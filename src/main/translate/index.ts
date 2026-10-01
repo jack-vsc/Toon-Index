@@ -1,0 +1,141 @@
+import { app } from 'electron'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { appError, isAppError } from '../../shared/errors'
+import {
+  activeProfile,
+  CANCELLED,
+  type ApiProfile,
+  type AppSettings,
+  type ModelOption,
+  type Speed,
+  type TextBlock,
+  type TranslateRequest
+} from '../../shared/types'
+import { getApiKey, getSettings } from '../settings'
+import { listCursorModels, pickDefaultCursorModel, runCursor } from './cursorProvider'
+import { describeError } from './errors'
+import { listOpenAIModels, runOpenAI } from './openaiProvider'
+import { buildPrompt, parseBlocks } from './prompt'
+
+const active = new Map<string, AbortController>()
+
+/** 32x32 white PNG: proves the model accepts images without spending much. */
+const TEST_IMAGE = {
+  base64: 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAAAAABWESUoAAAAFklEQVR4nGP4TwAwjCoYVTCqYKQqAAA/aPwuq5iY/wAAAABJRU5ErkJggg==',
+  mimeType: 'image/png' as const,
+  width: 32,
+  height: 32
+}
+const TEST_TIMEOUT_MS = 90_000
+
+export async function translate(req: TranslateRequest): Promise<TextBlock[][]> {
+  const settings = getSettings()
+  const profile = activeProfile(settings)
+  if (!profile) throw appError({ code: 'auth', message: 'Cadastre uma API nas configurações antes de traduzir.' })
+  const apiKey = requireReady(profile, getApiKey(profile.id))
+
+  const prompt = buildPrompt(req, settings)
+  const cacheFile = join(cacheDir(), `${cacheKey(prompt, req, settings.speed, profile)}.txt`)
+  if (existsSync(cacheFile)) {
+    try {
+      return parseBlocks(readFileSync(cacheFile, 'utf8'), req)
+    } catch {
+      // Unreadable cache entry: ask the model again.
+    }
+  }
+
+  const controller = new AbortController()
+  active.set(req.requestId, controller)
+  try {
+    const raw = await callModel(profile, apiKey, prompt, req, settings.speed, controller.signal)
+    const blocks = parseBlocks(raw, req)
+    writeFileSync(cacheFile, raw, 'utf8')
+    return blocks
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error(CANCELLED)
+    throw describeError(err, profile)
+  } finally {
+    active.delete(req.requestId)
+  }
+}
+
+/** Sends one tiny request with an image, using a profile that may not be saved yet. */
+export async function testApi(profile: ApiProfile, typedKey?: string): Promise<{ ms: number }> {
+  const apiKey = requireReady(profile, typedKey?.trim() || getApiKey(profile.id))
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS)
+  const started = Date.now()
+  try {
+    const req: TranslateRequest = { images: [TEST_IMAGE], regions: [], pageNumber: 0, requestId: 'test' }
+    await callModel(profile, apiKey, 'Respond with the JSON object {"ok":true} and nothing else.', req, 'fast', controller.signal)
+    return { ms: Date.now() - started }
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw appError({ code: 'server', message: `A API não respondeu em ${TEST_TIMEOUT_MS / 1000}s.` })
+    }
+    throw describeError(err, profile)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function listModels(profile: ApiProfile, typedKey?: string): Promise<{ models: ModelOption[]; suggested: string }> {
+  const apiKey = typedKey?.trim() || getApiKey(profile.id)
+  try {
+    if (profile.kind === 'openai') return { models: await listOpenAIModels(profile.baseUrl, apiKey), suggested: '' }
+    if (!apiKey) throw appError({ code: 'auth', message: 'Informe a chave de API do Cursor primeiro.' })
+    const models = await listCursorModels(apiKey)
+    return { models, suggested: pickDefaultCursorModel(models) }
+  } catch (err) {
+    throw isAppError(err) ? err : describeError(err, profile)
+  }
+}
+
+function requireReady(profile: ApiProfile, apiKey: string | undefined): string {
+  if (!apiKey) throw appError({ code: 'auth', message: `A API "${profile.name}" está sem chave. Cadastre a chave nas configurações.` })
+  if (profile.kind === 'openai' && !profile.baseUrl.trim()) {
+    throw appError({ code: 'model', message: `Informe a URL base da API "${profile.name}" nas configurações.` })
+  }
+  if (profile.kind === 'openai' && apiKey.startsWith('sk-or-') && !profile.baseUrl.includes('openrouter.ai')) {
+    throw appError({
+      code: 'auth',
+      message: `Essa chave é do OpenRouter, mas a URL base da API "${profile.name}" é ${profile.baseUrl}. Use https://openrouter.ai/api/v1.`
+    })
+  }
+  if (!profile.model) throw appError({ code: 'model', message: `Escolha um modelo para a API "${profile.name}" nas configurações.` })
+  return apiKey
+}
+
+function callModel(profile: ApiProfile, apiKey: string, prompt: string, req: TranslateRequest, speed: Speed, signal: AbortSignal) {
+  return profile.kind === 'cursor'
+    ? runCursor(prompt, req, apiKey, profile.model, speed, signal)
+    : runOpenAI(prompt, req, apiKey, profile.baseUrl, profile.model, signal)
+}
+
+export function currentModelLabel(): string {
+  return activeProfile(getSettings())?.model ?? ''
+}
+
+/** Aborts the given requests, or every running request when no ids are given. */
+export function cancelTranslations(requestIds?: string[]): void {
+  for (const [id, controller] of active) {
+    if (!requestIds || requestIds.includes(id)) controller.abort()
+  }
+}
+
+/** Same images + same prompt + same model = same answer, so re-translating a chapter costs nothing. */
+function cacheKey(prompt: string, req: TranslateRequest, speed: AppSettings['speed'], profile: ApiProfile): string {
+  const hash = createHash('sha256')
+  const model = profile.kind === 'cursor' ? profile.model : `${profile.baseUrl}|${profile.model}`
+  hash.update(`${profile.kind}|${model}|${speed}|${prompt}`)
+  for (const img of req.images) hash.update(img.base64)
+  return hash.digest('hex')
+}
+
+function cacheDir(): string {
+  const dir = join(app.getPath('userData'), 'translation-cache')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
