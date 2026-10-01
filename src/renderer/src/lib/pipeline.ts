@@ -299,7 +299,7 @@ function jpegUrl(jpeg: Uint8Array): string {
 
 function toPageSpace(block: TextBlock, scale: number, offsetY: number): TextBlock {
   const map = (b: Box): Box => [b[0] * scale, b[1] * scale + offsetY, b[2] * scale, b[3] * scale + offsetY]
-  return { ...block, textBox: map(block.textBox), areaBox: map(block.areaBox) }
+  return { ...block, textBox: map(block.textBox), areaBox: map(block.areaBox), inkBoxes: block.inkBoxes?.map(map) }
 }
 
 /**

@@ -26,6 +26,8 @@ export interface TextBlock {
   textBox: Box
   /** Free space available for the translation (e.g. bubble interior). Always contains textBox. */
   areaBox: Box
+  /** Boxes the app's text detector drew around this block's lettering: everything in them gets erased. */
+  inkBoxes?: Box[]
   original: string
   translation: string
   kind: BlockKind

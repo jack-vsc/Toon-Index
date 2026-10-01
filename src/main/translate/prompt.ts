@@ -96,6 +96,7 @@ function toBlock(item: unknown, req: TranslateRequest): { image: number; block: 
     block: {
       textBox: placed.box,
       areaBox: roomAround(placed.box, width, height),
+      inkBoxes: placed.inkBoxes,
       original: typeof b.original === 'string' ? b.original : '',
       translation,
       kind: KINDS.includes(b.kind as BlockKind) ? (b.kind as BlockKind) : 'other',
@@ -113,30 +114,38 @@ function pickRegions(ids: unknown, req: TranslateRequest): MarkedRegion[] {
 }
 
 /**
- * Detected boxes give the exact position, the model's own box tells which text it meant. The model
- * sometimes hands text without a box of its own to a nearby box (a bubble border, artwork), adds boxes
- * of spikes around the text, or the detector caught only part of the text: its box settles all three.
+ * The detected boxes the model picked give the exact position; its own box_2d is often off by a line or
+ * more, so it never overrides them. It only drops picked boxes far from the text (another bubble, spikes)
+ * when it agrees with some of them, and extends them when the detector caught part of the text.
  */
 function place(
   picked: MarkedRegion[],
   guess: { image: number; box: Box } | undefined,
   req: TranslateRequest
-): { image: number; box: Box } | undefined {
-  if (!guess) {
-    if (!picked.length) return undefined
-    const image = picked[0].image
-    return { image, box: unionAll(picked.filter((r) => r.image === image).map((r) => r.box)) }
+): { image: number; box: Box; inkBoxes?: Box[] } | undefined {
+  if (picked.length) {
+    const image = guess && picked.some((r) => r.image === guess.image) ? guess.image : picked[0].image
+    let chosen = picked.filter((r) => r.image === image)
+    const box = guess?.image === image ? guess.box : undefined
+    if (box) {
+      const reach = Math.max(20, 0.25 * Math.max(box[2] - box[0], box[3] - box[1]))
+      const near = [box[0] - reach, box[1] - reach, box[2] + reach, box[3] + reach] as Box
+      const agreeing = chosen.filter((r) => overlapArea(r.box, near) > 0)
+      if (agreeing.length) chosen = agreeing
+    }
+    const inkBoxes = chosen.map((r) => r.box)
+    const found = unionAll(inkBoxes)
+    const extended = box && union(found, box)
+    if (box && extended && overlapArea(found, box) >= 0.5 * area(found) && area(extended) <= 3 * area(found)) {
+      return { image, box: extended, inkBoxes }
+    }
+    return { image, box: found, inkBoxes }
   }
-  const { image, box } = guess
-  const reach = Math.max(20, 0.25 * Math.max(box[2] - box[0], box[3] - box[1]))
-  const near = [box[0] - reach, box[1] - reach, box[2] + reach, box[3] + reach] as Box
-  let chosen = picked.filter((r) => r.image === image && overlapArea(r.box, near) > 0)
-  if (!chosen.length) {
-    chosen = req.regions.filter((r) => r.image === image && overlapArea(r.box, box) >= 0.5 * area(r.box))
-  }
-  if (!chosen.length) return guess
-  const found = unionAll(chosen.map((r) => r.box))
-  return { image, box: overlapArea(found, box) < 0.5 * area(box) ? union(found, box) : found }
+  if (!guess) return undefined
+  const inside = req.regions.filter((r) => r.image === guess.image && overlapArea(r.box, guess.box) >= 0.5 * area(r.box))
+  if (!inside.length) return guess
+  const inkBoxes = inside.map((r) => r.box)
+  return { image: guess.image, box: unionAll(inkBoxes), inkBoxes }
 }
 
 function fromBox(b: Record<string, unknown>, req: TranslateRequest): { image: number; box: Box } | undefined {

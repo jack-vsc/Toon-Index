@@ -19,6 +19,8 @@ interface Glyphs {
   wh: number
   /** 1 = pixel of an original glyph. */
   mask: Uint8Array
+  /** 1 = pixel of any thin stroke, dark or light (not flat background). */
+  ink: Uint8Array
   /** Bounding box of the glyphs in canvas pixels, or null when none were found. */
   bbox: Box | null
   /** Typical letter height in px. */
@@ -119,6 +121,8 @@ interface Cluster {
   ink: Uint8Array
   /** Strong-ink components that failed the glyph tests. */
   rejected: Comp[]
+  /** Dark lettering on a lighter background. */
+  dark: boolean
 }
 
 /**
@@ -135,7 +139,8 @@ export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: n
   const win = roundBox(clampBox(expand(union(tb, block.areaBox), margin), W, H))
   const ww = win[2] - win[0]
   const wh = win[3] - win[1]
-  const empty: Glyphs = { win, ww, wh, mask: new Uint8Array(Math.max(0, ww * wh)), bbox: null, letterHeight: 0, score: 0, look: null }
+  const blank = new Uint8Array(Math.max(0, ww * wh))
+  const empty: Glyphs = { win, ww, wh, mask: blank, ink: blank, bbox: null, letterHeight: 0, score: 0, look: null }
   if (ww < 8 || wh < 8) return empty
 
   const data = ctx.getImageData(win[0], win[1], ww, wh).data
@@ -160,9 +165,12 @@ export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: n
     }
     return contrast
   })
+  const strokes = new Uint8Array(ww * wh)
+  for (let p = 0; p < strokes.length; p++) strokes[p] = contrasts[0][p] > INK_WEAK || contrasts[1][p] > INK_WEAK ? 1 : 0
+  empty.ink = strokes
   const attempt = (strongInk: number, best: Cluster | null): Cluster | null => {
     for (const contrast of contrasts) {
-      const cluster = bestCluster(contrast, gray, ww, wh, near, area, expected, W, letter, strongInk)
+      const cluster = bestCluster(contrast, gray, ww, wh, near, area, expected, W, letter, strongInk, contrast === contrasts[0])
       // The counters and gaps of dark lettering look like light lettering, but they share the
       // background's grey level.
       if (cluster && inkContrast(cluster, gray, ww, wh) < 50) continue
@@ -174,18 +182,25 @@ export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: n
   // Hollow or outlined letters set tightly weld into one blob; a stricter threshold separates them at
   // their faint joins.
   if (!best || best.textness < 0.35) best = attempt(INK_STRONG * 2, best)
-  if (!best) return empty
+  if (best) {
+    // Lettering covers a fraction of its box (bold condensed type the most); a solid blob is artwork.
+    const strongInk = best.comps.reduce((n, c) => n + c.count, 0)
+    const bb = best.bbox
+    const size = (bb[2] - bb[0]) * (bb[3] - bb[1])
+    // A poor match away from where the model saw the text is artwork (windows, a pattern), not the text.
+    if (strongInk > size * 0.75 || (best.score < 3 && overlapArea(bb, near) < 0.3 * size)) best = null
+  }
+  const inkBoxes = (block.inkBoxes ?? []).map((b) => roundBox(clampBox(toLocal(b), ww, wh)))
+  // Lettering found elsewhere than in the detected boxes is other text or artwork.
+  if (best && inkBoxes.length && !inkBoxes.some((b) => overlapArea(b, best!.bbox) > 0)) best = null
+  if (!best) return inkBoxes.length ? detectedOnly(empty, block, inkBoxes, contrasts) : empty
 
-  // Lettering covers a fraction of its box (bold condensed type the most); a solid blob is artwork.
-  const strongInk = best.comps.reduce((n, c) => n + c.count, 0)
-  const bb = best.bbox
-  if (strongInk > (bb[2] - bb[0]) * (bb[3] - bb[1]) * 0.75) return empty
-  // A poor match away from where the model saw the text is artwork (windows, a pattern), not the text.
-  if (best.score < 3 && overlapArea(bb, near) < 0.3 * (bb[2] - bb[0]) * (bb[3] - bb[1])) return empty
+  const mask = new Uint8Array(ww * wh)
+  addInkBoxes(mask, ww, wh, inkBoxes, contrasts[best.dark ? 0 : 1], best.letterHeight)
+  if (inkBoxes.length) best.bbox = inkBoxes.reduce(union, best.bbox)
 
   // Ink right around the chosen glyphs goes too: letters touching artwork (a speed line crossing the
   // text) merge into a big component that is not letter-like.
-  const mask = new Uint8Array(ww * wh)
   const ids = new Set(best.comps.map((c) => c.id))
   for (let p = 0; p < mask.length; p++) if (ids.has(best.labels[p])) mask[p] = 1
   const pad = Math.round(best.letterHeight * 0.25)
@@ -235,11 +250,44 @@ export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: n
     ww,
     wh,
     mask,
+    ink: strokes,
     bbox: [b[0] + win[0], b[1] + win[1], b[2] + win[0], b[3] + win[1]],
     letterHeight: best.letterHeight,
     score: best.score,
     look: measureLook(data, ww, wh, best, block.original)
   }
+}
+
+/** Marks the ink of one polarity inside the detected boxes, padded to reach anti-aliased edges. */
+function addInkBoxes(mask: Uint8Array, ww: number, wh: number, boxes: Box[], contrast: Uint8Array, letterHeight: number): void {
+  const pad = Math.round(letterHeight * 0.25)
+  for (const b of boxes) {
+    for (let y = Math.max(0, b[1] - pad); y < Math.min(wh, b[3] + pad); y++) {
+      for (let x = Math.max(0, b[0] - pad); x < Math.min(ww, b[2] + pad); x++) {
+        if (contrast[y * ww + x] > INK_WEAK) mask[y * ww + x] = 1
+      }
+    }
+  }
+}
+
+/**
+ * The lettering could not be measured, but the detector boxed it: everything of the polarity that
+ * dominates those boxes is erased, and the translation goes where they are.
+ */
+function detectedOnly(empty: Glyphs, block: TextBlock, boxes: Box[], contrasts: Uint8Array[]): Glyphs {
+  const { win, ww, wh } = empty
+  const sums = contrasts.map((contrast) => {
+    let sum = 0
+    for (const b of boxes) {
+      for (let y = b[1]; y < b[3]; y++) for (let x = b[0]; x < b[2]; x++) sum += contrast[y * ww + x]
+    }
+    return sum
+  })
+  const letterHeight = Math.max(3, Math.min(estimateLetter(block), ...boxes.map((b) => b[3] - b[1])))
+  const mask = new Uint8Array(ww * wh)
+  addInkBoxes(mask, ww, wh, boxes, contrasts[sums[0] >= sums[1] ? 0 : 1], letterHeight)
+  const b = boxes.reduce(union)
+  return { ...empty, mask, bbox: [b[0] + win[0], b[1] + win[1], b[2] + win[0], b[3] + win[1]], letterHeight }
 }
 
 /** Grey-level difference between a cluster's strokes and the background around the whole cluster. */
@@ -399,7 +447,8 @@ function bestCluster(
   expected: number,
   W: number,
   letter: number,
-  strongInk: number
+  strongInk: number,
+  dark: boolean
 ): Cluster | null {
   // Glyphs are found on strong ink only (faint halos would weld neighbouring letters together);
   // the faint ink is used for the background test and, later, to erase anti-aliased edges.
@@ -586,7 +635,8 @@ function bestCluster(
     textness: info.textness,
     labels,
     ink,
-    rejected: comps.filter((c) => !accepted.has(c.id) && c.count >= 3)
+    rejected: comps.filter((c) => !accepted.has(c.id) && c.count >= 3),
+    dark
   }
 }
 
@@ -633,79 +683,110 @@ function runs(values: Uint8Array, maxGap: number): [number, number][] {
 function erase(ctx: CanvasRenderingContext2D, g: Glyphs): void {
   if (!g.bbox) return
   const { win, ww, wh } = g
-  // Wide enough to cover the anti-aliasing and JPEG ringing around the strokes.
-  const grow = Math.max(1, Math.round(g.letterHeight * 0.18)) + 1
-  const mask = dilate(g.mask, ww, wh, grow * 2 + 1)
+  // Wide enough to cover the outline, the anti-aliasing and JPEG ringing around the strokes, plus a ring
+  // of glow that is repainted but never sampled: copying it inwards draws streaks.
+  const outline = g.look?.outline ? g.look.outlineRatio * g.look.capHeight : 0
+  const grow = Math.max(1, Math.round(g.letterHeight * 0.18 + outline)) + 1
+  const halo = Math.max(1, Math.round(g.letterHeight * 0.12))
+  const mask = dilate(g.mask, ww, wh, (grow + halo) * 2 + 1)
   const image = ctx.getImageData(win[0], win[1], ww, wh)
-  inpaint(image.data, ww, wh, mask)
+  fillMasked(image.data, ww, wh, mask, g.ink, Math.max(3, Math.round(g.letterHeight * 0.6)))
   ctx.putImageData(image, win[0], win[1])
 }
 
-/** Fills masked pixels layer by layer from the outside in, each with the mean of its already-known neighbours. */
-function inpaint(d: Uint8ClampedArray, ww: number, wh: number, mask: Uint8Array): void {
-  const unknown = mask.slice()
-  const queued = new Uint8Array(ww * wh)
-  let frontier: number[] = []
-  for (let p = 0; p < unknown.length; p++) {
-    if (unknown[p] && hasKnownNeighbour(unknown, p, ww, wh)) frontier.push(p), (queued[p] = 1)
-  }
-  while (frontier.length) {
-    const fills = new Float32Array(frontier.length * 3)
-    frontier.forEach((p, n) => {
-      const x = p % ww
-      const y = (p - x) / ww
-      let r = 0
-      let g = 0
-      let b = 0
-      let weight = 0
-      for (let dy = -1; dy <= 1; dy++) {
-        const ny = y + dy
-        if (ny < 0 || ny >= wh) continue
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx
-          if (nx < 0 || nx >= ww || (dx === 0 && dy === 0)) continue
-          const q = ny * ww + nx
-          if (unknown[q]) continue
-          const w = dx && dy ? 0.7 : 1
-          r += d[q * 4] * w
-          g += d[q * 4 + 1] * w
-          b += d[q * 4 + 2] * w
-          weight += w
-        }
-      }
-      fills[n * 3] = r / weight
-      fills[n * 3 + 1] = g / weight
-      fills[n * 3 + 2] = b / weight
-    })
-    frontier.forEach((p, n) => {
-      d[p * 4] = fills[n * 3]
-      d[p * 4 + 1] = fills[n * 3 + 1]
-      d[p * 4 + 2] = fills[n * 3 + 2]
-      unknown[p] = 0
-    })
+/**
+ * Normalized convolution: each masked pixel becomes the mean of the flat pixels in a square around it,
+ * widened until enough of them are found, then the fill is blurred once to hide where it widened.
+ * Smooth backgrounds and gradients come back without the streaks of edge-to-centre diffusion; strokes
+ * (bubble borders, other text, artwork lines) barely count, so they do not smear into the fill.
+ */
+function fillMasked(d: Uint8ClampedArray, ww: number, wh: number, mask: Uint8Array, ink: Uint8Array, radius: number): void {
+  const masked: number[] = []
+  for (let p = 0; p < mask.length; p++) if (mask[p]) masked.push(p)
+  if (!masked.length) return
+  const known = integrals(d, ww, wh, (p) => (mask[p] ? 0 : ink[p] ? 0.05 : 1))
+  const colors = new Float32Array(masked.length * 3)
+  const filled = new Uint8Array(masked.length)
+  let todo = masked.map((_, n) => n)
+  for (let r = radius; todo.length; r *= 2) {
+    // Over artwork there is no flat pixel nearby; take what there is rather than a far-away mean.
+    const loose = r >= radius * 4
+    const last = r > Math.max(ww, wh)
     const next: number[] = []
-    for (const p of frontier) {
+    for (const n of todo) {
+      const p = masked[n]
       const x = p % ww
       const y = (p - x) / ww
-      for (let dy = -1; dy <= 1; dy++) {
-        const ny = y + dy
-        if (ny < 0 || ny >= wh) continue
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx
-          if (nx < 0 || nx >= ww) continue
-          const q = ny * ww + nx
-          if (unknown[q] && !queued[q]) (queued[q] = 1), next.push(q)
-        }
+      const s = boxSum(known, ww, wh, x, y, r)
+      if (s[3] === 0 || (!loose && s[3] < 0.15 * (2 * r + 1) ** 2)) {
+        next.push(n)
+        continue
       }
+      colors[n * 3] = s[0] / s[3]
+      colors[n * 3 + 1] = s[1] / s[3]
+      colors[n * 3 + 2] = s[2] / s[3]
+      filled[n] = 1
     }
-    frontier = next
+    if (last) break
+    todo = next
   }
+  const write = () =>
+    masked.forEach((p, n) => {
+      if (!filled[n]) return
+      d[p * 4] = colors[n * 3]
+      d[p * 4 + 1] = colors[n * 3 + 1]
+      d[p * 4 + 2] = colors[n * 3 + 2]
+    })
+  write()
+
+  const flat = integrals(d, ww, wh, (p) => (mask[p] || !ink[p] ? 1 : 0))
+  const smooth = Math.max(1, radius >> 1)
+  masked.forEach((p, n) => {
+    if (!filled[n]) return
+    const x = p % ww
+    const y = (p - x) / ww
+    const s = boxSum(flat, ww, wh, x, y, smooth)
+    if (!s[3]) return
+    colors[n * 3] = s[0] / s[3]
+    colors[n * 3 + 1] = s[1] / s[3]
+    colors[n * 3 + 2] = s[2] / s[3]
+  })
+  write()
 }
 
-function hasKnownNeighbour(unknown: Uint8Array, p: number, ww: number, wh: number): boolean {
-  const x = p % ww
-  const y = (p - x) / ww
-  return (x > 0 && !unknown[p - 1]) || (x < ww - 1 && !unknown[p + 1]) || (y > 0 && !unknown[p - ww]) || (y < wh - 1 && !unknown[p + ww])
+/** Summed-area tables of r, g, b (weighted) and weight; (ww + 1) × (wh + 1), 4 values per entry. */
+function integrals(d: Uint8ClampedArray, ww: number, wh: number, weight: (p: number) => number): Float64Array {
+  const stride = ww + 1
+  const t = new Float64Array(stride * (wh + 1) * 4)
+  for (let y = 0; y < wh; y++) {
+    const row = [0, 0, 0, 0]
+    for (let x = 0; x < ww; x++) {
+      const p = y * ww + x
+      const w = weight(p)
+      row[0] += d[p * 4] * w
+      row[1] += d[p * 4 + 1] * w
+      row[2] += d[p * 4 + 2] * w
+      row[3] += w
+      const i = ((y + 1) * stride + x + 1) * 4
+      const above = (y * stride + x + 1) * 4
+      for (let k = 0; k < 4; k++) t[i + k] = t[above + k] + row[k]
+    }
+  }
+  return t
+}
+
+/** Sums of a summed-area table over the square of radius r around (x, y), clipped to the image. */
+function boxSum(t: Float64Array, ww: number, wh: number, x: number, y: number, r: number): number[] {
+  const stride = ww + 1
+  const x0 = Math.max(0, x - r)
+  const y0 = Math.max(0, y - r)
+  const x1 = Math.min(ww, x + r + 1)
+  const y1 = Math.min(wh, y + r + 1)
+  const a = (y0 * stride + x0) * 4
+  const b = (y0 * stride + x1) * 4
+  const c = (y1 * stride + x0) * 4
+  const e = (y1 * stride + x1) * 4
+  return [0, 1, 2, 3].map((k) => t[e + k] - t[b + k] - t[c + k] + t[a + k])
 }
 
 // ---------------------------------------------------------------------------------------------------
