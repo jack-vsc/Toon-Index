@@ -9,6 +9,7 @@ import {
   type TranslateRequest
 } from '../../shared/types'
 import { FormatError } from './errors'
+import { parseLenient } from './json'
 
 export function buildPrompt(req: TranslateRequest, settings: AppSettings): string {
   const source =
@@ -171,12 +172,11 @@ function toHex(value: unknown): string | undefined {
 function extractJson(raw: string): any {
   const cleaned = raw.replace(/```(?:json)?/gi, '').trim()
   const start = cleaned.search(/[[{]/)
-  const end = Math.max(cleaned.lastIndexOf('}'), cleaned.lastIndexOf(']'))
-  if (start === -1 || end <= start) {
+  if (start === -1) {
     throw new FormatError(`A IA não retornou JSON válido. Resposta: ${raw.slice(0, 300)}`)
   }
   try {
-    return JSON.parse(cleaned.slice(start, end + 1))
+    return parseLenient(cleaned.slice(start))
   } catch (err) {
     throw new FormatError(`Falha ao ler o JSON da IA: ${(err as Error).message}. Resposta: ${raw.slice(0, 300)}`)
   }
