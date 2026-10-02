@@ -3,3 +3,5 @@ out/
 dist/
 src/renderer/public/pdfjs/
 *.log
+samples/cap53 portugues/
+samples/eval/

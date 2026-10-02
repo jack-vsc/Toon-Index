@@ -131,13 +131,25 @@ export function parseBlocks(raw: string, req: TranslateRequest, boxedOnly = fals
       : Array.isArray(json)
         ? json
         : []
+  // A bubble in the overlap of two slices is sometimes returned for both, the second time on whatever
+  // box lies near it there; the copy on more letters is the real one.
+  const seen = new Map<string, { image: number; block: TextBlock; glyphs: number }>()
   for (const entry of entries) {
     const picked = entry && typeof entry === 'object' ? pickRegions((entry as Record<string, unknown>).ids, req) : []
     if (boxedOnly && !picked.length) continue
     const placed = toBlock(entry, picked, req)
     // Boxes the block's position left out (not next to its text) are asked about again on their own.
     for (const r of placed ? placed.kept : picked) answered.add(r.id)
-    if (placed) result[placed.image].push(placed.block)
+    if (!placed) continue
+    const text = placed.block.original.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    const glyphs = placed.kept.reduce((n, r) => n + r.glyphs, 0)
+    const twin = text.length >= 3 ? seen.get(text) : undefined
+    if (twin && twin.image !== placed.image) {
+      if (twin.glyphs >= glyphs) continue
+      result[twin.image].splice(result[twin.image].indexOf(twin.block), 1)
+    }
+    if (text.length >= 3) seen.set(text, { image: placed.image, block: placed.block, glyphs })
+    result[placed.image].push(placed.block)
   }
   return { blocks: result, answered }
 }
@@ -271,14 +283,6 @@ function union(a: Box, b: Box): Box {
 
 function unionAll(boxes: Box[]): Box {
   return boxes.reduce(union)
-}
-
-function area(b: Box): number {
-  return Math.max(1, (b[2] - b[0]) * (b[3] - b[1]))
-}
-
-function overlapArea(a: Box, b: Box): number {
-  return Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]))
 }
 
 function clamp(v: number, min: number, max: number): number {
