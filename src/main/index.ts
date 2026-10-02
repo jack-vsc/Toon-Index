@@ -3,6 +3,7 @@ import { rmSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ApiProfile, SaveLibraryInput, SaveSettingsInput, TranslateRequest } from '../shared/types'
+import { registerEvalIpc } from './evaluate'
 import { deleteFromLibrary, listLibrary, readLibraryPdf, saveToLibrary } from './library'
 import { getPublicSettings, saveSettings } from './settings'
 import { cancelTranslations, listModels, testApi, translate } from './translate'
@@ -68,6 +69,7 @@ function registerIpc(): void {
   ipcMain.handle('library:save', (_e, input: SaveLibraryInput) => saveToLibrary(input))
   ipcMain.handle('library:pdf', (_e, id: string, which: 'original' | 'translated') => readLibraryPdf(id, which))
   ipcMain.handle('library:delete', (_e, id: string) => deleteFromLibrary(id))
+  registerEvalIpc()
 }
 
 app.whenReady().then(() => {

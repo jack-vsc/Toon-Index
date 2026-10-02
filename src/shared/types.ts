@@ -26,8 +26,10 @@ export interface TextBlock {
   textBox: Box
   /** Free space available for the translation (e.g. bubble interior). Always contains textBox. */
   areaBox: Box
-  /** Boxes the app's text detector drew around this block's lettering: everything in them gets erased. */
+  /** Boxes the app's text detector drew around this block's lettering: every glyph in them gets erased. */
   inkBoxes?: Box[]
+  /** Letter height the detector measured in those boxes. */
+  letterHeight?: number
   original: string
   translation: string
   kind: BlockKind
@@ -94,11 +96,25 @@ export interface MarkedRegion {
   image: number
   /** Tight box around the glyphs, in pixels of that image. */
   box: Box
+  /** Typical letter height and number of glyphs the detector measured. */
+  letterHeight: number
+  glyphs: number
+}
+
+/** Developer evaluation run (MI_EVAL_* environment variables): sample pages and a reference translation. */
+export interface EvalConfig {
+  pdf: string
+  /** Images of the same chapter translated by hand, top to bottom, forming one continuous strip. */
+  reference: string[]
+  /** 1-based pages to translate; all when null. */
+  pages: number[] | null
 }
 
 /** One model request: one or more consecutive vertical slices of the same page, top to bottom. */
 export interface TranslateRequest {
   images: PageImage[]
+  /** Every marked region enlarged and tagged with its number, sent after `images`. */
+  key: PageImage[]
   regions: MarkedRegion[]
   pageNumber: number
   /** Lets the renderer cancel this request while it is running. */

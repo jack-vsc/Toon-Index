@@ -1,10 +1,10 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { FATAL_ERRORS, toAppError, type AppError } from '../../../shared/errors'
 import { CANCELLED, type Box, type MarkedRegion, type PageImage, type TextBlock } from '../../../shared/types'
-import { detectText, drawMarks } from './detect'
+import { detectText, drawKey, drawMarks, type TextRegion } from './detect'
 import { buildPdf, type OutputPage } from './exportPdf'
 import { ensureFonts } from './fonts'
-import { drawOverlay } from './overlay'
+import { drawOverlay, type OverlayInfo } from './overlay'
 import {
   canvasToBase64,
   canvasToBlob,
@@ -54,6 +54,8 @@ export class TranslationJob {
   stopReason: AppError | null = null
   /** Blocks found on each translated page, in page pixel coordinates. */
   readonly blocks = new Map<number, TextBlock[]>()
+  /** Evaluation runs inspect each page before and after the translation is drawn, with the detected text. */
+  onPageRendered?: (pageNumber: number, before: HTMLCanvasElement, after: HTMLCanvasElement, regions: Box[], drawn: OverlayInfo[]) => Promise<void>
   private outputs = new Map<number, OutputPage>()
   private cancelled = false
   private activeRequests = new Set<string>()
@@ -181,11 +183,10 @@ export class TranslationJob {
         // Text touching a cut between overlapping slices is whole in the neighbouring slice.
         const cutTop = slice.y0 > 0
         const cutBottom = slice.y1 < canvas.height
-        const regions = detectText(crop)
-          .filter((r) => !(cutTop && r.box[1] <= 2) && !(cutBottom && r.box[3] >= crop.height - 2))
-          .map((r) => r.box)
+        const regions = detectText(crop).filter((r) => !(cutTop && r.box[1] <= 2) && !(cutBottom && r.box[3] >= crop.height - 2))
         return { crop, regions, offsetY: slice.y0, scale: canvas.width / crop.width }
       })
+      boxOnce(prepared)
 
       const chunks = chunk(prepared, MAX_IMAGES_PER_REQUEST)
       let done = 0
@@ -194,11 +195,11 @@ export class TranslationJob {
         chunks.map((part) =>
           this.limiter.run(async () => {
             if (this.cancelled) throw new Error(CANCELLED)
-            const { images, regions } = await markedImages(part)
+            const { images, key, regions } = await markedImages(part)
             const requestId = crypto.randomUUID()
             this.activeRequests.add(requestId)
             try {
-              const blocks = await window.api.translate({ images, regions, pageNumber, requestId })
+              const blocks = await window.api.translate({ images, key, regions, pageNumber, requestId })
               this.update(pageNumber, { parts: { done: ++done, total: chunks.length } })
               return blocks.flatMap((list, i) => list.map((b) => toPageSpace(b, part[i].scale, part[i].offsetY)))
             } finally {
@@ -212,7 +213,14 @@ export class TranslationJob {
       const blocks = dedupe(results.flat())
       this.blocks.set(pageNumber, blocks)
       await ensureFonts()
-      drawOverlay(canvas, blocks)
+      const before = this.onPageRendered ? cropCanvas(canvas, { x: 0, y: 0, width: canvas.width, height: canvas.height }, Infinity) : null
+      const drawn = drawOverlay(canvas, blocks)
+      if (before) {
+        const regions = prepared.flatMap((p) =>
+          p.regions.map(({ box: b }): Box => [b[0] * p.scale, b[1] * p.scale + p.offsetY, b[2] * p.scale, b[3] * p.scale + p.offsetY])
+        )
+        await this.onPageRendered?.(pageNumber, before, canvas, regions, drawn)
+      }
 
       const jpeg = await canvasToBytes(canvas, 'image/jpeg', 0.9)
       this.outputs.set(pageNumber, { jpeg, widthPt, heightPt })
@@ -270,27 +278,57 @@ class Limiter {
   }
 }
 
-/** Numbers the detected regions across the request and draws them on the images sent to the model. */
-async function markedImages(
-  part: { crop: HTMLCanvasElement; regions: Box[] }[]
-): Promise<{ images: PageImage[]; regions: MarkedRegion[] }> {
-  const regions: MarkedRegion[] = []
-  const marks = part.map((p, image) =>
-    p.regions.map((box) => {
-      const region = { id: regions.length + 1, image, box }
-      regions.push(region)
-      return region
+/**
+ * Text in the overlap of two slices is detected in both, sometimes cut short in one. Each text keeps
+ * only its most complete box (the largest, away from the cut), so the model reads it once and whole.
+ */
+function boxOnce(slices: { crop: HTMLCanvasElement; regions: TextRegion[]; offsetY: number; scale: number }[]): void {
+  const all = slices.flatMap((s, i) =>
+    s.regions.map((r) => {
+      const b = r.box
+      const page: Box = [b[0] * s.scale, b[1] * s.scale + s.offsetY, b[2] * s.scale, b[3] * s.scale + s.offsetY]
+      const margin = Math.min(b[1], s.crop.height - b[3])
+      const area = (page[2] - page[0]) * (page[3] - page[1])
+      return { slice: i, region: r, page, score: area * (margin >= r.letterHeight ? 1 : 0.5) }
     })
   )
-  const images = await Promise.all(
-    part.map(async (p, i): Promise<PageImage> => ({
-      base64: await canvasToBase64(drawMarks(p.crop, marks[i]), 'image/jpeg', 0.85),
-      mimeType: 'image/jpeg',
-      width: p.crop.width,
-      height: p.crop.height
-    }))
+  const dropped = new Set<TextRegion>()
+  for (const a of all) {
+    for (const b of all) {
+      if (a.slice === b.slice || dropped.has(a.region) || dropped.has(b.region)) continue
+      const ix = Math.min(a.page[2], b.page[2]) - Math.max(a.page[0], b.page[0])
+      const iy = Math.min(a.page[3], b.page[3]) - Math.max(a.page[1], b.page[1])
+      const smaller = Math.min((a.page[2] - a.page[0]) * (a.page[3] - a.page[1]), (b.page[2] - b.page[0]) * (b.page[3] - b.page[1]))
+      if (ix > 0 && iy > 0 && ix * iy > 0.3 * smaller) dropped.add(a.score >= b.score ? b.region : a.region)
+    }
+  }
+  for (const s of slices) s.regions = s.regions.filter((r) => !dropped.has(r))
+}
+
+/**
+ * Numbers the detected regions across the request, draws them on the images sent to the model, and
+ * draws the key: every region enlarged with its number.
+ */
+async function markedImages(
+  part: { crop: HTMLCanvasElement; regions: TextRegion[] }[]
+): Promise<{ images: PageImage[]; key: PageImage[]; regions: MarkedRegion[] }> {
+  const regions: MarkedRegion[] = []
+  const marks = part.map((p, image) =>
+    p.regions.map((r) => {
+      const region = { id: regions.length + 1, image, box: r.box, letterHeight: r.letterHeight, glyphs: r.glyphs }
+      regions.push(region)
+      return { ...region, source: p.crop }
+    })
   )
-  return { images, regions }
+  const encode = async (canvas: HTMLCanvasElement): Promise<PageImage> => ({
+    base64: await canvasToBase64(canvas, 'image/jpeg', 0.85),
+    mimeType: 'image/jpeg',
+    width: canvas.width,
+    height: canvas.height
+  })
+  const images = await Promise.all(part.map((p, i) => encode(drawMarks(p.crop, marks[i]))))
+  const key = await Promise.all(drawKey(marks.flat()).map(encode))
+  return { images, key, regions }
 }
 
 function jpegUrl(jpeg: Uint8Array): string {
@@ -299,7 +337,13 @@ function jpegUrl(jpeg: Uint8Array): string {
 
 function toPageSpace(block: TextBlock, scale: number, offsetY: number): TextBlock {
   const map = (b: Box): Box => [b[0] * scale, b[1] * scale + offsetY, b[2] * scale, b[3] * scale + offsetY]
-  return { ...block, textBox: map(block.textBox), areaBox: map(block.areaBox), inkBoxes: block.inkBoxes?.map(map) }
+  return {
+    ...block,
+    textBox: map(block.textBox),
+    areaBox: map(block.areaBox),
+    inkBoxes: block.inkBoxes?.map(map),
+    letterHeight: block.letterHeight && block.letterHeight * scale
+  }
 }
 
 /**
@@ -308,7 +352,8 @@ function toPageSpace(block: TextBlock, scale: number, offsetY: number): TextBloc
  */
 export function dedupe(blocks: TextBlock[]): TextBlock[] {
   const area = (b: Box) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1])
-  const score = (b: TextBlock) => normalizeText(b.original).length * 1e9 + area(b.textBox)
+  // Blocks on detected text are placed exactly; a copy placed by the model's own box is not.
+  const score = (b: TextBlock) => (b.inkBoxes ? 1e15 : 0) + normalizeText(b.original).length * 1e9 + area(b.textBox)
   const sorted = [...blocks].sort((a, b) => score(b) - score(a))
   const kept: TextBlock[] = []
   for (const block of sorted) {

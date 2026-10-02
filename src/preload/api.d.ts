@@ -1,5 +1,6 @@
 import type {
   ApiProfile,
+  EvalConfig,
   LibraryEntry,
   ModelOption,
   PublicSettings,
@@ -27,6 +28,14 @@ export interface MangaApi {
     save(input: SaveLibraryInput): Promise<LibraryEntry>
     pdf(id: string, which: 'original' | 'translated'): Promise<Uint8Array>
     remove(id: string): Promise<void>
+  }
+  /** Developer evaluation runs; `config` resolves to null in normal use. */
+  evaluation: {
+    config(): Promise<EvalConfig | null>
+    read(path: string): Promise<Uint8Array>
+    write(name: string, data: Uint8Array | string): Promise<void>
+    log(message: string): Promise<void>
+    done(): Promise<void>
   }
 }
 

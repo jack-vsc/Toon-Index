@@ -15,6 +15,13 @@ const api: MangaApi = {
     save: (input) => ipcRenderer.invoke('library:save', input),
     pdf: (id, which) => ipcRenderer.invoke('library:pdf', id, which),
     remove: (id) => ipcRenderer.invoke('library:delete', id)
+  },
+  evaluation: {
+    config: () => ipcRenderer.invoke('eval:config'),
+    read: (path) => ipcRenderer.invoke('eval:read', path),
+    write: (name, data) => ipcRenderer.invoke('eval:write', name, data),
+    log: (message) => ipcRenderer.invoke('eval:log', message),
+    done: () => ipcRenderer.invoke('eval:done')
   }
 }
 

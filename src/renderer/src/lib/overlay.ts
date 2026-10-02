@@ -55,21 +55,39 @@ interface Look {
   slant: number
 }
 
+/** What the overlay measured and chose for one block (evaluation runs). */
+export interface OverlayInfo {
+  drawn: boolean
+  /** Letter height of the original glyphs found, 0 when none were. */
+  letterHeight: number
+  capHeight?: number
+  fontSize?: number
+  family?: string
+}
+
 /** Erases the original text of every block, then writes the translations on top. Load fonts first (`ensureFonts`). */
-export function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]): void {
+export function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]): OverlayInfo[] {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const W = canvas.width
   const H = canvas.height
   // Locate all glyphs on the untouched page first, then erase, then write: no step sees another's output.
   const glyphs = blocks.map((block) => findGlyphs(ctx, block, W, H))
-  const skip = duplicates(blocks, glyphs)
-  // Interjections and names that read the same in both languages keep their original lettering.
+  const kept = new Set<number>()
   blocks.forEach((block, i) => {
+    // Interjections and names that read the same in both languages keep their original lettering.
     const text = normalizeText(block.translation)
-    if (!text || text === normalizeText(block.original)) skip.add(i)
+    if (!text || text === normalizeText(block.original)) kept.add(i)
+    // Placed by the model's own box and no lettering there: writing it would cover the art, not the text.
+    if (!block.inkBoxes && !glyphs[i].bbox) kept.add(i)
   })
+  const skip = duplicates(blocks, glyphs, kept)
+  for (const i of kept) skip.add(i)
   glyphs.forEach((g, i) => skip.has(i) || erase(ctx, g))
-  blocks.forEach((block, i) => skip.has(i) || typeset(ctx, block, glyphs[i], W, H))
+  return blocks.map((block, i) => ({
+    drawn: !skip.has(i),
+    letterHeight: glyphs[i].letterHeight,
+    ...(skip.has(i) ? {} : typeset(ctx, block, glyphs[i], W, H))
+  }))
 }
 
 /**
@@ -77,11 +95,13 @@ export function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]): voi
  * resolve to the same lettering are one block; a copy whose lettering was not found, or matches far
  * worse (artwork picked up where the copy was misplaced), is dropped too.
  */
-function duplicates(blocks: TextBlock[], glyphs: Glyphs[]): Set<number> {
+function duplicates(blocks: TextBlock[], glyphs: Glyphs[], ignored: Set<number>): Set<number> {
   const drop = new Set<number>()
   const area = (b: Box) => Math.max(1, (b[2] - b[0]) * (b[3] - b[1]))
   for (let i = 0; i < blocks.length; i++) {
+    if (ignored.has(i)) continue
     for (let j = i + 1; j < blocks.length; j++) {
+      if (ignored.has(j)) continue
       const a = glyphs[i]
       const b = glyphs[j]
       const loser = a.score >= b.score ? j : i
@@ -191,12 +211,15 @@ export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: n
     if (strongInk > size * 0.75 || (best.score < 3 && overlapArea(bb, near) < 0.3 * size)) best = null
   }
   const inkBoxes = (block.inkBoxes ?? []).map((b) => roundBox(clampBox(toLocal(b), ww, wh)))
-  // Lettering found elsewhere than in the detected boxes is other text or artwork.
+  // Lettering found elsewhere than in the detected boxes, or at another size than the detector measured
+  // there, is other text, specks of glow or artwork.
   if (best && inkBoxes.length && !inkBoxes.some((b) => overlapArea(b, best!.bbox) > 0)) best = null
-  if (!best) return inkBoxes.length ? detectedOnly(empty, block, inkBoxes, contrasts) : empty
+  const lh = block.letterHeight
+  if (best && lh && (best.letterHeight < 0.6 * lh || best.letterHeight > 1.7 * lh)) best = null
+  if (!best) return inkBoxes.length ? detectedOnly(empty, block, inkBoxes, contrasts, gray) : empty
 
   const mask = new Uint8Array(ww * wh)
-  addInkBoxes(mask, ww, wh, inkBoxes, contrasts[best.dark ? 0 : 1], best.letterHeight)
+  addInkBoxes(mask, ww, wh, inkBoxes, contrasts, gray, lh ?? best.letterHeight)
   if (inkBoxes.length) best.bbox = inkBoxes.reduce(union, best.bbox)
 
   // Ink right around the chosen glyphs goes too: letters touching artwork (a speed line crossing the
@@ -258,34 +281,84 @@ export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: n
   }
 }
 
-/** Marks the ink of one polarity inside the detected boxes, padded to reach anti-aliased edges. */
-function addInkBoxes(mask: Uint8Array, ww: number, wh: number, boxes: Box[], contrast: Uint8Array, letterHeight: number): void {
+/**
+ * Marks the glyphs inside the detected boxes, with the faint ink right around them (anti-aliased
+ * edges). The polarity with more letter-sized strokes is the lettering; strokes of the other polarity
+ * count only where they touch it (an outline, a glow). Pieces reaching out of a box must be letters on
+ * a flat background: bubble spikes and artwork stay.
+ */
+function addInkBoxes(mask: Uint8Array, ww: number, wh: number, boxes: Box[], contrasts: Uint8Array[], gray: Uint8Array, letterHeight: number): void {
+  if (!boxes.length) return
   const pad = Math.round(letterHeight * 0.25)
+  const zones = boxes.map((b) => expand(b, pad))
+  // Letters cover a fraction of their box, so its median is the background. Gaps between dark letters
+  // look like light strokes to the top-hat, but they have the background's colour.
+  const samples: number[] = []
   for (const b of boxes) {
-    for (let y = Math.max(0, b[1] - pad); y < Math.min(wh, b[3] + pad); y++) {
-      for (let x = Math.max(0, b[0] - pad); x < Math.min(ww, b[2] + pad); x++) {
-        if (contrast[y * ww + x] > INK_WEAK) mask[y * ww + x] = 1
+    const step = Math.max(1, Math.round(Math.sqrt(((b[2] - b[0]) * (b[3] - b[1])) / 2000)))
+    for (let y = b[1]; y < b[3]; y += step) for (let x = b[0]; x < b[2]; x += step) samples.push(gray[y * ww + x])
+  }
+  const bg = quantile(samples, 0.5)
+  const found = contrasts.map((contrast) => {
+    const ink = new Uint8Array(ww * wh)
+    const strong = new Uint8Array(ww * wh)
+    for (let p = 0; p < ink.length; p++) {
+      ink[p] = contrast[p] > INK_WEAK ? 1 : 0
+      strong[p] = contrast[p] > INK_STRONG ? 1 : 0
+    }
+    const { labels, comps } = components(strong, ww, wh)
+    const glyphs = comps.filter((c) => {
+      if (c.count < 3 || c.h > letterHeight * 2) return false
+      if (Math.abs(medianGray(c, labels, gray, ww) - bg) < 40) return false
+      const cb: Box = [c.x0, c.y0, c.x1, c.y1]
+      if (boxes.some((b) => c.x0 >= b[0] && c.y0 >= b[1] && c.x1 <= b[2] && c.y1 <= b[3])) return true
+      return zones.some((z) => overlapArea(cb, z) >= 0.7 * Math.max(1, c.w * c.h)) && isGlyph(c, gray, ink, labels, ww, wh)
+    })
+    const own = new Uint8Array(ww * wh)
+    for (const c of glyphs) {
+      for (let y = Math.max(0, c.y0 - pad); y < Math.min(wh, c.y1 + pad); y++) {
+        for (let x = Math.max(0, c.x0 - pad); x < Math.min(ww, c.x1 + pad); x++) {
+          const p = y * ww + x
+          if (labels[p] === c.id || ink[p]) own[p] = 1
+        }
       }
+    }
+    return { glyphs, labels, own, mass: glyphs.reduce((n, c) => n + c.count, 0) }
+  })
+  const main = found[0].mass >= found[1].mass ? found[0] : found[1]
+  const other = main === found[0] ? found[1] : found[0]
+  const touch = dilate(main.own, ww, wh, 3)
+  for (let p = 0; p < mask.length; p++) if (main.own[p]) mask[p] = 1
+  for (const c of other.glyphs) {
+    let touching = false
+    for (let y = c.y0; y < c.y1 && !touching; y++) {
+      for (let x = c.x0; x < c.x1; x++) if (other.labels[y * ww + x] === c.id && touch[y * ww + x]) (touching = true), (x = c.x1)
+    }
+    if (!touching) continue
+    for (let y = Math.max(0, c.y0 - pad); y < Math.min(wh, c.y1 + pad); y++) {
+      for (let x = Math.max(0, c.x0 - pad); x < Math.min(ww, c.x1 + pad); x++) if (other.own[y * ww + x]) mask[y * ww + x] = 1
     }
   }
 }
 
+function medianGray(c: Comp, labels: Int32Array, gray: Uint8Array, ww: number): number {
+  const values: number[] = []
+  const step = Math.max(1, Math.round(Math.sqrt(c.count / 100)))
+  for (let y = c.y0; y < c.y1; y += step) {
+    for (let x = c.x0; x < c.x1; x += step) if (labels[y * ww + x] === c.id) values.push(gray[y * ww + x])
+  }
+  return quantile(values, 0.5)
+}
+
 /**
- * The lettering could not be measured, but the detector boxed it: everything of the polarity that
- * dominates those boxes is erased, and the translation goes where they are.
+ * The lettering could not be measured, but the detector boxed it: the glyphs in those boxes are
+ * erased, and the translation goes where they are.
  */
-function detectedOnly(empty: Glyphs, block: TextBlock, boxes: Box[], contrasts: Uint8Array[]): Glyphs {
+function detectedOnly(empty: Glyphs, block: TextBlock, boxes: Box[], contrasts: Uint8Array[], gray: Uint8Array): Glyphs {
   const { win, ww, wh } = empty
-  const sums = contrasts.map((contrast) => {
-    let sum = 0
-    for (const b of boxes) {
-      for (let y = b[1]; y < b[3]; y++) for (let x = b[0]; x < b[2]; x++) sum += contrast[y * ww + x]
-    }
-    return sum
-  })
-  const letterHeight = Math.max(3, Math.min(estimateLetter(block), ...boxes.map((b) => b[3] - b[1])))
+  const letterHeight = Math.max(3, block.letterHeight ?? Math.min(estimateLetter(block), ...boxes.map((b) => b[3] - b[1])))
   const mask = new Uint8Array(ww * wh)
-  addInkBoxes(mask, ww, wh, boxes, contrasts[sums[0] >= sums[1] ? 0 : 1], letterHeight)
+  addInkBoxes(mask, ww, wh, boxes, contrasts, gray, letterHeight)
   const b = boxes.reduce(union)
   return { ...empty, mask, bbox: [b[0] + win[0], b[1] + win[1], b[2] + win[0], b[3] + win[1]], letterHeight }
 }
@@ -704,21 +777,18 @@ function fillMasked(d: Uint8ClampedArray, ww: number, wh: number, mask: Uint8Arr
   const masked: number[] = []
   for (let p = 0; p < mask.length; p++) if (mask[p]) masked.push(p)
   if (!masked.length) return
-  const known = integrals(d, ww, wh, (p) => (mask[p] ? 0 : ink[p] ? 0.05 : 1))
+  const known = integrals(d, ww, wh, (p) => (mask[p] || ink[p] ? 0 : 1))
   const colors = new Float32Array(masked.length * 3)
   const filled = new Uint8Array(masked.length)
   let todo = masked.map((_, n) => n)
-  for (let r = radius; todo.length; r *= 2) {
-    // Over artwork there is no flat pixel nearby; take what there is rather than a far-away mean.
-    const loose = r >= radius * 4
-    const last = r > Math.max(ww, wh)
+  for (const r of [radius, radius * 2]) {
     const next: number[] = []
     for (const n of todo) {
       const p = masked[n]
       const x = p % ww
       const y = (p - x) / ww
       const s = boxSum(known, ww, wh, x, y, r)
-      if (s[3] === 0 || (!loose && s[3] < 0.15 * (2 * r + 1) ** 2)) {
+      if (s[3] < 0.15 * (2 * r + 1) ** 2) {
         next.push(n)
         continue
       }
@@ -727,8 +797,28 @@ function fillMasked(d: Uint8ClampedArray, ww: number, wh: number, mask: Uint8Arr
       colors[n * 3 + 2] = s[2] / s[3]
       filled[n] = 1
     }
-    if (last) break
     todo = next
+  }
+  // The middle of a large erased block is far from any background; a wider mean would reach the
+  // bubble's border and the art outside it. It takes the background colour around the block.
+  if (todo.length) {
+    const near = dilate(mask, ww, wh, 2 * radius + 1)
+    const ring: RGB[] = []
+    const loose: RGB[] = []
+    for (let p = 0; p < mask.length; p++) {
+      if (!near[p] || mask[p]) continue
+      const rgb: RGB = [d[p * 4], d[p * 4 + 1], d[p * 4 + 2]]
+      if (!ink[p]) ring.push(rgb)
+      else loose.push(rgb)
+    }
+    const source = ring.length >= 20 ? ring : [...ring, ...loose]
+    if (source.length) {
+      const fill = medianRgb(source)
+      for (const n of todo) {
+        colors.set(fill, n * 3)
+        filled[n] = 1
+      }
+    }
   }
   const write = () =>
     masked.forEach((p, n) => {
@@ -835,11 +925,17 @@ interface Style {
 }
 
 /** Writes the translation where the original was, in lettering that resembles the original's. */
-function typeset(ctx: CanvasRenderingContext2D, block: TextBlock, g: Glyphs, W: number, H: number): void {
+function typeset(
+  ctx: CanvasRenderingContext2D,
+  block: TextBlock,
+  g: Glyphs,
+  W: number,
+  H: number
+): { capHeight: number; fontSize: number; family: string } {
   const text = matchCase(block.translation, block.original)
   const look = g.look
   const textBox = g.bbox ?? block.textBox
-  const capHeight = look?.capHeight ?? estimateLetter(block) * 0.9
+  const capHeight = look?.capHeight ?? block.letterHeight ?? estimateLetter(block) * 0.9
   const profile = measureBubble(ctx, block, textBox, g.bbox !== null, capHeight, W, H)
   const style = resolveStyle(ctx, block, look, profile)
   // Between the original's proportions and the bubble's: a one-line original in a round bubble becomes
@@ -898,6 +994,7 @@ function typeset(ctx: CanvasRenderingContext2D, block: TextBlock, g: Glyphs, W: 
   ctx.fillStyle = style.fill
   draw((line) => ctx.fillText(line, 0, 0))
   ctx.restore()
+  return { capHeight: Math.round(capHeight), fontSize: layout.size, family: style.family }
 }
 
 /** Picks the bundled face, weight, colours and spacing closest to the original lettering. */

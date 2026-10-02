@@ -23,18 +23,14 @@ export function buildPrompt(req: TranslateRequest, settings: AppSettings): strin
   const multi = req.images.length > 1
   const sizes = req.images.map((img, i) => `image ${i}: ${img.width}x${img.height}`).join(', ')
   const intro = multi
-    ? `The ${req.images.length} attached images are consecutive vertical slices of ONE long manga/webtoon page, ordered top to bottom. Sizes (width x height): ${sizes}.
-Neighbouring slices may overlap. If a text block is cut by the top or bottom edge of a slice, skip it in that slice: it appears complete in the neighbouring slice.`
-    : `The attached image is one manga/webtoon page, exactly ${sizes.replace('image 0: ', '')} pixels (width x height).`
+    ? `The first ${req.images.length} attached images are consecutive vertical slices of ONE long manga/webtoon page, ordered top to bottom. Sizes (width x height): ${sizes}.
+Neighbouring slices overlap, so some text shows in two slices; it is boxed in only one of them, and is returned only once. If a text block is cut by the top or bottom edge of a slice, skip it in that slice: it appears complete in the neighbouring slice.`
+    : `The first attached image is one manga/webtoon page, exactly ${sizes.replace('image 0: ', '')} pixels (width x height).`
 
-  const marks = req.regions.length
-    ? `Text detection software has drawn numbered magenta boxes on the image${multi ? 's' : ''}, each around a block of lettering it found; the number is on a magenta tag next to the box and is unique across all images. The software can be wrong: a box may surround artwork with no text, split one bubble into several boxes, or miss some text.`
-    : 'Text detection software found no lettering on these images; it may have missed some.'
-
-  return `You are a professional manga translator.
+  if (!req.regions.length) {
+    return `You are a professional manga translator.
 
 ${intro}
-${marks}
 ${source}
 Translate every piece of readable text into ${settings.targetLanguage}.
 ${sfx}
@@ -44,29 +40,87 @@ Return EVERY text block, including small bubbles, one-word bubbles and short int
 
 For each text block (one speech bubble, thought bubble, narration box, system window or caption = one block) return:
 - "image": index of the image the block is on.
-- "box_2d": a bounding box [ymin, xmin, ymax, xmax] that tightly encloses all of the block's glyphs, normalized to 0-1000 relative to the height and width of that image. Always give it, also for text inside numbered boxes.
-- "ids": the numbers of the boxes drawn around this block's text, or [] when it has none. List every box of the block when it was split. Only use a box that actually contains this text: never boxes of another bubble, boxes around artwork or bubble borders, or a nearby box for text that has no box of its own.
-- "original": the original text.
-- "translation": natural, fluent ${settings.targetLanguage}, matching the tone of the character. Keep it concise so it fits the bubble.
-- "kind": "speech" (regular dialogue bubble), "thought" (inner monologue: cloud, fuzzy or dark bubble), "shout" (yelling: jagged burst bubble or big bold lettering), "narration" (caption box or text over the art), "system" (game-like system window, status screen or notification), "aside" (small side remark written next to a bubble or character), "sfx" (sound effect).
-- "font": typeface of the original lettering: "comic" (standard comic lettering), "brush" (bold slanted marker/brush lettering), "condensed" (tall narrow sans-serif), "sans", "serif" or "handwritten" (small casual handwriting).
-- "italic": true if the original lettering is slanted.
-- "color": fill colour of the original letters as "#rrggbb".
-- "outline": colour of the outline drawn around the original letters as "#rrggbb", or null if they have none.
+- "box_2d": a bounding box [ymin, xmin, ymax, xmax] that tightly encloses all of the block's glyphs, normalized to 0-1000 relative to the height and width of that image.
+${blockFields(settings.targetLanguage)}
 
 List blocks in reading order. Images without text get no entries.
 
 Respond with ONLY a JSON object, no markdown fences and no commentary, in exactly this shape:
-{"blocks":[{"image":0,"box_2d":[0,0,0,0],"ids":[1],"original":"","translation":"","kind":"speech","font":"comic","italic":false,"color":"#000000","outline":null},{"image":0,"box_2d":[0,0,0,0],"ids":[],"original":"","translation":"","kind":"narration","font":"sans","italic":false,"color":"#ffffff","outline":"#000000"}]}`
+{"blocks":[{"image":0,"box_2d":[0,0,0,0],${EXAMPLE_FIELDS}}]}`
+  }
+
+  const keyCount = req.key.length
+  const keyImages = keyCount === 1 ? `image ${req.images.length}` : `images ${req.images.length}-${req.images.length + keyCount - 1}`
+  return `You are a professional manga translator.
+
+${intro}
+Text detection software has drawn numbered magenta boxes on the page image${multi ? 's' : ''}, each around a block of lettering it found; the number is on a magenta tag next to the box and is unique across all images. The last attached ${keyCount === 1 ? 'image' : `${keyCount} images`} (${keyImages}) ${keyCount === 1 ? 'is' : 'are'} the key: every box cut out and enlarged, its number on the magenta tag at its left. Read the text of each box on the key; use the page for context (who speaks to whom, what is happening, which boxes share a bubble).
+The software can be wrong: a box may surround artwork or a bubble's border with no text, one bubble may be split into several boxes, and some text may have no box.
+${source}
+Translate the text into ${settings.targetLanguage}.
+${sfx}
+Scanlation credits, watermarks and website URLs are not translated. Writing in another script than the page's lettering that is drawn into the artwork (signs, screens, background patterns, leftovers of the original edition) is part of the art: skip it.
+
+Answer EVERY numbered box exactly once: put its number in the "ids" of the text block it belongs to, or in "skip" when it holds nothing to translate (artwork, a pattern, a bubble border, a watermark or credit, a sound effect that is not translated). A bubble whose text is split over several boxes is one block that lists all of them; separate bubbles, captions and side remarks written next to a bubble are separate blocks, even when the sentence continues from one to the next. A box left out stays untranslated on the page.
+
+For each text block (one speech bubble, thought bubble, narration box, system window or caption = one block) return:
+- "ids": the numbers of the boxes holding this block's letters; never boxes that only hold the bubble's border, spikes or artwork around the text.
+${blockFields(settings.targetLanguage)}
+
+Text with no box at all (check the page for bubbles and captions without a magenta box) is a block with "ids": [] and also:
+- "image": index of the page image it is on.
+- "box_2d": a bounding box [ymin, xmin, ymax, xmax] that tightly encloses its glyphs, normalized to 0-1000 relative to the height and width of that image.
+
+List blocks in reading order.
+
+Respond with ONLY a JSON object, no markdown fences and no commentary, in exactly this shape:
+{"skip":[3],"blocks":[{"ids":[1,2],${EXAMPLE_FIELDS}},{"ids":[],"image":0,"box_2d":[0,0,0,0],${EXAMPLE_FIELDS}}]}`
 }
+
+/** Asks again for boxes the model left out of its answer, showing only the key. */
+export function buildFollowUp(ids: number[], req: TranslateRequest, settings: AppSettings): string {
+  const source =
+    settings.sourceLanguage === AUTO_LANGUAGE
+      ? 'Detect the source language automatically.'
+      : `The source language is ${settings.sourceLanguage}.`
+  return `You are a professional manga translator.
+
+The attached image${req.key.length > 1 ? 's show' : ' shows'} blocks of lettering cut out of a manga/webtoon page, each with its number on a magenta tag at its left. ${source}
+Translate the text of boxes ${ids.join(', ')} into ${settings.targetLanguage}; ignore the other boxes.
+Answer each of these boxes exactly once: put its number in the "ids" of a text block, or in "skip" when it holds nothing to translate (artwork, a pattern, a bubble border, a watermark or credit${settings.translateSfx ? '' : ', a sound effect'}). Boxes that are parts of one sentence or bubble form one block that lists all of them.
+
+For each text block return:
+- "ids": the numbers of the boxes holding this block's text.
+${blockFields(settings.targetLanguage)}
+
+Respond with ONLY a JSON object, no markdown fences and no commentary, in exactly this shape:
+{"skip":[],"blocks":[{"ids":[${ids[0] ?? 1}],${EXAMPLE_FIELDS}}]}`
+}
+
+function blockFields(target: string): string {
+  return `- "original": the original text.
+- "translation": natural, fluent ${target}, matching the tone of the character. Keep it concise so it fits the bubble.
+- "kind": "speech" (regular dialogue bubble), "thought" (inner monologue: cloud, fuzzy or dark bubble), "shout" (yelling: jagged burst bubble or big bold lettering), "narration" (caption box or text over the art), "system" (game-like system window, status screen or notification), "aside" (small side remark written next to a bubble or character), "sfx" (sound effect).
+- "font": typeface of the original lettering: "comic" (standard comic lettering), "brush" (bold slanted marker/brush lettering), "condensed" (tall narrow sans-serif), "sans", "serif" or "handwritten" (small casual handwriting).
+- "italic": true if the original lettering is slanted.
+- "color": fill colour of the original letters as "#rrggbb".
+- "outline": colour of the outline drawn around the original letters as "#rrggbb", or null if they have none.`
+}
+
+const EXAMPLE_FIELDS = '"original":"","translation":"","kind":"speech","font":"comic","italic":false,"color":"#000000","outline":null'
 
 const KINDS: BlockKind[] = ['speech', 'thought', 'shout', 'narration', 'system', 'aside', 'sfx', 'other']
 const FONT_ROLES: FontRole[] = ['comic', 'brush', 'condensed', 'sans', 'serif', 'handwritten']
 
-/** Returns one list of blocks per requested image, in the same order. */
-export function parseBlocks(raw: string, req: TranslateRequest): TextBlock[][] {
+/**
+ * Returns one list of blocks per requested image, in the same order, and the boxes the answer
+ * accounted for. `boxedOnly` drops blocks placed by the model's own box (follow-ups only show the key).
+ */
+export function parseBlocks(raw: string, req: TranslateRequest, boxedOnly = false): { blocks: TextBlock[][]; answered: Set<number> } {
   const json = extractJson(raw)
   const result: TextBlock[][] = req.images.map(() => [])
+  const answered = new Set<number>()
+  for (const id of Array.isArray(json?.skip) ? json.skip : []) answered.add(Number(id))
   // Also accepts blocks grouped per image, which some models fall back to.
   const entries: unknown[] = Array.isArray(json?.blocks)
     ? json.blocks
@@ -78,26 +132,36 @@ export function parseBlocks(raw: string, req: TranslateRequest): TextBlock[][] {
         ? json
         : []
   for (const entry of entries) {
-    const placed = toBlock(entry, req)
+    const picked = entry && typeof entry === 'object' ? pickRegions((entry as Record<string, unknown>).ids, req) : []
+    if (boxedOnly && !picked.length) continue
+    const placed = toBlock(entry, picked, req)
+    // Boxes the block's position left out (not next to its text) are asked about again on their own.
+    for (const r of placed ? placed.kept : picked) answered.add(r.id)
     if (placed) result[placed.image].push(placed.block)
   }
-  return result
+  return { blocks: result, answered }
 }
 
-function toBlock(item: unknown, req: TranslateRequest): { image: number; block: TextBlock } | undefined {
+function toBlock(
+  item: unknown,
+  picked: MarkedRegion[],
+  req: TranslateRequest
+): { image: number; block: TextBlock; kept: MarkedRegion[] } | undefined {
   if (!item || typeof item !== 'object') return undefined
   const b = item as Record<string, unknown>
   const translation = typeof b.translation === 'string' ? b.translation.trim() : ''
   if (!translation) return undefined
-  const placed = place(pickRegions(b.ids, req), fromBox(b, req), req)
+  const placed = place(picked, fromBox(b, req))
   if (!placed) return undefined
   const { width, height } = req.images[placed.image]
   return {
     image: placed.image,
+    kept: placed.kept,
     block: {
       textBox: placed.box,
       areaBox: roomAround(placed.box, width, height),
       inkBoxes: placed.inkBoxes,
+      letterHeight: placed.letterHeight,
       original: typeof b.original === 'string' ? b.original : '',
       translation,
       kind: KINDS.includes(b.kind as BlockKind) ? (b.kind as BlockKind) : 'other',
@@ -115,38 +179,44 @@ function pickRegions(ids: unknown, req: TranslateRequest): MarkedRegion[] {
 }
 
 /**
- * The detected boxes the model picked give the exact position; its own box_2d is often off by a line or
- * more, so it never overrides them. It only drops picked boxes far from the text (another bubble, spikes)
- * when it agrees with some of them, and extends them when the detector caught part of the text.
+ * The detected boxes the model picked give the exact position. The model's own box_2d (often off by a
+ * line or more) only places text the detector missed, and the overlay looks for the glyphs around it.
  */
 function place(
   picked: MarkedRegion[],
-  guess: { image: number; box: Box } | undefined,
-  req: TranslateRequest
-): { image: number; box: Box; inkBoxes?: Box[] } | undefined {
-  if (picked.length) {
-    const image = guess && picked.some((r) => r.image === guess.image) ? guess.image : picked[0].image
-    let chosen = picked.filter((r) => r.image === image)
-    const box = guess?.image === image ? guess.box : undefined
-    if (box) {
-      const reach = Math.max(20, 0.25 * Math.max(box[2] - box[0], box[3] - box[1]))
-      const near = [box[0] - reach, box[1] - reach, box[2] + reach, box[3] + reach] as Box
-      const agreeing = chosen.filter((r) => overlapArea(r.box, near) > 0)
-      if (agreeing.length) chosen = agreeing
+  guess: { image: number; box: Box } | undefined
+): { image: number; box: Box; kept: MarkedRegion[]; inkBoxes?: Box[]; letterHeight?: number } | undefined {
+  if (!picked.length) return guess && { ...guess, kept: [] }
+  // Overlapping slices number the same text twice; a block keeps the slice most of its boxes are on.
+  const counts = new Map<number, number>()
+  for (const r of picked) counts.set(r.image, (counts.get(r.image) ?? 0) + 1)
+  const image = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  const onImage = picked.filter((r) => r.image === image)
+  // The detector already joins the lines of one bubble; other boxes the model adds are bubble spikes or
+  // artwork beside the text, unless they continue it right away.
+  const kept = [onImage.reduce((a, b) => (b.glyphs > a.glyphs ? b : a))]
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const r of onImage) {
+      if (!kept.includes(r) && kept.some((k) => continues(k, r))) kept.push(r), (grew = true)
     }
-    const inkBoxes = chosen.map((r) => r.box)
-    const found = unionAll(inkBoxes)
-    const extended = box && union(found, box)
-    if (box && extended && overlapArea(found, box) >= 0.5 * area(found) && area(extended) <= 3 * area(found)) {
-      return { image, box: extended, inkBoxes }
-    }
-    return { image, box: found, inkBoxes }
   }
-  if (!guess) return undefined
-  const inside = req.regions.filter((r) => r.image === guess.image && overlapArea(r.box, guess.box) >= 0.5 * area(r.box))
-  if (!inside.length) return guess
-  const inkBoxes = inside.map((r) => r.box)
-  return { image: guess.image, box: unionAll(inkBoxes), inkBoxes }
+  const inkBoxes = kept.map((r) => r.box)
+  const letterHeight = Math.max(...kept.map((r) => r.letterHeight))
+  return { image, box: unionAll(inkBoxes), kept: [...kept, ...picked.filter((r) => r.image !== image)], inkBoxes, letterHeight }
+}
+
+/** Whether `b` is the next line of `a`, or the rest of its line. */
+function continues(a: MarkedRegion, b: MarkedRegion): boolean {
+  const lo = Math.min(a.letterHeight, b.letterHeight)
+  const hi = Math.max(a.letterHeight, b.letterHeight)
+  if (hi > 1.8 * lo) return false
+  const gapX = Math.max(0, b.box[0] - a.box[2], a.box[0] - b.box[2])
+  const gapY = Math.max(0, b.box[1] - a.box[3], a.box[1] - b.box[3])
+  const overlapX = Math.min(a.box[2], b.box[2]) - Math.max(a.box[0], b.box[0])
+  const overlapY = Math.min(a.box[3], b.box[3]) - Math.max(a.box[1], b.box[1])
+  const minW = Math.min(a.box[2] - a.box[0], b.box[2] - b.box[0])
+  return (gapY <= 1.5 * hi && overlapX >= 0.3 * minW) || (overlapY >= 0.5 * lo && gapX <= 2 * hi)
 }
 
 function fromBox(b: Record<string, unknown>, req: TranslateRequest): { image: number; box: Box } | undefined {

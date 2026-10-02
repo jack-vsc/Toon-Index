@@ -15,9 +15,9 @@ import {
 } from '../../shared/types'
 import { getApiKey, getSettings } from '../settings'
 import { listCursorModels, pickDefaultCursorModel, runCursor } from './cursorProvider'
-import { describeError } from './errors'
+import { describeError, FormatError } from './errors'
 import { listOpenAIModels, runOpenAI } from './openaiProvider'
-import { buildPrompt, parseBlocks } from './prompt'
+import { buildFollowUp, buildPrompt, parseBlocks } from './prompt'
 
 const active = new Map<string, AbortController>()
 
@@ -36,22 +36,38 @@ export async function translate(req: TranslateRequest): Promise<TextBlock[][]> {
   if (!profile) throw appError({ code: 'auth', message: 'Cadastre uma API nas configurações antes de traduzir.' })
   const apiKey = requireReady(profile, getApiKey(profile.id))
 
-  const prompt = buildPrompt(req, settings)
-  const cacheFile = join(cacheDir(), `${cacheKey(prompt, req, settings.speed, profile)}.txt`)
-  if (existsSync(cacheFile)) {
-    try {
-      return parseBlocks(readFileSync(cacheFile, 'utf8'), req)
-    } catch {
-      // Unreadable cache entry: ask the model again.
-    }
-  }
-
   const controller = new AbortController()
   active.set(req.requestId, controller)
+  // Same images + same prompt + same model = same answer, so re-translating a chapter costs nothing.
+  const ask = async (prompt: string, images: TranslateRequest['images'], parse: (raw: string) => ReturnType<typeof parseBlocks>) => {
+    const modelReq = { ...req, images }
+    const cacheFile = join(cacheDir(), `${cacheKey(prompt, modelReq, settings.speed, profile)}.txt`)
+    if (existsSync(cacheFile)) {
+      try {
+        return parse(readFileSync(cacheFile, 'utf8'))
+      } catch {
+        // Unreadable cache entry: ask the model again.
+      }
+    }
+    // Models now and then stop mid-answer; a second try usually comes back whole.
+    for (let attempt = 1; ; attempt++) {
+      const raw = await callModel(profile, apiKey, prompt, modelReq, settings.speed, controller.signal)
+      try {
+        const parsed = parse(raw)
+        writeFileSync(cacheFile, raw, 'utf8')
+        return parsed
+      } catch (err) {
+        if (!(err instanceof FormatError) || attempt >= 2) throw err
+      }
+    }
+  }
   try {
-    const raw = await callModel(profile, apiKey, prompt, req, settings.speed, controller.signal)
-    const blocks = parseBlocks(raw, req)
-    writeFileSync(cacheFile, raw, 'utf8')
+    const { blocks, answered } = await ask(buildPrompt(req, settings), [...req.images, ...req.key], (raw) => parseBlocks(raw, req))
+    const missing = req.regions.filter((r) => !answered.has(r.id)).map((r) => r.id)
+    if (missing.length && req.key.length) {
+      const more = await ask(buildFollowUp(missing, req, settings), req.key, (raw) => parseBlocks(raw, req, true))
+      more.blocks.forEach((list, i) => blocks[i].push(...list))
+    }
     return blocks
   } catch (err) {
     if (controller.signal.aborted) throw new Error(CANCELLED)
@@ -68,7 +84,7 @@ export async function testApi(profile: ApiProfile, typedKey?: string): Promise<{
   const timer = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS)
   const started = Date.now()
   try {
-    const req: TranslateRequest = { images: [TEST_IMAGE], regions: [], pageNumber: 0, requestId: 'test' }
+    const req: TranslateRequest = { images: [TEST_IMAGE], key: [], regions: [], pageNumber: 0, requestId: 'test' }
     await callModel(profile, apiKey, 'Respond with the JSON object {"ok":true} and nothing else.', req, 'fast', controller.signal)
     return { ms: Date.now() - started }
   } catch (err) {
@@ -125,7 +141,6 @@ export function cancelTranslations(requestIds?: string[]): void {
   }
 }
 
-/** Same images + same prompt + same model = same answer, so re-translating a chapter costs nothing. */
 function cacheKey(prompt: string, req: TranslateRequest, speed: AppSettings['speed'], profile: ApiProfile): string {
   const hash = createHash('sha256')
   const model = profile.kind === 'cursor' ? profile.model : `${profile.baseUrl}|${profile.model}`

@@ -70,10 +70,12 @@ export function detectText(canvas: HTMLCanvasElement): TextRegion[] {
     )
     const clean = new Set(shapes.filter((c) => isGlyph(c, gray, ink, labels, W, H, GLYPH_TOLERANCE)))
     for (const block of groupBlocks(shapes, clean)) {
-      if (isTextBlock(block, gray, ink, W, H)) found.push({ box: block.box, letterHeight: block.letterHeight, glyphs: block.glyphs })
+      if (isTextBlock(block, gray, ink, W, H) && !besideOwnColour(block, gray, labels, W, H)) {
+        found.push({ box: block.box, letterHeight: block.letterHeight, glyphs: block.glyphs })
+      }
     }
   }
-  return mergeRegions(found)
+  return joinBubbles(mergeRegions(found), gray, W, H)
     .sort((a, b) => b.glyphs - a.glyphs)
     .slice(0, MAX_REGIONS)
     .sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0])
@@ -299,6 +301,45 @@ function flatAround(block: TextRegion, gray: Uint8Array, ww: number, wh: number)
   return sides > 0 && score / sides >= 0.75
 }
 
+/**
+ * The tips of a shout bubble's spikes (and the white gaps between them) line up like letters, but one
+ * side of them is a solid mass of their own colour: the band they grow out of, or the bubble's inside.
+ * Lettering has the background on every side.
+ */
+function besideOwnColour(block: TextRegion & { list: Comp[] }, gray: Uint8Array, labels: Int32Array, ww: number, wh: number): boolean {
+  const values: number[] = []
+  for (const c of block.list) {
+    const step = Math.max(1, Math.round(Math.sqrt(c.count / 50)))
+    for (let y = c.y0; y < c.y1; y += step) {
+      for (let x = c.x0; x < c.x1; x += step) if (labels[y * ww + x] === c.id) values.push(gray[y * ww + x])
+    }
+  }
+  if (!values.length) return false
+  const own = quantile(values, 0.5)
+  const { box, letterHeight } = block
+  const near = Math.max(2, Math.round(letterHeight * 0.3))
+  const far = Math.max(near + 2, Math.round(letterHeight * 0.9))
+  const [bx0, by0, bx1, by1] = box
+  const strips: Box[] = [
+    [bx0, by0 - far, bx1, by0 - near],
+    [bx0, by1 + near, bx1, by1 + far],
+    [bx0 - far, by0, bx0 - near, by1],
+    [bx1 + near, by0, bx1 + far, by1]
+  ]
+  for (const [sx0, sy0, sx1, sy1] of strips) {
+    const x0 = Math.max(0, sx0)
+    const y0 = Math.max(0, sy0)
+    const x1 = Math.min(ww, sx1)
+    const y1 = Math.min(wh, sy1)
+    if (x1 - x0 < 2 || y1 - y0 < 2) continue
+    const step = Math.max(1, Math.round(Math.sqrt(((x1 - x0) * (y1 - y0)) / 200)))
+    const strip: number[] = []
+    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) strip.push(gray[y * ww + x])
+    if (Math.abs(quantile(strip, 0.5) - own) < 35) return true
+  }
+  return false
+}
+
 /** Outlined lettering shows up in both passes (the outline dark, the fill light): one block. */
 function mergeRegions(regions: TextRegion[]): TextRegion[] {
   const out: TextRegion[] = []
@@ -316,6 +357,89 @@ function mergeRegions(regions: TextRegion[]): TextRegion[] {
     ]
   }
   return out
+}
+
+/**
+ * Lines of one bubble that the line grouping kept apart (one set bigger, a wider gap) become one region:
+ * they sit right above each other and the bubble's background connects them without crossing a border.
+ * Otherwise the model tends to name only one part, and the rest stays in the original language.
+ */
+function joinBubbles(regions: TextRegion[], gray: Uint8Array, W: number, H: number): TextRegion[] {
+  const parent = regions.map((_, i) => i)
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+  for (let i = 0; i < regions.length; i++) {
+    for (let j = i + 1; j < regions.length; j++) {
+      const a = regions[i]
+      const b = regions[j]
+      const lo = Math.min(a.letterHeight, b.letterHeight)
+      const hi = Math.max(a.letterHeight, b.letterHeight)
+      if (hi > 1.8 * lo) continue
+      const gapY = Math.max(0, b.box[1] - a.box[3], a.box[1] - b.box[3])
+      const overlapX = Math.min(a.box[2], b.box[2]) - Math.max(a.box[0], b.box[0])
+      const minW = Math.min(a.box[2] - a.box[0], b.box[2] - b.box[0])
+      if (gapY > 2.2 * hi || overlapX < 0.5 * minW) continue
+      if (sameBackground(a.box, b.box, hi, gray, W, H)) parent[find(i)] = find(j)
+    }
+  }
+  const groups = new Map<number, TextRegion[]>()
+  regions.forEach((r, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), r]))
+  return [...groups.values()].map((list) => ({
+    box: list.map((r) => r.box).reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]),
+    letterHeight: Math.max(...list.map((r) => r.letterHeight)),
+    glyphs: list.reduce((n, r) => n + r.glyphs, 0)
+  }))
+}
+
+/** Whether background of the colour around `a` leads, around the letters, to the area around `b`. */
+function sameBackground(a: Box, b: Box, letterHeight: number, gray: Uint8Array, W: number, H: number): boolean {
+  const pad = Math.max(2, Math.round(letterHeight * 0.3))
+  const x0 = Math.max(0, Math.min(a[0], b[0]) - 2 * pad)
+  const y0 = Math.max(0, Math.min(a[1], b[1]) - 2 * pad)
+  const x1 = Math.min(W, Math.max(a[2], b[2]) + 2 * pad)
+  const y1 = Math.min(H, Math.max(a[3], b[3]) + 2 * pad)
+  const ww = x1 - x0
+  const inRing = (box: Box, x: number, y: number) =>
+    x >= box[0] - pad && x < box[2] + pad && y >= box[1] - pad && y < box[3] + pad && !(x >= box[0] && x < box[2] && y >= box[1] && y < box[3])
+  const ringA: number[] = []
+  const ringB: number[] = []
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      if (inRing(a, x, y)) ringA.push(y * W + x)
+      if (inRing(b, x, y)) ringB.push(y * W + x)
+    }
+  }
+  if (!ringA.length || !ringB.length) return false
+  const bg = quantile(ringA.map((p) => gray[p]), 0.5)
+  if (Math.abs(quantile(ringB.map((p) => gray[p]), 0.5) - bg) > BLOCK_TOLERANCE) return false
+  const target = new Set(ringB)
+  const seen = new Uint8Array(ww * (y1 - y0))
+  const queue: number[] = []
+  for (const p of ringA) {
+    if (Math.abs(gray[p] - bg) > BLOCK_TOLERANCE) continue
+    if (target.has(p)) return true
+    seen[(Math.floor(p / W) - y0) * ww + (p % W) - x0] = 1
+    queue.push(p)
+  }
+  while (queue.length) {
+    const p = queue.pop()!
+    const x = p % W
+    const y = (p - x) / W
+    for (const [nx, ny] of [
+      [x - 1, y],
+      [x + 1, y],
+      [x, y - 1],
+      [x, y + 1]
+    ]) {
+      if (nx < x0 || nx >= x1 || ny < y0 || ny >= y1) continue
+      const s = (ny - y0) * ww + nx - x0
+      const q = ny * W + nx
+      if (seen[s] || Math.abs(gray[q] - bg) > BLOCK_TOLERANCE) continue
+      if (target.has(q)) return true
+      seen[s] = 1
+      queue.push(q)
+    }
+  }
+  return false
 }
 
 /** A copy of the image with each region outlined and tagged with its number, for the model to refer to. */
@@ -352,6 +476,77 @@ export function drawMarks(source: HTMLCanvasElement, marks: { id: number; box: B
     ctx.fillText(label, tx + 4, ty + 2)
   }
   return canvas
+}
+
+const KEY_WIDTH = 1024
+const KEY_MAX_HEIGHT = 1536
+/** Letter height the regions are enlarged (or reduced) to on the key. */
+const KEY_LETTER = 28
+
+/**
+ * Every region cut out of its image, scaled to a readable letter size and tagged with its number,
+ * packed into as few images as needed: the model reads each box there and sees the page for context.
+ */
+export function drawKey(regions: { id: number; source: HTMLCanvasElement; box: Box; letterHeight: number }[]): HTMLCanvasElement[] {
+  const gap = 10
+  const fontSize = 20
+  const tagW = 44
+  const tiles = regions.map((r) => {
+    const pad = Math.round(r.letterHeight * 0.4)
+    const x0 = Math.max(0, r.box[0] - pad)
+    const y0 = Math.max(0, r.box[1] - pad)
+    const x1 = Math.min(r.source.width, r.box[2] + pad)
+    const y1 = Math.min(r.source.height, r.box[3] + pad)
+    const s = Math.min(
+      Math.max(0.6, Math.min(3, KEY_LETTER / Math.max(1, r.letterHeight))),
+      (KEY_WIDTH - tagW - 2 * gap) / (x1 - x0),
+      (KEY_MAX_HEIGHT - 2 * gap) / (y1 - y0)
+    )
+    return { ...r, src: [x0, y0, x1, y1] as Box, w: Math.round((x1 - x0) * s), h: Math.round((y1 - y0) * s) }
+  })
+
+  const sheets: { tiles: (typeof tiles[number] & { x: number; y: number })[]; height: number }[] = []
+  let sheet: (typeof sheets)[number] = { tiles: [], height: gap }
+  let x = gap
+  let rowTop = gap
+  let rowH = 0
+  for (const tile of tiles) {
+    const width = tagW + tile.w + gap
+    if (x + width > KEY_WIDTH) (x = gap), (rowTop += rowH + gap), (rowH = 0)
+    if (rowTop + tile.h + gap > KEY_MAX_HEIGHT && sheet.tiles.length) {
+      sheets.push(sheet)
+      sheet = { tiles: [], height: gap }
+      x = gap
+      rowTop = gap
+      rowH = 0
+    }
+    sheet.tiles.push({ ...tile, x, y: rowTop })
+    sheet.height = Math.max(sheet.height, rowTop + tile.h + gap)
+    x += width
+    rowH = Math.max(rowH, tile.h)
+  }
+  if (sheet.tiles.length) sheets.push(sheet)
+
+  return sheets.map(({ tiles: placed, height }) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = KEY_WIDTH
+    canvas.height = height
+    const ctx = canvas.getContext('2d')!
+    ctx.fillStyle = '#555555'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.imageSmoothingQuality = 'high'
+    ctx.font = `bold ${fontSize}px Arial, sans-serif`
+    ctx.textBaseline = 'middle'
+    for (const t of placed) {
+      ctx.fillStyle = MARK_COLOR
+      ctx.fillRect(t.x, t.y, tagW - 4, Math.min(t.h, fontSize + 12))
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(String(t.id), t.x + 4, t.y + Math.min(t.h, fontSize + 12) / 2)
+      const [x0, y0, x1, y1] = t.src
+      ctx.drawImage(t.source, x0, y0, x1 - x0, y1 - y0, t.x + tagW, t.y, t.w, t.h)
+    }
+    return canvas
+  })
 }
 
 function boundsOf(list: Comp[]): Box {
