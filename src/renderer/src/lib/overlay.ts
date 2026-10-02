@@ -65,6 +65,11 @@ export interface OverlayInfo {
   family?: string
 }
 
+/** Signage and narration placed only on the artwork are listed below the panel instead of over the art. */
+function isFootnote(block: TextBlock): boolean {
+  return block.kind === 'signage' || (block.kind === 'narration' && !block.inkBoxes)
+}
+
 /** Erases the original text of every block, then writes the translations on top. Load fonts first (`ensureFonts`). */
 export function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]): OverlayInfo[] {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
@@ -78,16 +83,78 @@ export function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]): Ove
     const text = normalizeText(block.translation)
     if (!text || text === normalizeText(block.original)) kept.add(i)
     // Placed by the model's own box and no lettering there: writing it would cover the art, not the text.
-    if (!block.inkBoxes && !glyphs[i].bbox) kept.add(i)
+    if (!block.inkBoxes && !glyphs[i].bbox && !isFootnote(block)) kept.add(i)
   })
-  const skip = duplicates(blocks, glyphs, kept)
-  for (const i of kept) skip.add(i)
-  glyphs.forEach((g, i) => skip.has(i) || erase(ctx, g))
+  const skipDraw = duplicates(blocks, glyphs, kept)
+  for (const i of kept) skipDraw.add(i)
+  blocks.forEach((block, i) => {
+    if (!skipDraw.has(i) && isFootnote(block)) skipDraw.add(i)
+  })
+  const skipErase = new Set(kept)
+  for (let i = 0; i < blocks.length; i++) {
+    if (skipDraw.has(i) && !isFootnote(blocks[i])) skipErase.add(i)
+  }
+  glyphs.forEach((g, i) => skipErase.has(i) || erase(ctx, g))
+
+  const footnotes: string[] = []
+  blocks.forEach((block, i) => {
+    if (!isFootnote(block) || !skipDraw.has(i)) return
+    if (kept.has(i)) return
+    const t = block.translation.trim()
+    if (t) footnotes.push(t)
+  })
+  if (footnotes.length) appendFootnotes(canvas, footnotes)
+
   return blocks.map((block, i) => ({
-    drawn: !skip.has(i),
+    drawn: !skipDraw.has(i),
     letterHeight: glyphs[i].letterHeight,
-    ...(skip.has(i) ? {} : typeset(ctx, block, glyphs[i], W, H))
+    ...(skipDraw.has(i) ? {} : typeset(ctx, block, glyphs[i], W, H))
   }))
+}
+
+/** Adds a band below the page with *adendo lines (signage and similar). */
+function appendFootnotes(canvas: HTMLCanvasElement, notes: string[]): void {
+  const ctx = canvas.getContext('2d')!
+  const pad = Math.round(canvas.width * 0.02)
+  const fontSize = Math.max(13, Math.round(canvas.width / 52))
+  const lineGap = Math.round(fontSize * 0.35)
+  ctx.font = `italic ${fontSize}px ${FONTS.sans.family}`
+  const lines = notes.map((t) => `*${t}`)
+  const lineH = fontSize + lineGap
+  const band = pad * 2 + lines.length * lineH
+  const prev = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  canvas.height += band
+  ctx.putImageData(prev, 0, 0)
+  ctx.fillStyle = '#f0f0f0'
+  ctx.fillRect(0, canvas.height - band, canvas.width, band)
+  ctx.strokeStyle = '#bdbdbd'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(0, canvas.height - band)
+  ctx.lineTo(canvas.width, canvas.height - band)
+  ctx.stroke()
+  ctx.fillStyle = '#212121'
+  ctx.textBaseline = 'top'
+  let y = canvas.height - band + pad
+  const maxW = canvas.width - 2 * pad
+  for (const line of lines) {
+    y += wrapFootnote(ctx, line, pad, y, maxW, lineH)
+  }
+}
+
+function wrapFootnote(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number): number {
+  let line = ''
+  let used = 0
+  for (const char of text) {
+    const next = line + char
+    if (line && ctx.measureText(next).width > maxW) {
+      ctx.fillText(line, x, y + used)
+      used += lineH
+      line = char
+    } else line = next
+  }
+  if (line) ctx.fillText(line, x, y + used)
+  return used + lineH
 }
 
 /**
@@ -871,6 +938,14 @@ function fillMasked(d: Uint8ClampedArray, ww: number, wh: number, mask: Uint8Arr
       d[p * 4 + 2] = colors[n * 3 + 2]
     })
   write()
+  // Pixels the fill could not reach (busy art behind lettering) would otherwise stay as dark smudges.
+  masked.forEach((p, n) => {
+    if (!filled[n]) {
+      d[p * 4] = 255
+      d[p * 4 + 1] = 255
+      d[p * 4 + 2] = 255
+    }
+  })
 
   const flat = integrals(d, ww, wh, (p) => (mask[p] || !ink[p] ? 1 : 0))
   const smooth = Math.max(1, radius >> 1)

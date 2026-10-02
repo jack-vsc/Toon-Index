@@ -29,8 +29,8 @@ const TEST_IMAGE = {
   height: 32
 }
 const TEST_TIMEOUT_MS = 90_000
-/** Glyphs in a box the model skipped above which it is asked about again. */
-const SKIPPED_PARAGRAPH = 8
+/** Glyphs in a box the model skipped above which it is asked about again (includes small asides). */
+const SKIPPED_PARAGRAPH = 3
 
 export async function translate(req: TranslateRequest): Promise<TextBlock[][]> {
   const settings = getSettings()

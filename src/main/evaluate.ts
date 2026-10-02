@@ -6,7 +6,8 @@ import type { EvalConfig } from '../shared/types'
 
 /**
  * Developer evaluation run: MI_EVAL_PDF (sample chapter), MI_EVAL_REF (folder with the same chapter
- * translated by hand), MI_EVAL_OUT (where comparison sheets go) and MI_EVAL_PAGES ("2-4,7").
+ * translated by hand), MI_EVAL_OUT (where comparison sheets go), MI_EVAL_PAGES ("2-4,7") and
+ * MI_EVAL_DETECT=1 (only mark the detected text, no model calls).
  */
 function evalConfig(): EvalConfig | null {
   const pdf = process.env.MI_EVAL_PDF
@@ -18,7 +19,7 @@ function evalConfig(): EvalConfig | null {
         .sort()
         .map((f) => resolve(refDir, f))
     : []
-  return { pdf: resolve(pdf), reference, pages: parsePages(process.env.MI_EVAL_PAGES) }
+  return { pdf: resolve(pdf), reference, pages: parsePages(process.env.MI_EVAL_PAGES), detectOnly: process.env.MI_EVAL_DETECT === '1' }
 }
 
 function parsePages(spec: string | undefined): number[] | null {

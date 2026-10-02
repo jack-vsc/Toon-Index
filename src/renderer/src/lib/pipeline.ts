@@ -172,21 +172,8 @@ export class TranslationJob {
     try {
       const { widthPt, heightPt } = await pageSize(this.doc, pageNumber)
       const tall = isTallPage(widthPt, heightPt)
-      const rendered = await renderPage(this.doc, pageNumber, tall ? OUTPUT_WIDTH_TALL : OUTPUT_WIDTH)
-      const canvas = rendered.canvas
-
-      const sliceHeight = Math.round(canvas.width * SLICE_ASPECT)
-      const slices = planSlices(canvas, sliceHeight, Math.round(sliceHeight * SLICE_OVERLAP))
-      const aiLongSide = tall ? AI_LONG_SIDE_TALL : AI_LONG_SIDE
-      const prepared = slices.map((slice) => {
-        const crop = cropCanvas(canvas, { x: 0, y: slice.y0, width: canvas.width, height: slice.y1 - slice.y0 }, aiLongSide)
-        // Text touching a cut between overlapping slices is whole in the neighbouring slice.
-        const cutTop = slice.y0 > 0
-        const cutBottom = slice.y1 < canvas.height
-        const regions = detectText(crop).filter((r) => !(cutTop && r.box[1] <= 2) && !(cutBottom && r.box[3] >= crop.height - 2))
-        return { crop, regions, offsetY: slice.y0, scale: canvas.width / crop.width }
-      })
-      boxOnce(prepared)
+      const canvas = await renderForTranslation(this.doc, pageNumber)
+      const prepared = prepareSlices(canvas, tall)
 
       const chunks = chunk(prepared, MAX_IMAGES_PER_REQUEST)
       let done = 0
@@ -213,8 +200,10 @@ export class TranslationJob {
       const blocks = dedupe(results.flat())
       this.blocks.set(pageNumber, blocks)
       await ensureFonts()
-      const before = this.onPageRendered ? cropCanvas(canvas, { x: 0, y: 0, width: canvas.width, height: canvas.height }, Infinity) : null
+      const pagePx = canvas.height
+      const before = this.onPageRendered ? cropCanvas(canvas, { x: 0, y: 0, width: canvas.width, height: pagePx }, Infinity) : null
       const drawn = drawOverlay(canvas, blocks)
+      const heightPtOut = heightPt * (canvas.height / pagePx)
       if (before) {
         const regions = prepared.flatMap((p) =>
           p.regions.map(({ box: b }): Box => [b[0] * p.scale, b[1] * p.scale + p.offsetY, b[2] * p.scale, b[3] * p.scale + p.offsetY])
@@ -223,7 +212,7 @@ export class TranslationJob {
       }
 
       const jpeg = await canvasToBytes(canvas, 'image/jpeg', 0.9)
-      this.outputs.set(pageNumber, { jpeg, widthPt, heightPt })
+      this.outputs.set(pageNumber, { jpeg, widthPt, heightPt: heightPtOut })
       this.update(pageNumber, {
         status: 'done',
         blockCount: blocks.length,
@@ -278,11 +267,40 @@ class Limiter {
   }
 }
 
+export interface PreparedSlice {
+  crop: HTMLCanvasElement
+  regions: TextRegion[]
+  offsetY: number
+  scale: number
+}
+
+export async function renderForTranslation(doc: PDFDocumentProxy, pageNumber: number): Promise<HTMLCanvasElement> {
+  const { widthPt, heightPt } = await pageSize(doc, pageNumber)
+  return (await renderPage(doc, pageNumber, isTallPage(widthPt, heightPt) ? OUTPUT_WIDTH_TALL : OUTPUT_WIDTH)).canvas
+}
+
+/** Cuts the page into the overlapping images sent to the model and finds the text on each. */
+export function prepareSlices(canvas: HTMLCanvasElement, tall: boolean): PreparedSlice[] {
+  const sliceHeight = Math.round(canvas.width * SLICE_ASPECT)
+  const slices = planSlices(canvas, sliceHeight, Math.round(sliceHeight * SLICE_OVERLAP))
+  const aiLongSide = tall ? AI_LONG_SIDE_TALL : AI_LONG_SIDE
+  const prepared = slices.map((slice) => {
+    const crop = cropCanvas(canvas, { x: 0, y: slice.y0, width: canvas.width, height: slice.y1 - slice.y0 }, aiLongSide)
+    // Text touching a cut between overlapping slices is whole in the neighbouring slice.
+    const cutTop = slice.y0 > 0
+    const cutBottom = slice.y1 < canvas.height
+    const regions = detectText(crop).filter((r) => !(cutTop && r.box[1] <= 2) && !(cutBottom && r.box[3] >= crop.height - 2))
+    return { crop, regions, offsetY: slice.y0, scale: canvas.width / crop.width }
+  })
+  boxOnce(prepared)
+  return prepared
+}
+
 /**
  * Text in the overlap of two slices is detected in both, sometimes cut short in one. Each text keeps
  * only its most complete box (the largest, away from the cut), so the model reads it once and whole.
  */
-function boxOnce(slices: { crop: HTMLCanvasElement; regions: TextRegion[]; offsetY: number; scale: number }[]): void {
+function boxOnce(slices: PreparedSlice[]): void {
   const all = slices.flatMap((s, i) =>
     s.regions.map((r) => {
       const b = r.box

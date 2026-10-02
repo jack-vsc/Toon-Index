@@ -16,7 +16,7 @@ export interface ApiProfile {
 /** [x0, y0, x1, y1] in pixels of the image that was sent to the model. */
 export type Box = [number, number, number, number]
 
-export type BlockKind = 'speech' | 'thought' | 'shout' | 'narration' | 'system' | 'aside' | 'sfx' | 'other'
+export type BlockKind = 'speech' | 'thought' | 'shout' | 'narration' | 'system' | 'aside' | 'signage' | 'sfx' | 'other'
 
 /** Typeface family of the original lettering, as scanlators classify it. */
 export type FontRole = 'comic' | 'brush' | 'condensed' | 'sans' | 'serif' | 'handwritten'
@@ -108,6 +108,8 @@ export interface EvalConfig {
   reference: string[]
   /** 1-based pages to translate; all when null. */
   pages: number[] | null
+  /** Only save the slices with the detected text marked, without calling the model. */
+  detectOnly: boolean
 }
 
 /** One model request: one or more consecutive vertical slices of the same page, top to bottom. */

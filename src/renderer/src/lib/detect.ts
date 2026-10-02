@@ -387,6 +387,10 @@ function joinBubbles(regions: TextRegion[], gray: Uint8Array, W: number, H: numb
       const overlapX = Math.min(a.box[2], b.box[2]) - Math.max(a.box[0], b.box[0])
       const minW = Math.min(a.box[2] - a.box[0], b.box[2] - b.box[0])
       if (gapY > 2.2 * hi || overlapX < 0.5 * minW) continue
+      const areaA = (a.box[2] - a.box[0]) * (a.box[3] - a.box[1])
+      const areaB = (b.box[2] - b.box[0]) * (b.box[3] - b.box[1])
+      // A main bubble line and a small corner remark differ greatly in size; keep them apart.
+      if (Math.min(areaA, areaB) < 0.4 * Math.max(areaA, areaB) && gapY > 0) continue
       // Lines of a bubble are centred or flush left; a remark written across the bubble's edge is not.
       const maxW = Math.max(a.box[2] - a.box[0], b.box[2] - b.box[0])
       const centred = Math.abs(a.box[0] + a.box[2] - b.box[0] - b.box[2]) / 2 <= 0.2 * maxW
