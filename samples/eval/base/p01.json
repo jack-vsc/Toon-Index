@@ -1,0 +1,99 @@
+{
+ "page": 1,
+ "blocks": [
+  {
+   "textBox": [
+    1005,
+    359,
+    1336,
+    446
+   ],
+   "areaBox": [
+    906,
+    307,
+    1400,
+    499
+   ],
+   "original": "MANHWA",
+   "translation": "MANHWA",
+   "kind": "narration",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff"
+  },
+  {
+   "textBox": [
+    343,
+    506,
+    980,
+    728
+   ],
+   "areaBox": [
+    152,
+    373,
+    1171,
+    786
+   ],
+   "inkBoxes": [
+    [
+     346,
+     515,
+     966,
+     723
+    ]
+   ],
+   "original": "XTREME",
+   "translation": "XTREME",
+   "kind": "narration",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff"
+  },
+  {
+   "textBox": [
+    1064,
+    705,
+    1225,
+    744
+   ],
+   "areaBox": [
+    1016,
+    681,
+    1273,
+    768
+   ],
+   "inkBoxes": [
+    [
+     1064,
+     713,
+     1185,
+     739
+    ]
+   ],
+   "original": "『我的好?L",
+   "translation": "『Meu bom?L",
+   "kind": "narration",
+   "font": "handwritten",
+   "italic": false,
+   "color": "#ffffff"
+  }
+ ],
+ "guessed": 1,
+ "orphans": 0,
+ "matched": 0,
+ "items": 3,
+ "regions": [
+  [
+   346,
+   515,
+   966,
+   723
+  ],
+  [
+   1064,
+   713,
+   1185,
+   739
+  ]
+ ]
+}

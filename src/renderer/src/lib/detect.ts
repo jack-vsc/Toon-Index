@@ -320,6 +320,7 @@ function besideOwnColour(block: TextRegion & { list: Comp[] }, gray: Uint8Array,
   const near = Math.max(2, Math.round(letterHeight * 0.3))
   const far = Math.max(near + 2, Math.round(letterHeight * 0.9))
   const [bx0, by0, bx1, by1] = box
+  const dbg: string[] = []
   const strips: Box[] = [
     [bx0, by0 - far, bx1, by0 - near],
     [bx0, by1 + near, bx1, by1 + far],
@@ -335,8 +336,11 @@ function besideOwnColour(block: TextRegion & { list: Comp[] }, gray: Uint8Array,
     const step = Math.max(1, Math.round(Math.sqrt(((x1 - x0) * (y1 - y0)) / 200)))
     const strip: number[] = []
     for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) strip.push(gray[y * ww + x])
+    const f = strip.filter((v) => Math.abs(v - own) < 35).length / strip.length
+    dbg.push(`${Math.round(quantile(strip, 0.5))}/${f.toFixed(2)}`)
     if (Math.abs(quantile(strip, 0.5) - own) < 35) return true
   }
+  ;(window as any).api?.evaluation?.log(`DBG ${ww}x${wh} box=${box.map(Math.round)} lh=${Math.round(letterHeight)} n=${block.list.length} own=${Math.round(own)} ${dbg.join(' ')}`)
   return false
 }
 

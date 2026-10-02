@@ -1,0 +1,407 @@
+{
+ "page": 2,
+ "blocks": [
+  {
+   "textBox": [
+    235,
+    206,
+    763,
+    258
+   ],
+   "areaBox": [
+    77,
+    176,
+    921,
+    288
+   ],
+   "inkBoxes": [
+    [
+     235,
+     206,
+     763,
+     258
+    ]
+   ],
+   "letterHeight": 32.5,
+   "original": "All comics on this website\nare just previews of the original comics,\nthere may be many errors in language,\ncharacter names, and storylines.\n\nFor the original version, please buy\nthe comic if it is available in your city.",
+   "translation": "Todos os quadrinhos neste site\nsão apenas prévias dos quadrinhos originais,\npode haver muitos erros de linguagem,\nnomes de personagens e enredos.\n\nPara a versão original, por favor, compre\no quadrinho se estiver disponível em sua cidade.",
+   "kind": "narration",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 33,
+    "capHeight": 43,
+    "fontSize": 22,
+    "family": "Oswald, \"Arial Narrow\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    76,
+    860,
+    926,
+    1118
+   ],
+   "areaBox": [
+    0,
+    706,
+    1000,
+    1272
+   ],
+   "inkBoxes": [
+    [
+     76,
+     860,
+     926,
+     1118
+    ]
+   ],
+   "letterHeight": 73.75,
+   "original": "READ ON\nRESET-SCAN.CO",
+   "translation": "LEIA EM\nRESET-SCAN.CO",
+   "kind": "narration",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 74,
+    "capHeight": 76,
+    "fontSize": 100,
+    "family": "Bangers, \"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    25,
+    3486,
+    193,
+    3529
+   ],
+   "areaBox": [
+    0,
+    3461,
+    243,
+    3554
+   ],
+   "inkBoxes": [
+    [
+     25,
+     3486,
+     193,
+     3529
+    ]
+   ],
+   "letterHeight": 26.25,
+   "original": "UTOON.NET",
+   "translation": "UTOON.NET",
+   "kind": "narration",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "overlay": {
+    "drawn": false,
+    "letterHeight": 26
+   }
+  },
+  {
+   "textBox": [
+    111,
+    6572,
+    884,
+    6743
+   ],
+   "areaBox": [
+    0,
+    6469,
+    1000,
+    6846
+   ],
+   "inkBoxes": [
+    [
+     111,
+     6572,
+     884,
+     6743
+    ]
+   ],
+   "letterHeight": 64,
+   "original": "THESE GUYS, THEY USUALLY\nFIGHT SO MUCH...",
+   "translation": "ESSES CARAS, ELES COSTUMAM\nBRIGAR TANTO...",
+   "kind": "speech",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 64,
+    "capHeight": 65,
+    "fontSize": 80,
+    "family": "Oswald, \"Arial Narrow\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    66,
+    8235,
+    934,
+    8405
+   ],
+   "areaBox": [
+    0,
+    8133,
+    1000,
+    8455
+   ],
+   "inkBoxes": [
+    [
+     66,
+     8235,
+     934,
+     8405
+    ]
+   ],
+   "letterHeight": 65,
+   "original": "BUT THEY'RE SO CALM WHEN IT\nCOMES TO VISITING THE SICK.",
+   "translation": "MAS ELES SÃO TÃO CALMOS QUANDO SE TRATA DE VISITAR OS DOENTES.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 64,
+    "capHeight": 65,
+    "fontSize": 95,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    89,
+    9358,
+    739,
+    9475
+   ],
+   "areaBox": [
+    0,
+    9287,
+    934,
+    9546
+   ],
+   "inkBoxes": [
+    [
+     89,
+     9358,
+     739,
+     9475
+    ]
+   ],
+   "letterHeight": 31.25,
+   "original": "BY THE WAY, I COULDN'T EVEN ORGANIZE MY REWARDS BECAUSE I WAS MAKING THE TREATMENT...",
+   "translation": "A propósito, eu nem consegui organizar minhas recompensas porque estava fazendo o tratamento...",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 31,
+    "capHeight": 32,
+    "fontSize": 47,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    166,
+    11350,
+    794,
+    11475
+   ],
+   "areaBox": [
+    0,
+    11275,
+    982,
+    11550
+   ],
+   "inkBoxes": [
+    [
+     166,
+     11350,
+     794,
+     11475
+    ]
+   ],
+   "letterHeight": 32.5,
+   "original": "WITH THESE STATS, I WON'T HAVE TO WORRY ABOUT PLATINUM PROMOTION.",
+   "translation": "Com esses status, não vou precisar me preocupar com a promoção Platina.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 33,
+    "capHeight": 34,
+    "fontSize": 49,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    338,
+    12908,
+    915,
+    13025
+   ],
+   "areaBox": [
+    164,
+    12837,
+    1000,
+    13096
+   ],
+   "inkBoxes": [
+    [
+     338,
+     12908,
+     915,
+     13025
+    ]
+   ],
+   "letterHeight": 31.25,
+   "original": "ADDING THE ELIXIRS I'LL MAKE IN THE FUTURE WILL BE THE ICING ON THE CAKE.",
+   "translation": "Adicionar os elixires que farei no futuro será a cereja do bolo.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 31,
+    "capHeight": 32,
+    "fontSize": 47,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    193,
+    13765,
+    809,
+    13882
+   ],
+   "areaBox": [
+    8,
+    13695,
+    994,
+    13952
+   ],
+   "inkBoxes": [
+    [
+     193,
+     13765,
+     809,
+     13882
+    ]
+   ],
+   "letterHeight": 31,
+   "original": "AND MOST IMPORTANTLY, THE MAIN REWARD FROM THIS DEBUT MATCH WAS SEPARATE.",
+   "translation": "E o mais importante, a recompensa principal desta partida de estreia foi separada.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 31,
+    "capHeight": 32,
+    "fontSize": 47,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  }
+ ],
+ "guessed": 0,
+ "orphans": 4,
+ "matched": 9,
+ "items": 13,
+ "regions": [
+  [
+   235,
+   206,
+   763,
+   258
+  ],
+  [
+   76,
+   860,
+   926,
+   1118
+  ],
+  [
+   140,
+   1218,
+   888,
+   1570
+  ],
+  [
+   25,
+   3486,
+   193,
+   3529
+  ],
+  [
+   419,
+   3575,
+   718,
+   3675
+  ],
+  [
+   111,
+   6572,
+   884,
+   6743
+  ],
+  [
+   823,
+   6909,
+   889,
+   6919
+  ],
+  [
+   66,
+   8235,
+   934,
+   8405
+  ],
+  [
+   89,
+   9358,
+   739,
+   9475
+  ],
+  [
+   166,
+   11350,
+   794,
+   11475
+  ],
+  [
+   395,
+   11834,
+   936,
+   12528
+  ],
+  [
+   338,
+   12908,
+   915,
+   13025
+  ],
+  [
+   193,
+   13765,
+   809,
+   13882
+  ]
+ ]
+}

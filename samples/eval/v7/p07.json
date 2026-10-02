@@ -1,0 +1,127 @@
+{
+ "page": 7,
+ "blocks": [
+  {
+   "textBox": [
+    186,
+    1176,
+    804,
+    1338
+   ],
+   "areaBox": [
+    1,
+    1080,
+    989,
+    1434
+   ],
+   "inkBoxes": [
+    [
+     186,
+     1176,
+     804,
+     1338
+    ]
+   ],
+   "letterHeight": 32.5,
+   "original": "KUHAHA! THESE GUYS HAD NO CHOICE BUT TO GIVE IT BECAUSE IT'S A WHITE ELEPHANT THEY CAN'T USE!",
+   "translation": "HA HA HA! ESSES CARAS NÃO TIVERAM ESCOLHA A NÃO SER ENTREGAR PORQUE É UM PRESENTE DE GREGO QUE ELES NÃO PODEM USAR!",
+   "kind": "shout",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#ff0000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 32,
+    "capHeight": 33,
+    "fontSize": 48,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    339,
+    11200,
+    641,
+    11340
+   ],
+   "areaBox": [
+    248,
+    11116,
+    732,
+    11424
+   ],
+   "inkBoxes": [
+    [
+     339,
+     11200,
+     641,
+     11340
+    ]
+   ],
+   "letterHeight": 57.5,
+   "original": "MOM, I'M HERE.",
+   "translation": "MAMÃE, EU CHEGUEI.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 58,
+    "capHeight": 59,
+    "fontSize": 86,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  }
+ ],
+ "guessed": 0,
+ "orphans": 5,
+ "matched": 7,
+ "items": 7,
+ "regions": [
+  [
+   4,
+   1071,
+   176,
+   1131
+  ],
+  [
+   186,
+   1176,
+   804,
+   1338
+  ],
+  [
+   238,
+   2091,
+   316,
+   2120
+  ],
+  [
+   8,
+   6042,
+   287,
+   6110
+  ],
+  [
+   553,
+   6354,
+   917,
+   6450
+  ],
+  [
+   339,
+   11200,
+   641,
+   11340
+  ],
+  [
+   414,
+   13740,
+   496,
+   13785
+  ]
+ ]
+}

@@ -1,0 +1,555 @@
+{
+ "page": 5,
+ "blocks": [
+  {
+   "textBox": [
+    258,
+    2286,
+    738,
+    2415
+   ],
+   "areaBox": [
+    114,
+    2209,
+    882,
+    2492
+   ],
+   "inkBoxes": [
+    [
+     258,
+     2286,
+     738,
+     2415
+    ]
+   ],
+   "letterHeight": 33.75,
+   "original": "BUT I CAN'T THINK OF\nANYTHING TO REQUEST\nRIGHT NOW...",
+   "translation": "MAS NÃO CONSIGO PENSAR EM\nNADA PARA PEDIR\nAGORA MESMO...",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 34,
+    "capHeight": 35,
+    "fontSize": 49,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    406,
+    4139,
+    896,
+    4305
+   ],
+   "areaBox": [
+    259,
+    4039,
+    1000,
+    4405
+   ],
+   "inkBoxes": [
+    [
+     406,
+     4139,
+     896,
+     4305
+    ]
+   ],
+   "letterHeight": 34,
+   "original": "DON'T WORRY ABOUT\nTHAT. I'VE BEEN THINKING\nABOUT SOMETHING FOR\nA WHILE, KUK KUK.",
+   "translation": "NÃO SE PREOCUPE\nCOM ISSO. ESTIVE PENSANDO\nEM ALGO HÁ\nUM TEMPO, KUK KUK.",
+   "kind": "speech",
+   "font": "brush",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#ff0000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 33,
+    "capHeight": 34,
+    "fontSize": 49,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    359,
+    4870,
+    786,
+    4999
+   ],
+   "areaBox": [
+    231,
+    4793,
+    915,
+    5076
+   ],
+   "inkBoxes": [
+    [
+     359,
+     4870,
+     786,
+     4999
+    ]
+   ],
+   "letterHeight": 35,
+   "original": "JUST TRUST\nME AND TRY MAKING\nA REQUEST FIRST!",
+   "translation": "APENAS CONFIE\nEM MIM E TENTE FAZER\nUM PEDIDO PRIMEIRO!",
+   "kind": "speech",
+   "font": "brush",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#ff0000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 34,
+    "capHeight": 36,
+    "fontSize": 52,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    296,
+    5581,
+    766,
+    5635
+   ],
+   "areaBox": [
+    155,
+    5549,
+    907,
+    5667
+   ],
+   "inkBoxes": [
+    [
+     296,
+     5581,
+     766,
+     5635
+    ]
+   ],
+   "letterHeight": 52.5,
+   "original": "GALAXY ARENA.",
+   "translation": "ARENA GALÁXIA.",
+   "kind": "narration",
+   "font": "sans",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 52,
+    "capHeight": 54,
+    "fontSize": 69,
+    "family": "Kalam, \"Segoe Print\", cursive"
+   }
+  },
+  {
+   "textBox": [
+    319,
+    7140,
+    520,
+    7236
+   ],
+   "areaBox": [
+    259,
+    7083,
+    580,
+    7293
+   ],
+   "inkBoxes": [
+    [
+     319,
+     7140,
+     520,
+     7236
+    ]
+   ],
+   "letterHeight": 71.72557172557173,
+   "original": "I CAN ROUGHLY SEE YOUR SITUATION, SO I'LL JUST MAKE A REQUEST FROM THIS END.",
+   "translation": "Posso ver sua situação, então farei um pedido por aqui.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": false,
+    "letterHeight": 71.72557172557173
+   }
+  },
+  {
+   "textBox": [
+    174,
+    7211,
+    533,
+    7355
+   ],
+   "areaBox": [
+    66,
+    7124,
+    641,
+    7442
+   ],
+   "inkBoxes": [
+    [
+     174,
+     7211,
+     533,
+     7355
+    ]
+   ],
+   "letterHeight": 35.343035343035346,
+   "original": "수 음 음쁨",
+   "translation": "Eu posso mais ou menos ver sua situação, então farei um pedido.",
+   "kind": "speech",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 36,
+    "capHeight": 36,
+    "fontSize": 44,
+    "family": "Oswald, \"Arial Narrow\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    85,
+    7880,
+    905,
+    8038
+   ],
+   "areaBox": [
+    0,
+    7785,
+    1000,
+    8133
+   ],
+   "inkBoxes": [
+    [
+     85,
+     7880,
+     905,
+     8038
+    ]
+   ],
+   "letterHeight": 41.497975708502025,
+   "original": "I CAN ROUGHLY SEE YOUR\nSITUATION, SO I'LL JUST MAKE A\nREQUEST FROM THIS END.",
+   "translation": "Eu posso mais ou menos ver sua situação, então farei um pedido.",
+   "kind": "speech",
+   "font": "sans",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 42,
+    "capHeight": 43,
+    "fontSize": 63,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    201,
+    9198,
+    775,
+    9356
+   ],
+   "areaBox": [
+    29,
+    9103,
+    947,
+    9451
+   ],
+   "inkBoxes": [
+    [
+     201,
+     9198,
+     775,
+     9356
+    ]
+   ],
+   "letterHeight": 59.66850828729282,
+   "original": "STOPPING EXTENDED SEARCH TEMPORARILY.",
+   "translation": "Interrompendo a busca estendida temporariamente.",
+   "kind": "system",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 58,
+    "capHeight": 58,
+    "fontSize": 71,
+    "family": "Oswald, \"Arial Narrow\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    316,
+    10091,
+    621,
+    10235
+   ],
+   "areaBox": [
+    225,
+    10004,
+    712,
+    10322
+   ],
+   "inkBoxes": [
+    [
+     316,
+     10091,
+     621,
+     10235
+    ]
+   ],
+   "letterHeight": 60.77348066298343,
+   "original": "AS MY REWARD.",
+   "translation": "Como minha recompensa.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 60,
+    "capHeight": 61,
+    "fontSize": 77,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    244,
+    11870,
+    756,
+    11970
+   ],
+   "areaBox": [
+    90,
+    11810,
+    910,
+    12030
+   ],
+   "inkBoxes": [
+    [
+     244,
+     11870,
+     756,
+     11970
+    ]
+   ],
+   "letterHeight": 41.25,
+   "original": "A VANISHED ANCIENT CONSTELLATION,",
+   "translation": "Uma constelação antiga desaparecida,",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 41,
+    "capHeight": 43,
+    "fontSize": 58,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    191,
+    13835,
+    794,
+    13960
+   ],
+   "areaBox": [
+    9,
+    13760,
+    975,
+    14036
+   ],
+   "inkBoxes": [
+    [
+     191,
+     13835,
+     666,
+     13960
+    ],
+    [
+     671,
+     13907,
+     794,
+     13937
+    ]
+   ],
+   "letterHeight": 52.071005917159766,
+   "original": "I REQUEST PARACELSUS'S ****",
+   "translation": "Eu peço o/a **** de Paracelso",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 52,
+    "capHeight": 53,
+    "fontSize": 77,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  }
+ ],
+ "guessed": 0,
+ "orphans": 11,
+ "matched": 17,
+ "items": 22,
+ "regions": [
+  [
+   368,
+   1144,
+   555,
+   1183
+  ],
+  [
+   271,
+   1373,
+   676,
+   1493
+  ],
+  [
+   261,
+   2110,
+   339,
+   2144
+  ],
+  [
+   684,
+   2194,
+   725,
+   2209
+  ],
+  [
+   258,
+   2286,
+   738,
+   2415
+  ],
+  [
+   464,
+   3124,
+   553,
+   3144
+  ],
+  [
+   406,
+   4139,
+   896,
+   4305
+  ],
+  [
+   359,
+   4870,
+   786,
+   4999
+  ],
+  [
+   203,
+   4913,
+   324,
+   5023
+  ],
+  [
+   296,
+   5581,
+   766,
+   5635
+  ],
+  [
+   319,
+   7140,
+   520,
+   7236
+  ],
+  [
+   174,
+   7211,
+   533,
+   7355
+  ],
+  [
+   85,
+   7880,
+   905,
+   8038
+  ],
+  [
+   87,
+   9041,
+   229,
+   9133
+  ],
+  [
+   201,
+   9198,
+   775,
+   9356
+  ],
+  [
+   316,
+   10091,
+   621,
+   10235
+  ],
+  [
+   625,
+   10218,
+   681,
+   10232
+  ],
+  [
+   302,
+   10510,
+   715,
+   10601
+  ],
+  [
+   244,
+   11870,
+   756,
+   11970
+  ],
+  [
+   431,
+   12678,
+   600,
+   12721
+  ],
+  [
+   273,
+   12818,
+   376,
+   12842
+  ],
+  [
+   191,
+   13835,
+   666,
+   13960
+  ],
+  [
+   671,
+   13907,
+   794,
+   13937
+  ]
+ ]
+}

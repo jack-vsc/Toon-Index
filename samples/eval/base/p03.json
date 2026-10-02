@@ -1,0 +1,516 @@
+{
+ "page": 3,
+ "blocks": [
+  {
+   "textBox": [
+    340,
+    1480,
+    568,
+    1525
+   ],
+   "areaBox": [
+    272,
+    1453,
+    636,
+    1552
+   ],
+   "inkBoxes": [
+    [
+     340,
+     1480,
+     568,
+     1525
+    ]
+   ],
+   "original": "!",
+   "translation": "!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    296,
+    1634,
+    708,
+    1691
+   ],
+   "areaBox": [
+    173,
+    1599,
+    831,
+    1726
+   ],
+   "inkBoxes": [
+    [
+     296,
+     1634,
+     708,
+     1691
+    ]
+   ],
+   "original": "RIGHT HERE!!",
+   "translation": "BEM AQUI!!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    759,
+    2706,
+    814,
+    2730
+   ],
+   "areaBox": [
+    739,
+    2686,
+    834,
+    2750
+   ],
+   "inkBoxes": [
+    [
+     759,
+     2706,
+     814,
+     2730
+    ]
+   ],
+   "original": "ORESET-SCAN.CO",
+   "translation": "ORESET-SCAN.CO",
+   "kind": "narration",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    236,
+    3353,
+    871,
+    3444
+   ],
+   "areaBox": [
+    46,
+    3298,
+    1000,
+    3499
+   ],
+   "inkBoxes": [
+    [
+     236,
+     3353,
+     871,
+     3444
+    ]
+   ],
+   "original": "[SPECIAL RANDOM BOX]",
+   "translation": "[CAIXA SURPRESA ESPECIAL]",
+   "kind": "system",
+   "font": "condensed",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    241,
+    5664,
+    755,
+    5758
+   ],
+   "areaBox": [
+    87,
+    5660,
+    909,
+    5814
+   ],
+   "inkBoxes": [
+    [
+     241,
+     5664,
+     755,
+     5758
+    ]
+   ],
+   "original": "RECEIVED THAT TOO?",
+   "translation": "TAMBÉM RECEBEU?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    233,
+    7415,
+    819,
+    7590
+   ],
+   "areaBox": [
+    57,
+    7311,
+    995,
+    7694
+   ],
+   "inkBoxes": [
+    [
+     241,
+     7435,
+     814,
+     7580
+    ]
+   ],
+   "original": "AS EXPECTED, THIS REWARD IS ALSO A SPECIAL RANDOM BOX?",
+   "translation": "COMO ESPERADO, ESTA RECOMPENSA TAMBÉM É UMA CAIXA ALEATÓRIA ESPECIAL?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    629,
+    7720,
+    748,
+    7736
+   ],
+   "areaBox": [
+    593,
+    7700,
+    783,
+    7756
+   ],
+   "inkBoxes": [
+    [
+     629,
+     7720,
+     748,
+     7736
+    ]
+   ],
+   "original": "brings back memories.",
+   "translation": "traz de volta memórias.",
+   "kind": "aside",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    233,
+    9263,
+    900,
+    9593
+   ],
+   "areaBox": [
+    33,
+    9064,
+    1000,
+    9791
+   ],
+   "inkBoxes": [
+    [
+     234,
+     9263,
+     900,
+     9513
+    ]
+   ],
+   "original": "WOW~ RANDOM BOX? IF I WERE THE SAME BATCH AS YOU, I'D SQUEEZE IN AND TRY OPENING A RANDOM BOX TOO!",
+   "translation": "UAU~ CAIXA ALEATÓRIA? SE EU FOSSE DO MESMO LOTE QUE VOCÊ, EU ME ENFIARIA E TENTARIA ABRIR UMA CAIXA ALEATÓRIA TAMBÉM!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    233,
+    10522,
+    819,
+    10687
+   ],
+   "areaBox": [
+    57,
+    10422,
+    995,
+    10787
+   ],
+   "inkBoxes": [
+    [
+     242,
+     10522,
+     681,
+     10687
+    ]
+   ],
+   "original": "WHO TOLD YOU TO DEBUT FIRST, SENIOR?",
+   "translation": "QUEM DISSE PARA VOCÊ DEBUTAR PRIMEIRO, VETERANO?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    179,
+    11238,
+    726,
+    11314
+   ],
+   "areaBox": [
+    15,
+    11235,
+    890,
+    11360
+   ],
+   "inkBoxes": [
+    [
+     179,
+     11238,
+     726,
+     11314
+    ]
+   ],
+   "original": "IN THEIR PARTY? WITH THOSE SKILLS, NOT A CHANCE~!",
+   "translation": "NO GRUPO DELES? COM ESSAS HABILIDADES, NEM UMA CHANCE~!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    372,
+    11756,
+    879,
+    11973
+   ],
+   "areaBox": [
+    220,
+    11626,
+    1000,
+    12103
+   ],
+   "inkBoxes": [
+    [
+     372,
+     11756,
+     879,
+     11973
+    ]
+   ],
+   "original": "HEY! I'M STILL WORTH 1.5 PEOPLE IN A DEBUT MATCH!",
+   "translation": "EI! EU VALHO 1,5 PESSOAS EM UMA PARTIDA DE DEBUT!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    206,
+    12492,
+    786,
+    12662
+   ],
+   "areaBox": [
+    32,
+    12390,
+    960,
+    12765
+   ],
+   "inkBoxes": [
+    [
+     206,
+     12492,
+     786,
+     12662
+    ]
+   ],
+   "original": "SO WHAT? YOU DIDN'T GET 1ST PLACE~ YOU'RE THE ONLY ONE AMONG US WHO DIDN'T RECEIVE IT~",
+   "translation": "E DAÍ? VOCÊ NÃO FICOU EM 1º LUGAR~ VOCÊ É O ÚNICO ENTRE NÓS QUE NÃO RECEBEU~",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    497,
+    13562,
+    890,
+    13624
+   ],
+   "areaBox": [
+    379,
+    13525,
+    1000,
+    13661
+   ],
+   "inkBoxes": [
+    [
+     497,
+     13562,
+     890,
+     13624
+    ]
+   ],
+   "original": "THIS BASTARD...!",
+   "translation": "ESSE BASTARDO...!",
+   "kind": "shout",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    615,
+    13721,
+    705,
+    13742
+   ],
+   "areaBox": [
+    589,
+    13699,
+    731,
+    13764
+   ],
+   "inkBoxes": [
+    [
+     615,
+     13721,
+     705,
+     13742
+    ]
+   ],
+   "original": "?",
+   "translation": "?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  }
+ ],
+ "guessed": 0,
+ "orphans": 2,
+ "matched": 14,
+ "items": 16,
+ "regions": [
+  [
+   340,
+   1480,
+   568,
+   1525
+  ],
+  [
+   296,
+   1634,
+   708,
+   1691
+  ],
+  [
+   759,
+   2706,
+   814,
+   2730
+  ],
+  [
+   759,
+   2706,
+   814,
+   2730
+  ],
+  [
+   236,
+   3353,
+   871,
+   3444
+  ],
+  [
+   236,
+   3353,
+   871,
+   3444
+  ],
+  [
+   241,
+   5664,
+   755,
+   5758
+  ],
+  [
+   241,
+   7435,
+   814,
+   7580
+  ],
+  [
+   629,
+   7720,
+   748,
+   7736
+  ],
+  [
+   234,
+   9263,
+   900,
+   9513
+  ],
+  [
+   108,
+   9900,
+   146,
+   9913
+  ],
+  [
+   242,
+   10522,
+   681,
+   10687
+  ],
+  [
+   179,
+   11238,
+   726,
+   11314
+  ],
+  [
+   372,
+   11756,
+   879,
+   11973
+  ],
+  [
+   206,
+   12492,
+   786,
+   12662
+  ],
+  [
+   598,
+   13106,
+   761,
+   13131
+  ],
+  [
+   497,
+   13562,
+   890,
+   13624
+  ],
+  [
+   615,
+   13721,
+   705,
+   13742
+  ]
+ ]
+}

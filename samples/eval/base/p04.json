@@ -1,0 +1,773 @@
+{
+ "page": 4,
+ "blocks": [
+  {
+   "textBox": [
+    158,
+    153,
+    775,
+    428
+   ],
+   "areaBox": [
+    0,
+    0,
+    960,
+    593
+   ],
+   "inkBoxes": [
+    [
+     158,
+     332,
+     775,
+     428
+    ],
+    [
+     236,
+     164,
+     439,
+     215
+    ],
+    [
+     561,
+     153,
+     645,
+     187
+    ]
+   ],
+   "original": "MAYBE I SHOULDN'THAVE\nBROUGHT IT UP...",
+   "translation": "TALVEZ EU NÃO DEVESSE\nTER TOCADO NISSO...",
+   "kind": "thought",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    124,
+    1250,
+    638,
+    1350
+   ],
+   "areaBox": [
+    0,
+    1190,
+    792,
+    1350
+   ],
+   "original": "BROTHER, PLEASE\nOPEN IT QUICKLY.",
+   "translation": "IRMÃO, POR FAVOR,\nABRA LOGO.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    124,
+    2701,
+    938,
+    2890
+   ],
+   "areaBox": [
+    0,
+    2587,
+    1000,
+    2890
+   ],
+   "inkBoxes": [
+    [
+     300,
+     2737,
+     925,
+     2870
+    ]
+   ],
+   "original": "SPECIAL RANDOM BOXES\nUSUALLY GIVE ITEMS NEEDED\nBY THE OPENER.",
+   "translation": "CAIXAS ALEATÓRIAS ESPECIAIS\nGERALMENTE DÃO ITENS NECESSÁRIOS\nPARA QUEM ABRE.",
+   "kind": "narration",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    110,
+    3364,
+    844,
+    3568
+   ],
+   "areaBox": [
+    0,
+    3241,
+    1000,
+    3690
+   ],
+   "inkBoxes": [
+    [
+     110,
+     3400,
+     643,
+     3568
+    ]
+   ],
+   "original": "RIGHT, I'M STILL\nUSING THE SWORD I\nGOT BACK THEN.",
+   "translation": "CERTO, AINDA ESTOU\nUSANDO A ESPADA QUE\nPEGUEI NAQUELA ÉPOCA.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    404,
+    4965,
+    798,
+    5056
+   ],
+   "areaBox": [
+    286,
+    4910,
+    916,
+    5111
+   ],
+   "inkBoxes": [
+    [
+     404,
+     4965,
+     798,
+     5056
+    ]
+   ],
+   "original": "INDEED...",
+   "translation": "DE FATO...",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    801,
+    5015,
+    854,
+    5029
+   ],
+   "areaBox": [
+    781,
+    4995,
+    874,
+    5049
+   ],
+   "inkBoxes": [
+    [
+     801,
+     5015,
+     854,
+     5029
+    ]
+   ],
+   "original": "I'm\nexcited.",
+   "translation": "Estou\nempolgado.",
+   "kind": "aside",
+   "font": "comic",
+   "italic": true,
+   "color": "#ffffff"
+  },
+  {
+   "textBox": [
+    194,
+    6018,
+    495,
+    6109
+   ],
+   "areaBox": [
+    103,
+    5963,
+    585,
+    6164
+   ],
+   "inkBoxes": [
+    [
+     194,
+     6018,
+     234,
+     6026
+    ],
+    [
+     341,
+     6074,
+     495,
+     6109
+    ]
+   ],
+   "original": "WHAT KIND OF\nITEM WILL APPEAR\nFOR ME...",
+   "translation": "QUE TIPO DE\nITEM APARECERÁ\nPARA MIM...",
+   "kind": "thought",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    275,
+    7289,
+    718,
+    7486
+   ],
+   "areaBox": [
+    142,
+    7170,
+    851,
+    7605
+   ],
+   "inkBoxes": [
+    [
+     281,
+     7289,
+     705,
+     7486
+    ]
+   ],
+   "original": "[YOU HAVE OPENED\nTHE SPECIAL RANDOM\nBOX.]",
+   "translation": "[VOCÊ ABRIU\nA CAIXA ALEATÓRIA\nESPECIAL.]",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    256,
+    9537,
+    749,
+    9680
+   ],
+   "areaBox": [
+    107,
+    9451,
+    898,
+    9766
+   ],
+   "inkBoxes": [
+    [
+     256,
+     9537,
+     749,
+     9680
+    ]
+   ],
+   "original": "-SEARCHING FOR ITEM\nTO BE GRANTED...",
+   "translation": "-PROCURANDO ITEM\nA SER CONCEDIDO...",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    447,
+    9785,
+    554,
+    9835
+   ],
+   "areaBox": [
+    416,
+    9755,
+    586,
+    9865
+   ],
+   "inkBoxes": [
+    [
+     447,
+     9785,
+     554,
+     9835
+    ]
+   ],
+   "original": "...",
+   "translation": "...",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    163,
+    10631,
+    814,
+    10868
+   ],
+   "areaBox": [
+    0,
+    10490,
+    1000,
+    11009
+   ],
+   "inkBoxes": [
+    [
+     163,
+     10631,
+     814,
+     10868
+    ]
+   ],
+   "original": "CANNOT FIND APPROPRIATE\nITEM FOR CURRENT PLAYER\nKIM SI-MOON.",
+   "translation": "NÃO FOI ENCONTRADO ITEM\nAPROPRIADO PARA O JOGADOR\nATUAL KIM SI-MOON.",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    269,
+    11320,
+    724,
+    11585
+   ],
+   "areaBox": [
+    132,
+    11161,
+    860,
+    11744
+   ],
+   "inkBoxes": [
+    [
+     389,
+     11320,
+     421,
+     11338
+    ],
+    [
+     269,
+     11469,
+     724,
+     11585
+    ]
+   ],
+   "original": "WHAT? CAN'T\nFIND AN ITEM...?",
+   "translation": "O QUÊ? NÃO\nCONSEGUE ENCONTRAR UM ITEM...?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    25,
+    12388,
+    279,
+    12448
+   ],
+   "areaBox": [
+    0,
+    12352,
+    355,
+    12484
+   ],
+   "inkBoxes": [
+    [
+     25,
+     12388,
+     279,
+     12448
+    ]
+   ],
+   "original": "UTOON.NET",
+   "translation": "UTOON.NET",
+   "kind": "aside",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    105,
+    12760,
+    684,
+    12878
+   ],
+   "areaBox": [
+    0,
+    12690,
+    857,
+    12948
+   ],
+   "inkBoxes": [
+    [
+     105,
+     12760,
+     684,
+     12878
+    ]
+   ],
+   "original": "DON'T BE SURPRISED~\nOPPA! TRY MAKING A REQUEST\nLIKE LAST TIME!",
+   "translation": "NÃO SE SURPREENDA~\nOPPA! TENTE FAZER UM PEDIDO\nCOMO DA ÚLTIMA VEZ!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    85,
+    13423,
+    920,
+    13596
+   ],
+   "areaBox": [
+    0,
+    13318,
+    1000,
+    13701
+   ],
+   "inkBoxes": [
+    [
+     285,
+     13423,
+     920,
+     13596
+    ],
+    [
+     88,
+     13449,
+     211,
+     13486
+    ],
+    [
+     85,
+     13503,
+     223,
+     13530
+    ]
+   ],
+   "original": "WHEN YOU FIRST DID\nTHAT SPECIAL ARENA, THEY\nWERE SO CONFUSED THAT YOU\nMADE A REQUEST, REMEMBER?",
+   "translation": "QUANDO VOCÊ FEZ\nAQUELA ARENA ESPECIAL PELA PRIMEIRA VEZ, ELES\nFICARAM TÃO CONFUSOS QUE VOCÊ\nFEZ UM PEDIDO, LEMBRA?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    600,
+    13682,
+    799,
+    13721
+   ],
+   "areaBox": [
+    540,
+    13659,
+    859,
+    13744
+   ],
+   "original": "RESET-SCAN.CO",
+   "translation": "RESET-SCAN.CO",
+   "kind": "aside",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    866,
+    13683,
+    928,
+    13706
+   ],
+   "areaBox": [
+    846,
+    13663,
+    948,
+    13726
+   ],
+   "inkBoxes": [
+    [
+     866,
+     13683,
+     928,
+     13706
+    ]
+   ],
+   "original": "?",
+   "translation": "?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    573,
+    13859,
+    927,
+    13950
+   ],
+   "areaBox": [
+    467,
+    13804,
+    1000,
+    14004
+   ],
+   "inkBoxes": [
+    [
+     581,
+     13869,
+     922,
+     13943
+    ]
+   ],
+   "original": "I WANT MITHRIL AS\nMY REWARD.",
+   "translation": "QUERO MITRIL COMO\nRECOMPENSA.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  }
+ ],
+ "guessed": 2,
+ "orphans": 8,
+ "matched": 24,
+ "items": 26,
+ "regions": [
+  [
+   561,
+   153,
+   645,
+   187
+  ],
+  [
+   236,
+   164,
+   439,
+   215
+  ],
+  [
+   158,
+   332,
+   775,
+   428
+  ],
+  [
+   348,
+   534,
+   446,
+   560
+  ],
+  [
+   504,
+   534,
+   626,
+   561
+  ],
+  [
+   336,
+   2096,
+   528,
+   2173
+  ],
+  [
+   51,
+   2322,
+   171,
+   2355
+  ],
+  [
+   300,
+   2737,
+   925,
+   2870
+  ],
+  [
+   110,
+   3400,
+   643,
+   3568
+  ],
+  [
+   404,
+   4965,
+   798,
+   5056
+  ],
+  [
+   801,
+   5015,
+   854,
+   5029
+  ],
+  [
+   469,
+   5076,
+   893,
+   5196
+  ],
+  [
+   295,
+   5704,
+   464,
+   5753
+  ],
+  [
+   530,
+   5710,
+   589,
+   5736
+  ],
+  [
+   241,
+   5824,
+   763,
+   5998
+  ],
+  [
+   194,
+   6018,
+   234,
+   6026
+  ],
+  [
+   341,
+   6074,
+   495,
+   6109
+  ],
+  [
+   281,
+   7289,
+   705,
+   7486
+  ],
+  [
+   281,
+   7289,
+   705,
+   7486
+  ],
+  [
+   255,
+   9536,
+   750,
+   9595
+  ],
+  [
+   256,
+   9537,
+   749,
+   9680
+  ],
+  [
+   447,
+   9785,
+   554,
+   9835
+  ],
+  [
+   163,
+   10631,
+   814,
+   10868
+  ],
+  [
+   389,
+   11320,
+   421,
+   11338
+  ],
+  [
+   269,
+   11469,
+   724,
+   11585
+  ],
+  [
+   269,
+   11469,
+   724,
+   11585
+  ],
+  [
+   25,
+   12388,
+   279,
+   12448
+  ],
+  [
+   105,
+   12760,
+   684,
+   12878
+  ],
+  [
+   25,
+   12388,
+   279,
+   12448
+  ],
+  [
+   105,
+   12760,
+   684,
+   12878
+  ],
+  [
+   285,
+   13423,
+   920,
+   13596
+  ],
+  [
+   88,
+   13449,
+   211,
+   13486
+  ],
+  [
+   85,
+   13503,
+   223,
+   13530
+  ],
+  [
+   866,
+   13683,
+   928,
+   13706
+  ],
+  [
+   285,
+   13422,
+   920,
+   13592
+  ],
+  [
+   85,
+   13503,
+   222,
+   13530
+  ],
+  [
+   581,
+   13869,
+   922,
+   13943
+  ]
+ ]
+}

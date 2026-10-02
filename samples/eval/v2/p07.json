@@ -1,0 +1,226 @@
+{
+ "page": 7,
+ "blocks": [
+  {
+   "textBox": [
+    4,
+    1071,
+    804,
+    1338
+   ],
+   "areaBox": [
+    0,
+    912,
+    1000,
+    1497
+   ],
+   "inkBoxes": [
+    [
+     4,
+     1071,
+     176,
+     1131
+    ],
+    [
+     186,
+     1176,
+     804,
+     1338
+    ]
+   ],
+   "original": "KUHAHA! THESE GUYS HAD NO CHOICE BUT TO GIVE IT BECAUSE IT'S A WHITE ELEPHANT THEY CAN'T USE!",
+   "translation": "KUHAHA! ESSES CARAS NÃO TIVERAM ESCOLHA A NÃO SER ENTREGAR PORQUE É UM PRESENTE DE GREGO QUE ELES NÃO PODEM USAR!",
+   "kind": "shout",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#ff0000"
+  },
+  {
+   "textBox": [
+    238,
+    2091,
+    316,
+    2120
+   ],
+   "areaBox": [
+    214,
+    2071,
+    340,
+    2140
+   ],
+   "inkBoxes": [
+    [
+     238,
+     2091,
+     316,
+     2120
+    ]
+   ],
+   "original": "오오ㅇㅇㅇ",
+   "translation": "Oh oh oh oh",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    339,
+    11200,
+    641,
+    11340
+   ],
+   "areaBox": [
+    248,
+    11116,
+    732,
+    11424
+   ],
+   "inkBoxes": [
+    [
+     339,
+     11200,
+     641,
+     11340
+    ]
+   ],
+   "original": "MOM,\nI'M HERE.",
+   "translation": "MÃE,\nCHEGUEI.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    414,
+    13740,
+    496,
+    13785
+   ],
+   "areaBox": [
+    389,
+    13713,
+    521,
+    13812
+   ],
+   "inkBoxes": [
+    [
+     414,
+     13740,
+     496,
+     13785
+    ]
+   ],
+   "original": "00",
+   "translation": "00",
+   "kind": "system",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff"
+  }
+ ],
+ "guessed": 0,
+ "orphans": 8,
+ "matched": 12,
+ "items": 12,
+ "regions": [
+  [
+   4,
+   1071,
+   176,
+   1131
+  ],
+  [
+   186,
+   1176,
+   804,
+   1338
+  ],
+  [
+   4,
+   1071,
+   176,
+   1131
+  ],
+  [
+   186,
+   1176,
+   804,
+   1338
+  ],
+  [
+   238,
+   2091,
+   316,
+   2120
+  ],
+  [
+   238,
+   2091,
+   316,
+   2120
+  ],
+  [
+   907,
+   6019,
+   940,
+   6033
+  ],
+  [
+   8,
+   6042,
+   287,
+   6110
+  ],
+  [
+   756,
+   6068,
+   982,
+   6100
+  ],
+  [
+   589,
+   6323,
+   607,
+   6332
+  ],
+  [
+   553,
+   6354,
+   917,
+   6450
+  ],
+  [
+   124,
+   6553,
+   202,
+   6581
+  ],
+  [
+   339,
+   11200,
+   641,
+   11340
+  ],
+  [
+   391,
+   12523,
+   539,
+   12540
+  ],
+  [
+   531,
+   12639,
+   618,
+   12656
+  ],
+  [
+   414,
+   13740,
+   496,
+   13785
+  ]
+ ]
+}

@@ -1,0 +1,612 @@
+{
+ "page": 6,
+ "blocks": [
+  {
+   "textBox": [
+    241,
+    1013,
+    679,
+    1066
+   ],
+   "areaBox": [
+    110,
+    980,
+    810,
+    1099
+   ],
+   "inkBoxes": [
+    [
+     241,
+     1013,
+     679,
+     1066
+    ]
+   ],
+   "original": "C-CONSTELLATION...?!",
+   "translation": "CONSTELAÇÃO...?!",
+   "kind": "shout",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    488,
+    1930,
+    966,
+    2046
+   ],
+   "areaBox": [
+    344,
+    1860,
+    1000,
+    2116
+   ],
+   "inkBoxes": [
+    [
+     488,
+     1930,
+     966,
+     2046
+    ]
+   ],
+   "original": "HOW DOES BROTHER KNOW ABOUT A VANISHED CONSTELLATION...?",
+   "translation": "COMO O IRMÃO SABE SOBRE UMA CONSTELAÇÃO DESAPARECIDA...?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    14,
+    2389,
+    471,
+    2474
+   ],
+   "areaBox": [
+    0,
+    2338,
+    609,
+    2480
+   ],
+   "inkBoxes": [
+    [
+     14,
+     2389,
+     471,
+     2474
+    ]
+   ],
+   "original": "HYUNG IS MAKING A REQUEST TO GALAXY ARENA?",
+   "translation": "O HYUNG ESTÁ FAZENDO UM PEDIDO PARA A ARENA GALÁCTICA?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    229,
+    3406,
+    768,
+    3634
+   ],
+   "areaBox": [
+    67,
+    3270,
+    929,
+    3770
+   ],
+   "inkBoxes": [
+    [
+     318,
+     3406,
+     588,
+     3449
+    ],
+    [
+     229,
+     3544,
+     768,
+     3634
+    ]
+   ],
+   "original": "I KNEW BEING VVIP WAS IMPRESSIVE, BUT...",
+   "translation": "EU SABIA QUE SER VVIP ERA IMPRESSIONANTE, MAS...",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    210,
+    3941,
+    511,
+    4074
+   ],
+   "areaBox": [
+    120,
+    3862,
+    602,
+    4153
+   ],
+   "inkBoxes": [
+    [
+     210,
+     3941,
+     511,
+     4074
+    ]
+   ],
+   "original": "C-CONSTELLATION...?!",
+   "translation": "CONSTELAÇÃO...?!",
+   "kind": "shout",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    216,
+    4694,
+    799,
+    4830
+   ],
+   "areaBox": [
+    42,
+    4612,
+    974,
+    4912
+   ],
+   "inkBoxes": [
+    [
+     216,
+     4694,
+     799,
+     4830
+    ]
+   ],
+   "original": "IS IT OKAY TO REQUEST SOMETHING LIKE THAT SO CASUALLY?!",
+   "translation": "É ACEITÁVEL PEDIR ALGO ASSIM TÃO CASUALMENTE?!",
+   "kind": "shout",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    739,
+    4921,
+    849,
+    4948
+   ],
+   "areaBox": [
+    706,
+    4901,
+    882,
+    4968
+   ],
+   "inkBoxes": [
+    [
+     739,
+     4921,
+     849,
+     4948
+    ]
+   ],
+   "original": "Censored.",
+   "translation": "Censurado.",
+   "kind": "narration",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff"
+  },
+  {
+   "textBox": [
+    299,
+    5918,
+    624,
+    6088
+   ],
+   "areaBox": [
+    201,
+    5817,
+    721,
+    6189
+   ],
+   "inkBoxes": [
+    [
+     299,
+     5918,
+     624,
+     6088
+    ]
+   ],
+   "original": "UNDER DISCUSSION...",
+   "translation": "EM DISCUSSÃO...",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000"
+  },
+  {
+   "textBox": [
+    143,
+    7316,
+    770,
+    7549
+   ],
+   "areaBox": [
+    0,
+    7177,
+    958,
+    7688
+   ],
+   "inkBoxes": [
+    [
+     143,
+     7316,
+     770,
+     7549
+    ]
+   ],
+   "original": "DISCUSSION CONCLUDED.\nPLAYER KIM SI-MOON'S\nREQUEST IS ACCEPTED.",
+   "translation": "DISCUSSÃO CONCLUÍDA.\nO PEDIDO DO JOGADOR KIM SI-MOON\nFOI ACEITO.",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#00d4ff"
+  },
+  {
+   "textBox": [
+    228,
+    9220,
+    765,
+    9460
+   ],
+   "areaBox": [
+    66,
+    9076,
+    926,
+    9604
+   ],
+   "inkBoxes": [
+    [
+     228,
+     9220,
+     765,
+     9460
+    ]
+   ],
+   "original": "AS REQUESTED, THE SPECIAL\nRANDOM BOX REWARD WILL BE\nGRANTED AS 'PARACELSUS'S\nFLASK'.",
+   "translation": "CONFORME SOLICITADO, A RECOMPENSA\nDA CAIXA SURPRESA ESPECIAL SERÁ\nCONCEDIDA COMO 'O FRASCO DE\nPARACELSUS'.",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#00d4ff"
+  },
+  {
+   "textBox": [
+    234,
+    11498,
+    794,
+    11625
+   ],
+   "areaBox": [
+    66,
+    11421,
+    962,
+    11702
+   ],
+   "inkBoxes": [
+    [
+     234,
+     11498,
+     794,
+     11625
+    ]
+   ],
+   "original": "OOOOOH!!!!",
+   "translation": "OOOOOH!!!!",
+   "kind": "shout",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    218,
+    12234,
+    784,
+    12373
+   ],
+   "areaBox": [
+    48,
+    12151,
+    954,
+    12456
+   ],
+   "inkBoxes": [
+    [
+     218,
+     12234,
+     784,
+     12373
+    ]
+   ],
+   "original": "REALLY... YOU RECEIVED A\nCONSTELLATION'S ITEM?!",
+   "translation": "SÉRIO... VOCÊ RECEBEU UM\nITEM DE CONSTELAÇÃO?!",
+   "kind": "speech",
+   "font": "handwritten",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    53,
+    13663,
+    807,
+    13932
+   ],
+   "areaBox": [
+    0,
+    13502,
+    1000,
+    14093
+   ],
+   "inkBoxes": [
+    [
+     53,
+     13663,
+     807,
+     13932
+    ]
+   ],
+   "original": "BROTHER... WHAT ON EARTH\nHAPPENED IN THE ARENA FOR YOU TO\nGET A CONSTELLATION'S ITEM...!",
+   "translation": "IRMÃO... O QUE DIABOS\nACONTECEU NA ARENA PARA VOCÊ\nCONSEGUIR UM ITEM DE CONSTELAÇÃO...!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  }
+ ],
+ "guessed": 0,
+ "orphans": 18,
+ "matched": 30,
+ "items": 31,
+ "regions": [
+  [
+   241,
+   1013,
+   679,
+   1066
+  ],
+  [
+   680,
+   1035,
+   709,
+   1044
+  ],
+  [
+   241,
+   1013,
+   679,
+   1066
+  ],
+  [
+   680,
+   1035,
+   709,
+   1044
+  ],
+  [
+   561,
+   1824,
+   674,
+   1853
+  ],
+  [
+   488,
+   1930,
+   966,
+   2046
+  ],
+  [
+   709,
+   2193,
+   765,
+   2223
+  ],
+  [
+   19,
+   2264,
+   135,
+   2301
+  ],
+  [
+   14,
+   2389,
+   471,
+   2474
+  ],
+  [
+   561,
+   1824,
+   674,
+   1853
+  ],
+  [
+   488,
+   1930,
+   966,
+   2046
+  ],
+  [
+   709,
+   2193,
+   765,
+   2223
+  ],
+  [
+   19,
+   2264,
+   135,
+   2301
+  ],
+  [
+   14,
+   2389,
+   471,
+   2523
+  ],
+  [
+   414,
+   2580,
+   446,
+   2593
+  ],
+  [
+   96,
+   2605,
+   205,
+   2638
+  ],
+  [
+   386,
+   3375,
+   423,
+   3393
+  ],
+  [
+   318,
+   3406,
+   588,
+   3449
+  ],
+  [
+   229,
+   3544,
+   768,
+   3634
+  ],
+  [
+   368,
+   3723,
+   449,
+   3748
+  ],
+  [
+   210,
+   3941,
+   511,
+   4074
+  ],
+  [
+   229,
+   3544,
+   768,
+   3634
+  ],
+  [
+   368,
+   3723,
+   449,
+   3748
+  ],
+  [
+   210,
+   3941,
+   511,
+   4074
+  ],
+  [
+   811,
+   4583,
+   878,
+   4609
+  ],
+  [
+   216,
+   4694,
+   799,
+   4830
+  ],
+  [
+   510,
+   4908,
+   639,
+   4936
+  ],
+  [
+   739,
+   4921,
+   849,
+   4948
+  ],
+  [
+   244,
+   4940,
+   286,
+   4955
+  ],
+  [
+   299,
+   5918,
+   624,
+   6088
+  ],
+  [
+   630,
+   6075,
+   680,
+   6086
+  ],
+  [
+   143,
+   7316,
+   770,
+   7549
+  ],
+  [
+   228,
+   9220,
+   765,
+   9460
+  ],
+  [
+   419,
+   10043,
+   591,
+   10090
+  ],
+  [
+   234,
+   11498,
+   794,
+   11625
+  ],
+  [
+   218,
+   12234,
+   784,
+   12373
+  ],
+  [
+   53,
+   13663,
+   807,
+   13932
+  ]
+ ]
+}

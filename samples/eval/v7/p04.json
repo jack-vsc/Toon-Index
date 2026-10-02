@@ -1,0 +1,696 @@
+{
+ "page": 4,
+ "blocks": [
+  {
+   "textBox": [
+    158,
+    332,
+    775,
+    428
+   ],
+   "areaBox": [
+    0,
+    275,
+    960,
+    486
+   ],
+   "inkBoxes": [
+    [
+     158,
+     332,
+     775,
+     428
+    ]
+   ],
+   "letterHeight": 36.91983122362869,
+   "original": "MAYBE I SHOULDN'THAVE BROUGHT IT UP...",
+   "translation": "TALVEZ EU NÃO DEVESSE TER MENCIONADO ISSO...",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 37,
+    "capHeight": 38,
+    "fontSize": 55,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    300,
+    2737,
+    925,
+    2870
+   ],
+   "areaBox": [
+    112,
+    2658,
+    1000,
+    2890
+   ],
+   "inkBoxes": [
+    [
+     300,
+     2737,
+     925,
+     2870
+    ]
+   ],
+   "letterHeight": 34.89771359807461,
+   "original": "SPECIAL RANDOM BOXES USUALLY GIVE ITEMS NEEDED BY THE OPENER.",
+   "translation": "CAIXAS ALEATÓRIAS ESPECIAIS COSTUMAM DAR ITENS NECESSÁRIOS PARA QUEM ABRE.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 35,
+    "capHeight": 36,
+    "fontSize": 52,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    110,
+    3400,
+    643,
+    3568
+   ],
+   "areaBox": [
+    0,
+    3300,
+    802,
+    3668
+   ],
+   "inkBoxes": [
+    [
+     110,
+     3400,
+     643,
+     3568
+    ]
+   ],
+   "letterHeight": 43.75,
+   "original": "RIGHT, I'M STILL USING THE SWORD I GOT BACK THEN.",
+   "translation": "CERTO, EU AINDA ESTOU USANDO A ESPADA QUE PEGUEI NAQUELA ÉPOCA.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 44,
+    "capHeight": 45,
+    "fontSize": 64,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    404,
+    4965,
+    798,
+    5056
+   ],
+   "areaBox": [
+    286,
+    4910,
+    916,
+    5111
+   ],
+   "inkBoxes": [
+    [
+     404,
+     4965,
+     798,
+     5056
+    ]
+   ],
+   "letterHeight": 57.5,
+   "original": "INDEED...",
+   "translation": "DE FATO...",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 57,
+    "capHeight": 57,
+    "fontSize": 83,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    801,
+    5015,
+    854,
+    5029
+   ],
+   "areaBox": [
+    781,
+    4995,
+    874,
+    5049
+   ],
+   "inkBoxes": [
+    [
+     801,
+     5015,
+     854,
+     5029
+    ]
+   ],
+   "letterHeight": 13.75,
+   "original": "...",
+   "translation": "...",
+   "kind": "aside",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": false,
+    "letterHeight": 14
+   }
+  },
+  {
+   "textBox": [
+    469,
+    5076,
+    893,
+    5196
+   ],
+   "areaBox": [
+    342,
+    5004,
+    1000,
+    5268
+   ],
+   "inkBoxes": [
+    [
+     469,
+     5076,
+     893,
+     5196
+    ]
+   ],
+   "letterHeight": 18.75,
+   "original": "I'm excited.",
+   "translation": "Estou animado.",
+   "kind": "aside",
+   "font": "comic",
+   "italic": true,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 22,
+    "capHeight": 27,
+    "fontSize": 39,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    241,
+    5824,
+    763,
+    5998
+   ],
+   "areaBox": [
+    85,
+    5720,
+    919,
+    6102
+   ],
+   "inkBoxes": [
+    [
+     241,
+     5824,
+     763,
+     5998
+    ]
+   ],
+   "letterHeight": 45,
+   "original": "WHAT KIND OF ITEM WILL APPEAR FOR ME...",
+   "translation": "QUE TIPO DE ITEM APARECERÁ PARA MIM...",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 46,
+    "capHeight": 47,
+    "fontSize": 69,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    281,
+    7289,
+    705,
+    7486
+   ],
+   "areaBox": [
+    154,
+    7170,
+    832,
+    7605
+   ],
+   "inkBoxes": [
+    [
+     281,
+     7289,
+     705,
+     7486
+    ]
+   ],
+   "letterHeight": 45,
+   "original": "[YOU HAVE OPENED THE SPECIAL RANDOM BOX.]",
+   "translation": "[VOCÊ ABRIU A CAIXA ALEATÓRIA ESPECIAL.]",
+   "kind": "system",
+   "font": "condensed",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 45,
+    "capHeight": 45,
+    "fontSize": 55,
+    "family": "Oswald, \"Arial Narrow\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    256,
+    9537,
+    749,
+    9680
+   ],
+   "areaBox": [
+    107,
+    9451,
+    898,
+    9766
+   ],
+   "inkBoxes": [
+    [
+     256,
+     9537,
+     749,
+     9680
+    ]
+   ],
+   "letterHeight": 55.012224938875306,
+   "original": "-SEARCHING FOR ITEM\nTO BE GRANTED...",
+   "translation": "-PROCURANDO ITEM\nPARA SER CONCEDIDO...",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 54,
+    "capHeight": 54,
+    "fontSize": 66,
+    "family": "Oswald, \"Arial Narrow\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    163,
+    10631,
+    814,
+    10868
+   ],
+   "areaBox": [
+    0,
+    10490,
+    1000,
+    11009
+   ],
+   "inkBoxes": [
+    [
+     163,
+     10631,
+     814,
+     10868
+    ]
+   ],
+   "letterHeight": 55,
+   "original": "CANNOT FIND APPROPRIATE\nITEM FOR CURRENT PLAYER\nKIM SI-MOON.",
+   "translation": "NÃO FOI POSSÍVEL ENCONTRAR\nITEM ADEQUADO PARA O JOGADOR\nATUAL KIM SI-MOON.",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#000000",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 55,
+    "capHeight": 55,
+    "fontSize": 67,
+    "family": "Oswald, \"Arial Narrow\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    269,
+    11469,
+    693,
+    11584
+   ],
+   "areaBox": [
+    142,
+    11400,
+    820,
+    11653
+   ],
+   "inkBoxes": [
+    [
+     269,
+     11469,
+     693,
+     11584
+    ]
+   ],
+   "letterHeight": 47.5,
+   "original": "WHAT? CAN'T\nFIND AN ITEM...?",
+   "translation": "O QUÊ? NÃO\nCONSEGUE ENCONTRAR UM ITEM...?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "outline": "#ffffff",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 47,
+    "capHeight": 49,
+    "fontSize": 67,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    25,
+    12388,
+    279,
+    12448
+   ],
+   "areaBox": [
+    0,
+    12352,
+    355,
+    12484
+   ],
+   "inkBoxes": [
+    [
+     25,
+     12388,
+     279,
+     12448
+    ]
+   ],
+   "letterHeight": 45,
+   "original": "UTOON.NET",
+   "translation": "UTOON.NET",
+   "kind": "aside",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "overlay": {
+    "drawn": false,
+    "letterHeight": 45
+   }
+  },
+  {
+   "textBox": [
+    105,
+    12760,
+    684,
+    12878
+   ],
+   "areaBox": [
+    0,
+    12690,
+    857,
+    12935
+   ],
+   "inkBoxes": [
+    [
+     105,
+     12760,
+     684,
+     12878
+    ]
+   ],
+   "letterHeight": 32.5,
+   "original": "DON'T BE SURPRISED~\nOPPA! TRY MAKING A REQUEST\nLIKE LAST TIME!",
+   "translation": "NÃO SE SURPREENDA~\nOPPA! TENTE FAZER UM PEDIDO\nCOMO DA ÚLTIMA VEZ!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#ffffff",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 30,
+    "capHeight": 31,
+    "fontSize": 45,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    285,
+    13423,
+    920,
+    13596
+   ],
+   "areaBox": [
+    95,
+    13318,
+    1000,
+    13701
+   ],
+   "inkBoxes": [
+    [
+     285,
+     13423,
+     920,
+     13596
+    ]
+   ],
+   "letterHeight": 33.75,
+   "original": "WHEN YOU FIRST DID\nTHAT SPECIAL ARENA, THEY\\WERE SO CONFUSED THAT YOU\nMADE A REQUEST, REMEMBER?",
+   "translation": "QUANDO VOCÊ FEZ AQUELA\nARENA ESPECIAL PELA PRIMEIRA\nVEZ, ELES FICARAM TÃO CONFUSOS\nQUE VOCÊ FEZ UM PEDIDO, LEMBRA?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#ffffff",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 35,
+    "capHeight": 36,
+    "fontSize": 52,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  },
+  {
+   "textBox": [
+    581,
+    13869,
+    922,
+    13943
+   ],
+   "areaBox": [
+    479,
+    13825,
+    1000,
+    13987
+   ],
+   "inkBoxes": [
+    [
+     581,
+     13869,
+     922,
+     13943
+    ]
+   ],
+   "letterHeight": 30,
+   "original": "I WANT MITHRIL AS\nMY REWARD.",
+   "translation": "QUERO MITHRIL COMO\nRECOMPENSA.",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000",
+   "outline": "#ffffff",
+   "overlay": {
+    "drawn": true,
+    "letterHeight": 30,
+    "capHeight": 32,
+    "fontSize": 47,
+    "family": "\"Comic Neue\", \"Comic Sans MS\", sans-serif"
+   }
+  }
+ ],
+ "guessed": 0,
+ "orphans": 9,
+ "matched": 22,
+ "items": 24,
+ "regions": [
+  [
+   236,
+   164,
+   439,
+   215
+  ],
+  [
+   158,
+   332,
+   775,
+   428
+  ],
+  [
+   348,
+   534,
+   446,
+   560
+  ],
+  [
+   336,
+   2096,
+   528,
+   2173
+  ],
+  [
+   51,
+   2322,
+   171,
+   2355
+  ],
+  [
+   300,
+   2737,
+   925,
+   2870
+  ],
+  [
+   110,
+   3400,
+   643,
+   3568
+  ],
+  [
+   404,
+   4965,
+   798,
+   5056
+  ],
+  [
+   801,
+   5015,
+   854,
+   5029
+  ],
+  [
+   469,
+   5076,
+   893,
+   5196
+  ],
+  [
+   295,
+   5704,
+   464,
+   5753
+  ],
+  [
+   241,
+   5824,
+   763,
+   5998
+  ],
+  [
+   194,
+   6018,
+   234,
+   6026
+  ],
+  [
+   341,
+   6074,
+   495,
+   6109
+  ],
+  [
+   281,
+   7289,
+   705,
+   7486
+  ],
+  [
+   256,
+   9537,
+   749,
+   9680
+  ],
+  [
+   163,
+   10631,
+   814,
+   10868
+  ],
+  [
+   389,
+   11320,
+   421,
+   11338
+  ],
+  [
+   269,
+   11469,
+   693,
+   11584
+  ],
+  [
+   25,
+   12388,
+   279,
+   12448
+  ],
+  [
+   105,
+   12760,
+   684,
+   12878
+  ],
+  [
+   285,
+   13423,
+   920,
+   13596
+  ],
+  [
+   85,
+   13449,
+   223,
+   13530
+  ],
+  [
+   581,
+   13869,
+   922,
+   13943
+  ]
+ ]
+}

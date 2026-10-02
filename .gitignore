@@ -3,4 +3,3 @@ out/
 dist/
 src/renderer/public/pdfjs/
 *.log
-samples/

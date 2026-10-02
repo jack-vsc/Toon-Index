@@ -1,0 +1,612 @@
+{
+ "page": 6,
+ "blocks": [
+  {
+   "textBox": [
+    241,
+    1013,
+    679,
+    1066
+   ],
+   "areaBox": [
+    110,
+    980,
+    810,
+    1099
+   ],
+   "inkBoxes": [
+    [
+     241,
+     1013,
+     679,
+     1066
+    ]
+   ],
+   "letterHeight": 31.25,
+   "original": "C-CONSTELLATION...?!",
+   "translation": "CONSTELAÇÃO...?!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    488,
+    1930,
+    966,
+    2046
+   ],
+   "areaBox": [
+    344,
+    1860,
+    1000,
+    2116
+   ],
+   "inkBoxes": [
+    [
+     488,
+     1930,
+     966,
+     2046
+    ]
+   ],
+   "letterHeight": 32.5,
+   "original": "HOW DOES BROTHER KNOW ABOUT A VANISHED CONSTELLATION...?",
+   "translation": "COMO O IRMÃO SABE SOBRE UMA CONSTELAÇÃO DESAPARECIDA...?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    14,
+    2389,
+    471,
+    2523
+   ],
+   "areaBox": [
+    0,
+    2309,
+    609,
+    2603
+   ],
+   "inkBoxes": [
+    [
+     14,
+     2389,
+     471,
+     2523
+    ]
+   ],
+   "letterHeight": 36.25,
+   "original": "HYUNG IS MAKING A REQUEST TO GALAXY ARENA?",
+   "translation": "HYUNG ESTÁ FAZENDO UM PEDIDO PARA A ARENA GALÁXIA?",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    229,
+    3544,
+    768,
+    3634
+   ],
+   "areaBox": [
+    67,
+    3490,
+    929,
+    3688
+   ],
+   "inkBoxes": [
+    [
+     229,
+     3544,
+     768,
+     3634
+    ]
+   ],
+   "letterHeight": 37.5,
+   "original": "I KNEW BEING VVip WAS IMPRESSIVE, BUT...",
+   "translation": "EU SABIA QUE SER VVip ERA IMPRESSIONANTE, MAS...",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    210,
+    3941,
+    511,
+    4074
+   ],
+   "areaBox": [
+    120,
+    3862,
+    602,
+    4153
+   ],
+   "inkBoxes": [
+    [
+     210,
+     3941,
+     511,
+     4074
+    ]
+   ],
+   "letterHeight": 93.75,
+   "original": "IS IT OKAY TO REQUEST SOMETHING LIKE THAT SO CASUALLY?!",
+   "translation": "ESTÁ TUDO BEM PEDIR ALGO ASSIM TÃO CASUALMENTE?!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    216,
+    4694,
+    799,
+    4830
+   ],
+   "areaBox": [
+    42,
+    4612,
+    974,
+    4912
+   ],
+   "inkBoxes": [
+    [
+     216,
+     4694,
+     799,
+     4830
+    ]
+   ],
+   "letterHeight": 37.5,
+   "original": "IS IT OKAY TO REQUEST SOMETHING LIKE THAT SO CASUALLY?!",
+   "translation": "ESTÁ TUDO BEM PEDIR ALGO ASSIM TÃO CASUALMENTE?!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    739,
+    4921,
+    849,
+    4948
+   ],
+   "areaBox": [
+    706,
+    4901,
+    882,
+    4968
+   ],
+   "inkBoxes": [
+    [
+     739,
+     4921,
+     849,
+     4948
+    ]
+   ],
+   "letterHeight": 26.25,
+   "original": "Censored.",
+   "translation": "Censurado.",
+   "kind": "aside",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    299,
+    5918,
+    624,
+    6088
+   ],
+   "areaBox": [
+    201,
+    5817,
+    721,
+    6189
+   ],
+   "inkBoxes": [
+    [
+     299,
+     5918,
+     624,
+     6088
+    ]
+   ],
+   "letterHeight": 64.75716064757161,
+   "original": "UNDER DISCUSSION...",
+   "translation": "EM DISCUSSÃO...",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff"
+  },
+  {
+   "textBox": [
+    143,
+    7316,
+    770,
+    7549
+   ],
+   "areaBox": [
+    0,
+    7177,
+    958,
+    7688
+   ],
+   "inkBoxes": [
+    [
+     143,
+     7316,
+     770,
+     7549
+    ]
+   ],
+   "letterHeight": 53.75,
+   "original": "DISCUSSION CONCLUDED.\nPLAYER KIM SI-MOON'S\nREQUEST IS ACCEPTED.",
+   "translation": "DISCUSSÃO CONCLUÍDA.\nO PEDIDO DO JOGADOR KIM SI-MOON\nFOI ACEITO.",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#00d4ff"
+  },
+  {
+   "textBox": [
+    228,
+    9220,
+    765,
+    9460
+   ],
+   "areaBox": [
+    66,
+    9076,
+    926,
+    9604
+   ],
+   "inkBoxes": [
+    [
+     228,
+     9220,
+     765,
+     9460
+    ]
+   ],
+   "letterHeight": 41.25,
+   "original": "AS REQUESTED, THE SPECIAL\nRANDOM BOX REWARD WILL BE\nGRANTED AS 'PARACELSUS'S\nFLASK'.",
+   "translation": "CONFORME SOLICITADO, A RECOMPENSA\nDA CAIXA ALEATÓRIA ESPECIAL SERÁ\nCONCEDIDA COMO 'O FRASCO DE\nPARACELSUS'.",
+   "kind": "system",
+   "font": "sans",
+   "italic": false,
+   "color": "#ffffff",
+   "outline": "#00d4ff"
+  },
+  {
+   "textBox": [
+    234,
+    11498,
+    794,
+    11625
+   ],
+   "areaBox": [
+    66,
+    11421,
+    962,
+    11702
+   ],
+   "inkBoxes": [
+    [
+     234,
+     11498,
+     794,
+     11625
+    ]
+   ],
+   "letterHeight": 93.75,
+   "original": "OOOOOH!!!!",
+   "translation": "OOOOOOOH!!!!",
+   "kind": "shout",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    218,
+    12234,
+    784,
+    12373
+   ],
+   "areaBox": [
+    48,
+    12151,
+    954,
+    12456
+   ],
+   "inkBoxes": [
+    [
+     218,
+     12234,
+     784,
+     12373
+    ]
+   ],
+   "letterHeight": 53.75,
+   "original": "REALLY... YOU RECEIVED A\nCONSTELLATION'S ITEM?!",
+   "translation": "SÉRIO... VOCÊ RECEBEU UM\nITEM DE CONSTELAÇÃO?!",
+   "kind": "speech",
+   "font": "handwritten",
+   "italic": true,
+   "color": "#000000"
+  },
+  {
+   "textBox": [
+    53,
+    13663,
+    807,
+    13932
+   ],
+   "areaBox": [
+    0,
+    13502,
+    1000,
+    14093
+   ],
+   "inkBoxes": [
+    [
+     53,
+     13663,
+     807,
+     13932
+    ]
+   ],
+   "letterHeight": 54.229934924078094,
+   "original": "BROTHER... WHAT ON EARTH HAPPENED IN THE ARENA FOR YOU TO GET A CONSTELLATION'S ITEM...!",
+   "translation": "IRMÃO... O QUE DIABOS ACONTECEU NA ARENA PARA VOCÊ TER CONSEGUIDO UM ITEM DE CONSTELAÇÃO...!",
+   "kind": "speech",
+   "font": "comic",
+   "italic": false,
+   "color": "#000000"
+  }
+ ],
+ "guessed": 0,
+ "orphans": 19,
+ "matched": 31,
+ "items": 32,
+ "regions": [
+  [
+   241,
+   1013,
+   679,
+   1066
+  ],
+  [
+   680,
+   1035,
+   709,
+   1044
+  ],
+  [
+   241,
+   1013,
+   679,
+   1066
+  ],
+  [
+   680,
+   1035,
+   709,
+   1044
+  ],
+  [
+   561,
+   1824,
+   674,
+   1853
+  ],
+  [
+   488,
+   1930,
+   966,
+   2046
+  ],
+  [
+   709,
+   2193,
+   765,
+   2223
+  ],
+  [
+   19,
+   2264,
+   135,
+   2301
+  ],
+  [
+   14,
+   2389,
+   471,
+   2474
+  ],
+  [
+   561,
+   1824,
+   674,
+   1853
+  ],
+  [
+   488,
+   1930,
+   966,
+   2046
+  ],
+  [
+   709,
+   2193,
+   765,
+   2223
+  ],
+  [
+   19,
+   2264,
+   135,
+   2301
+  ],
+  [
+   14,
+   2389,
+   471,
+   2523
+  ],
+  [
+   414,
+   2580,
+   446,
+   2593
+  ],
+  [
+   96,
+   2605,
+   205,
+   2638
+  ],
+  [
+   386,
+   3375,
+   423,
+   3393
+  ],
+  [
+   318,
+   3406,
+   588,
+   3449
+  ],
+  [
+   229,
+   3544,
+   768,
+   3634
+  ],
+  [
+   368,
+   3723,
+   449,
+   3748
+  ],
+  [
+   210,
+   3941,
+   511,
+   4074
+  ],
+  [
+   229,
+   3544,
+   768,
+   3634
+  ],
+  [
+   368,
+   3723,
+   449,
+   3748
+  ],
+  [
+   210,
+   3941,
+   511,
+   4074
+  ],
+  [
+   811,
+   4583,
+   878,
+   4609
+  ],
+  [
+   216,
+   4694,
+   799,
+   4830
+  ],
+  [
+   510,
+   4908,
+   639,
+   4936
+  ],
+  [
+   739,
+   4921,
+   849,
+   4948
+  ],
+  [
+   244,
+   4940,
+   286,
+   4955
+  ],
+  [
+   299,
+   5918,
+   624,
+   6088
+  ],
+  [
+   630,
+   6075,
+   680,
+   6086
+  ],
+  [
+   143,
+   7316,
+   770,
+   7549
+  ],
+  [
+   228,
+   9220,
+   765,
+   9460
+  ],
+  [
+   419,
+   10043,
+   591,
+   10090
+  ],
+  [
+   234,
+   11498,
+   794,
+   11625
+  ],
+  [
+   218,
+   12234,
+   784,
+   12373
+  ],
+  [
+   53,
+   13663,
+   807,
+   13932
+  ]
+ ]
+}
