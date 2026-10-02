@@ -327,11 +327,11 @@ function besideOwnColour(
   const near = Math.max(2, Math.round(letterHeight * 0.3))
   const far = Math.max(near + 2, Math.round(letterHeight * 0.9))
   const [bx0, by0, bx1, by1] = box
+  // Only above and below: tips line up along the top and bottom of a bubble, and text set tight in a
+  // shout bubble has the spikes right beside its lines.
   const strips: Box[] = [
     [bx0, by0 - far, bx1, by0 - near],
-    [bx0, by1 + near, bx1, by1 + far],
-    [bx0 - far, by0, bx0 - near, by1],
-    [bx1 + near, by0, bx1 + far, by1]
+    [bx0, by1 + near, bx1, by1 + far]
   ]
   for (const [sx0, sy0, sx1, sy1] of strips) {
     const x0 = Math.max(0, sx0)
@@ -387,6 +387,10 @@ function joinBubbles(regions: TextRegion[], gray: Uint8Array, W: number, H: numb
       const overlapX = Math.min(a.box[2], b.box[2]) - Math.max(a.box[0], b.box[0])
       const minW = Math.min(a.box[2] - a.box[0], b.box[2] - b.box[0])
       if (gapY > 2.2 * hi || overlapX < 0.5 * minW) continue
+      // Lines of a bubble are centred or flush left; a remark written across the bubble's edge is not.
+      const maxW = Math.max(a.box[2] - a.box[0], b.box[2] - b.box[0])
+      const centred = Math.abs(a.box[0] + a.box[2] - b.box[0] - b.box[2]) / 2 <= 0.2 * maxW
+      if (!centred && Math.abs(a.box[0] - b.box[0]) > lo) continue
       if (sameBackground(a.box, b.box, hi, gray, W, H)) parent[find(i)] = find(j)
     }
   }

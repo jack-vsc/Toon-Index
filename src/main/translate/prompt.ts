@@ -59,7 +59,7 @@ The software can be wrong: a box may surround artwork or a bubble's border with 
 ${source}
 Translate the text into ${settings.targetLanguage}.
 ${sfx}
-Scanlation credits, watermarks and website URLs are not translated. Writing in another script than the page's lettering that is drawn into the artwork (signs, screens, background patterns, leftovers of the original edition) is part of the art: skip it.
+Scanlation credits, watermarks and website URLs are not translated. Korean, Japanese or Chinese writing left in the artwork of a page lettered in another language (shop signs, background writing, leftovers of the original edition) is part of the art: skip it. Lettered text is always translated, system windows and status screens included.
 
 Answer EVERY numbered box exactly once: put its number in the "ids" of the text block it belongs to, or in "skip" when it holds nothing to translate (artwork, a pattern, a bubble border, a watermark or credit, a sound effect that is not translated). A bubble whose text is split over several boxes is one block that lists all of them; separate bubbles, captions and side remarks written next to a bubble are separate blocks, even when the sentence continues from one to the next. A box left out stays untranslated on the page.
 
@@ -116,11 +116,16 @@ const FONT_ROLES: FontRole[] = ['comic', 'brush', 'condensed', 'sans', 'serif', 
  * Returns one list of blocks per requested image, in the same order, and the boxes the answer
  * accounted for. `boxedOnly` drops blocks placed by the model's own box (follow-ups only show the key).
  */
-export function parseBlocks(raw: string, req: TranslateRequest, boxedOnly = false): { blocks: TextBlock[][]; answered: Set<number> } {
+export function parseBlocks(
+  raw: string,
+  req: TranslateRequest,
+  boxedOnly = false
+): { blocks: TextBlock[][]; answered: Set<number>; skipped: Set<number> } {
   const json = extractJson(raw)
   const result: TextBlock[][] = req.images.map(() => [])
   const answered = new Set<number>()
-  for (const id of Array.isArray(json?.skip) ? json.skip : []) answered.add(Number(id))
+  const skipped = new Set<number>()
+  for (const id of Array.isArray(json?.skip) ? json.skip : []) answered.add(Number(id)), skipped.add(Number(id))
   // Also accepts blocks grouped per image, which some models fall back to.
   const entries: unknown[] = Array.isArray(json?.blocks)
     ? json.blocks
@@ -141,17 +146,26 @@ export function parseBlocks(raw: string, req: TranslateRequest, boxedOnly = fals
     // Boxes the block's position left out (not next to its text) are asked about again on their own.
     for (const r of placed ? placed.kept : picked) answered.add(r.id)
     if (!placed) continue
-    const text = placed.block.original.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
     const glyphs = placed.kept.reduce((n, r) => n + r.glyphs, 0)
-    const twin = text.length >= 3 ? seen.get(text) : undefined
-    if (twin && twin.image !== placed.image) {
+    // A long translation given twice is one bubble's text put on other boxes as well (background
+    // writing in another script, artwork) too.
+    const original = 'o:' + placed.block.original.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    const translation = 't:' + placed.block.translation.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    const keys = [original.length >= 5 ? original : '', translation.length >= 17 ? translation : ''].filter(Boolean)
+    const live = (key: string) => {
+      const t = seen.get(key)
+      return t && result[t.image].includes(t.block) ? t : undefined
+    }
+    const sameText = keys.includes(original) ? live(original) : undefined
+    const twin = (sameText && sameText.image !== placed.image ? sameText : undefined) ?? (keys.includes(translation) ? live(translation) : undefined)
+    if (twin) {
       if (twin.glyphs >= glyphs) continue
       result[twin.image].splice(result[twin.image].indexOf(twin.block), 1)
     }
-    if (text.length >= 3) seen.set(text, { image: placed.image, block: placed.block, glyphs })
+    for (const key of keys) seen.set(key, { image: placed.image, block: placed.block, glyphs })
     result[placed.image].push(placed.block)
   }
-  return { blocks: result, answered }
+  return { blocks: result, answered, skipped }
 }
 
 function toBlock(
@@ -163,7 +177,9 @@ function toBlock(
   const b = item as Record<string, unknown>
   const translation = typeof b.translation === 'string' ? b.translation.trim() : ''
   if (!translation) return undefined
-  const placed = place(picked, fromBox(b, req))
+  const original = typeof b.original === 'string' ? b.original : ''
+  const words = original.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length
+  const placed = place(picked, fromBox(b, req), words)
   if (!placed) return undefined
   const { width, height } = req.images[placed.image]
   return {
@@ -174,7 +190,7 @@ function toBlock(
       areaBox: roomAround(placed.box, width, height),
       inkBoxes: placed.inkBoxes,
       letterHeight: placed.letterHeight,
-      original: typeof b.original === 'string' ? b.original : '',
+      original,
       translation,
       kind: KINDS.includes(b.kind as BlockKind) ? (b.kind as BlockKind) : 'other',
       font: FONT_ROLES.includes(b.font as FontRole) ? (b.font as FontRole) : undefined,
@@ -196,7 +212,8 @@ function pickRegions(ids: unknown, req: TranslateRequest): MarkedRegion[] {
  */
 function place(
   picked: MarkedRegion[],
-  guess: { image: number; box: Box } | undefined
+  guess: { image: number; box: Box } | undefined,
+  words: number
 ): { image: number; box: Box; kept: MarkedRegion[]; inkBoxes?: Box[]; letterHeight?: number } | undefined {
   if (!picked.length) return guess && { ...guess, kept: [] }
   // Overlapping slices number the same text twice; a block keeps the slice most of its boxes are on.
@@ -213,6 +230,9 @@ function place(
       if (!kept.includes(r) && kept.some((k) => continues(k, r))) kept.push(r), (grew = true)
     }
   }
+  // Every word is at least one piece of ink: fewer pieces than words is a box beside the text the model
+  // read (a bubble's spiky border next to a small remark), and lettering it there would be the wrong size.
+  if (kept.reduce((n, r) => n + r.glyphs, 0) < words) return undefined
   const inkBoxes = kept.map((r) => r.box)
   const letterHeight = Math.max(...kept.map((r) => r.letterHeight))
   return { image, box: unionAll(inkBoxes), kept: [...kept, ...picked.filter((r) => r.image !== image)], inkBoxes, letterHeight }

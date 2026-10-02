@@ -111,8 +111,9 @@ function duplicates(blocks: TextBlock[], glyphs: Glyphs[], ignored: Set<number>)
         const ti = blocks[i].textBox
         const tj = blocks[j].textBox
         const close = Math.abs(ti[1] - tj[1]) < (ti[2] - ti[0] + tj[2] - tj[0]) * 1.5
-        if (!close || !(a.bbox || b.bbox)) continue
+        if (!(a.bbox || b.bbox)) continue
         if (!a.bbox || !b.bbox) {
+          if (!close) continue
           drop.add(a.bbox ? j : i)
           continue
         }
@@ -217,6 +218,20 @@ export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: n
   const lh = block.letterHeight
   if (best && lh && (best.letterHeight < 0.6 * lh || best.letterHeight > 1.7 * lh)) best = null
   if (!best) return inkBoxes.length ? detectedOnly(empty, block, inkBoxes, contrasts, gray) : empty
+  if (inkBoxes.length) {
+    // Pieces out of the detected lettering are bubble spikes, the gaps between them or screentone dots.
+    const zones = inkBoxes.map((b) => expand(b, best!.letterHeight * 0.5))
+    const kept = best.comps.filter((c) => {
+      const x = (c.x0 + c.x1) / 2
+      const y = (c.y0 + c.y1) / 2
+      return zones.some((z) => x >= z[0] && x <= z[2] && y >= z[1] && y <= z[3])
+    })
+    if (!kept.length) return detectedOnly(empty, block, inkBoxes, contrasts, gray)
+    if (kept.length < best.comps.length) {
+      best.comps = kept
+      best.bbox = boundsOf(kept)
+    }
+  }
 
   const mask = new Uint8Array(ww * wh)
   addInkBoxes(mask, ww, wh, inkBoxes, contrasts, gray, lh ?? best.letterHeight)
@@ -250,10 +265,12 @@ export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: n
       // Runs of columns in the band; narrow ones (the sides of an outline, a crossing line) are not
       // lettering, nor are sparse ones (a curved outline sweeping through the band) or distant ones.
       for (const [a, b] of runs(used, Math.round(h0 * 0.5))) {
-        const rx0 = r.x0 + a
-        const rx1 = r.x0 + b
-        const adjacent = rx0 <= band.x1 + h0 && rx1 >= band.x0 - h0
-        if (!adjacent || rx1 - rx0 < h0 * 1.5) continue
+        // A stroke beside the text (a panel edge, the bubble's border) is not part of it; one that
+        // crosses it is cut off just past the letters.
+        const crossing = Math.min(r.x0 + b, band.x1) - Math.max(r.x0 + a, band.x0)
+        const rx0 = Math.max(r.x0 + a, band.x0 - Math.round(h0 * 0.5))
+        const rx1 = Math.min(r.x0 + b, band.x1 + Math.round(h0 * 0.5))
+        if (crossing < h0 * 0.5 || rx1 - rx0 < h0 * 1.5) continue
         let filled = 0
         for (let y = y0; y < y1; y++) {
           for (let x = rx0; x < rx1; x++) if (best.labels[y * ww + x] === r.id) filled++
@@ -800,24 +817,50 @@ function fillMasked(d: Uint8ClampedArray, ww: number, wh: number, mask: Uint8Arr
     todo = next
   }
   // The middle of a large erased block is far from any background; a wider mean would reach the
-  // bubble's border and the art outside it. It takes the background colour around the block.
+  // bubble's border and the art outside it. It grows in from the nearest filled pixels instead.
   if (todo.length) {
-    const near = dilate(mask, ww, wh, 2 * radius + 1)
-    const ring: RGB[] = []
-    const loose: RGB[] = []
-    for (let p = 0; p < mask.length; p++) {
-      if (!near[p] || mask[p]) continue
-      const rgb: RGB = [d[p * 4], d[p * 4 + 1], d[p * 4 + 2]]
-      if (!ink[p]) ring.push(rgb)
-      else loose.push(rgb)
-    }
-    const source = ring.length >= 20 ? ring : [...ring, ...loose]
-    if (source.length) {
-      const fill = medianRgb(source)
+    const index = new Int32Array(ww * wh).fill(-1)
+    masked.forEach((p, n) => (index[p] = n))
+    const valueAt = (p: number, c: number) => (mask[p] ? colors[index[p] * 3 + c] : d[p * 4 + c])
+    for (let strokes = false; todo.length; ) {
+      const next: number[] = []
+      const updates: [number, number, number, number][] = []
       for (const n of todo) {
-        colors.set(fill, n * 3)
+        const p = masked[n]
+        const x = p % ww
+        const y = (p - x) / ww
+        let r = 0
+        let g = 0
+        let b = 0
+        let count = 0
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx
+            const ny = y + dy
+            if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= ww || ny >= wh) continue
+            const q = ny * ww + nx
+            if (mask[q] ? !filled[index[q]] : ink[q] && !strokes) continue
+            r += valueAt(q, 0)
+            g += valueAt(q, 1)
+            b += valueAt(q, 2)
+            count++
+          }
+        }
+        if (count) updates.push([n, r / count, g / count, b / count])
+        else next.push(n)
+      }
+      for (const [n, r, g, b] of updates) {
+        colors[n * 3] = r
+        colors[n * 3 + 1] = g
+        colors[n * 3 + 2] = b
         filled[n] = 1
       }
+      // Walled in by strokes only: take them rather than leave a hole.
+      if (!updates.length) {
+        if (strokes) break
+        strokes = true
+      }
+      todo = next
     }
   }
   const write = () =>
@@ -1189,7 +1232,9 @@ function measureBubble(
     const i = (y * lw + x) * 4
     return Math.abs(d[i] - bg[0]) <= BG_TOLERANCE && Math.abs(d[i + 1] - bg[1]) <= BG_TOLERANCE && Math.abs(d[i + 2] - bg[2]) <= BG_TOLERANCE
   }
-  const gap = Math.max(2, Math.round(letterHeight * 0.3))
+  // The original lettering is erased by now; a wider gap would step over the bubble's border into the
+  // page around it when that is the same colour.
+  const gap = Math.max(1, Math.round(letterHeight * 0.04))
   const lefts = new Int32Array(lh)
   const rights = new Int32Array(lh)
   const scan = (from: number) => {

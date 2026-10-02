@@ -29,6 +29,8 @@ const TEST_IMAGE = {
   height: 32
 }
 const TEST_TIMEOUT_MS = 90_000
+/** Glyphs in a box the model skipped above which it is asked about again. */
+const SKIPPED_PARAGRAPH = 8
 
 export async function translate(req: TranslateRequest): Promise<TextBlock[][]> {
   const settings = getSettings()
@@ -62,8 +64,12 @@ export async function translate(req: TranslateRequest): Promise<TextBlock[][]> {
     }
   }
   try {
-    const { blocks, answered } = await ask(buildPrompt(req, settings), [...req.images, ...req.key], (raw) => parseBlocks(raw, req))
-    const missing = req.regions.filter((r) => !answered.has(r.id)).map((r) => r.id)
+    const { blocks, answered, skipped } = await ask(buildPrompt(req, settings), [...req.images, ...req.key], (raw) => parseBlocks(raw, req))
+    // A whole paragraph of lettering is now and then skipped with the artwork; asking about it on its
+    // own gets it translated (credits and watermarks get skipped again).
+    const missing = req.regions
+      .filter((r) => !answered.has(r.id) || (skipped.has(r.id) && r.glyphs >= SKIPPED_PARAGRAPH))
+      .map((r) => r.id)
     if (missing.length && req.key.length) {
       const more = await ask(buildFollowUp(missing, req, settings), req.key, (raw) => parseBlocks(raw, req, true))
       more.blocks.forEach((list, i) => blocks[i].push(...list))
