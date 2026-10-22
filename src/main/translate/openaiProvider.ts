@@ -1,6 +1,6 @@
 import { net } from 'electron'
 import { CANCELLED, type ModelOption, type TranslateRequest } from '../../shared/types'
-import { FormatError, HttpError } from './errors'
+import { HttpError, TruncatedError } from './errors'
 
 const MAX_ATTEMPTS = 3
 const MAX_OUTPUT_TOKENS = 8192
@@ -12,10 +12,11 @@ export async function runOpenAI(
   apiKey: string,
   baseUrl: string,
   model: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  temperature = 0.2
 ): Promise<string> {
   try {
-    return await withRetries(prompt, req, apiKey, baseUrl, model, signal)
+    return await withRetries(prompt, req, apiKey, baseUrl, model, signal, temperature)
   } catch (err) {
     if (signal.aborted) throw new Error(CANCELLED)
     throw err
@@ -28,12 +29,13 @@ async function withRetries(
   apiKey: string,
   baseUrl: string,
   model: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  temperature: number
 ): Promise<string> {
   let jsonMode = true
   for (let attempt = 1; ; attempt++) {
     try {
-      return await request(prompt, req, apiKey, baseUrl, model, jsonMode, signal)
+      return await request(prompt, req, apiKey, baseUrl, model, jsonMode, signal, temperature)
     } catch (err) {
       if (!(err instanceof HttpError)) throw err
       if (jsonMode && err.status === 400 && /response_format|json_object|json mode/i.test(err.body)) {
@@ -60,7 +62,8 @@ async function request(
   baseUrl: string,
   model: string,
   jsonMode: boolean,
-  signal: AbortSignal
+  signal: AbortSignal,
+  temperature: number
 ): Promise<string> {
   // Electron's fetch: Node's gives up when the answer takes over five minutes to start, as a local
   // model on a small GPU may for a page of images.
@@ -74,7 +77,7 @@ async function request(
     },
     body: JSON.stringify({
       model,
-      temperature: 0.2,
+      temperature,
       // A page needs a few thousand tokens; models stuck repeating themselves stop here instead of later.
       max_tokens: MAX_OUTPUT_TOKENS,
       ...(jsonMode && { response_format: { type: 'json_object' } }),
@@ -110,7 +113,10 @@ async function request(
     throw new Error(`Resposta vazia da API (finish_reason: ${choice?.finish_reason ?? 'desconhecido'}): ${body.slice(0, 300)}`)
   }
   if (choice?.finish_reason === 'length') {
-    throw new FormatError(`A resposta da IA foi cortada no limite de ${MAX_OUTPUT_TOKENS} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: ${content.slice(-200)}`)
+    throw new TruncatedError(
+      `A resposta da IA foi cortada no limite de ${MAX_OUTPUT_TOKENS} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: ${content.slice(-200)}`,
+      content
+    )
   }
   return content
 }

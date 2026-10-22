@@ -6,6 +6,7 @@ import {
   addSfxEraseArea,
   bubbleAt,
   inpaintCanvas,
+  insideCount,
   SFX_MIN_COVERAGE,
   sfxShape,
   type Bubble,
@@ -103,19 +104,26 @@ export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]
   blocks.forEach((block, i) => {
     // Interjections and names that read the same in both languages keep their original lettering.
     const text = normalizeText(block.translation)
-    if (!text || text === normalizeText(block.original)) kept.add(i)
+    if (block.kind !== 'watermark' && (!text || text === normalizeText(block.original))) kept.add(i)
     // Placed by the model's own box and no lettering there: writing it would cover the art, not the text.
     if (!block.inkBoxes && !glyphs[i].bbox && !isFootnote(block) && !sfx[i]) kept.add(i)
+    // A watermark touching a speech bubble may share its box with the bubble's text (chapter 52: "HIS
+    // NAME IS KIM SHIMUN." beside the group's website): erasing it would take the line with it.
+    if (block.kind === 'watermark' && scene && touchesSpeech(ctx, scene, block.textBox)) kept.add(i)
     // A sound effect the vision models see no lettering for is left alone rather than erased.
     if (sfx[i] && sfx[i]!.shape.coverage < SFX_MIN_COVERAGE) kept.add(i)
   })
-  const skipDraw = duplicates(blocks, glyphs, kept)
+  // A watermark shares its box with the lettering beside it: it is no rival copy of that text.
+  const watermarks = blocks.flatMap((block, i) => (block.kind === 'watermark' ? [i] : []))
+  const skipDraw = duplicates(blocks, glyphs, new Set([...kept, ...watermarks]))
   for (const i of kept) skipDraw.add(i)
   blocks.forEach((block, i) => {
     if (!skipDraw.has(i) && isFootnote(block)) skipDraw.add(i)
   })
-  // Signs, logos and titles stay in the artwork, as scans do: their translation goes in a footnote.
-  const skipErase = new Set(skipDraw)
+  // Signs, logos and titles stay in the artwork, as scans do: their translation goes in a footnote. A
+  // scanlation group's watermark is only erased.
+  for (let i = 0; i < blocks.length; i++) if (blocks[i].kind === 'watermark' && !kept.has(i)) skipDraw.add(i)
+  const skipErase = new Set([...skipDraw].filter((i) => blocks[i].kind !== 'watermark' || kept.has(i)))
   const erased = scene ? await eraseWithModels(canvas, scene, blocks, glyphs, sfx, skipErase) : false
   if (!erased) glyphs.forEach((g, i) => skipErase.has(i) || erase(ctx, g))
 
@@ -139,6 +147,22 @@ export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]
       ...(skipDraw.has(i) ? {} : sfx[i] ? drawSfx(ctx, block, sfx[i]!) : typeset(ctx, block, glyphs[i], W, H, bubble, alone))
     }
   })
+}
+
+/**
+ * Whether a speech bubble's interior takes a fair part of the box: a bubble by the models' outline, and
+ * by the paper showing there (chapter 52: an outline that also took in the art below a bubble covered a
+ * watermark on dark art; the one sharing a box with "HIS NAME IS KIM SHIMUN." was 40% white paper).
+ */
+function touchesSpeech(ctx: CanvasRenderingContext2D, scene: Scene, box: Box): boolean {
+  const area = (box[2] - box[0]) * (box[3] - box[1])
+  if (!scene.bubbles.some((b) => !b.frame && insideCount(b, box) > 0.15 * area)) return false
+  const [x0, y0, x1, y1] = box.map(Math.round)
+  if (x1 <= x0 || y1 <= y0) return false
+  const d = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data
+  let paper = 0
+  for (let p = 0; p < d.length; p += 4) if (d[p] > 235 && d[p + 1] > 235 && d[p + 2] > 235) paper++
+  return paper > 0.25 * (d.length / 4)
 }
 
 /** One LaMa pass over everything to erase on the page. */

@@ -16,7 +16,7 @@ import {
 } from '../../shared/types'
 import { getApiKey, getSettings } from '../settings'
 import { listCursorModels, pickDefaultCursorModel, runCursor } from './cursorProvider'
-import { describeError, FormatError } from './errors'
+import { describeError, FormatError, TruncatedError } from './errors'
 import { listOpenAIModels, runOpenAI } from './openaiProvider'
 import { buildFollowUp, buildPrompt, parseBlocks } from './prompt'
 
@@ -52,15 +52,27 @@ export async function translate(req: TranslateRequest): Promise<TextBlock[][]> {
         // Unreadable cache entry: ask the model again.
       }
     }
-    // Models now and then stop mid-answer; a second try usually comes back whole.
+    // Models now and then stop mid-answer, or loop on a character until the token limit; a second try,
+    // a little less deterministic so it does not walk into the same loop, usually comes back whole.
     for (let attempt = 1; ; attempt++) {
-      const raw = await callModel(profile, apiKey, prompt, modelReq, settings.speed, controller.signal)
       try {
+        const raw = await callModel(profile, apiKey, prompt, modelReq, settings.speed, controller.signal, attempt > 1 ? 0.7 : 0.2)
         const parsed = parse(raw)
         writeFileSync(cacheFile, raw, 'utf8')
         return parsed
       } catch (err) {
-        if (!(err instanceof FormatError) || attempt >= 2) throw err
+        if (!(err instanceof FormatError)) throw err
+        if (attempt < 2) continue
+        // Looping twice: keep the blocks it finished before the loop (not cached, so a later run asks
+        // again); the boxes they leave out are asked about on their own.
+        if (err instanceof TruncatedError) {
+          try {
+            return parse(err.partial)
+          } catch {
+            // Nothing usable before the cut.
+          }
+        }
+        throw err
       }
     }
   }
@@ -148,10 +160,18 @@ function requireReady(profile: ApiProfile, apiKey: string | undefined): string {
   return apiKey
 }
 
-function callModel(profile: ApiProfile, apiKey: string, prompt: string, req: TranslateRequest, speed: Speed, signal: AbortSignal) {
+function callModel(
+  profile: ApiProfile,
+  apiKey: string,
+  prompt: string,
+  req: TranslateRequest,
+  speed: Speed,
+  signal: AbortSignal,
+  temperature?: number
+) {
   return profile.kind === 'cursor'
     ? runCursor(prompt, req, apiKey, profile.model, speed, signal)
-    : runOpenAI(prompt, req, apiKey, profile.baseUrl, profile.model, signal)
+    : runOpenAI(prompt, req, apiKey, profile.baseUrl, profile.model, signal, temperature)
 }
 
 export function currentModelLabel(): string {

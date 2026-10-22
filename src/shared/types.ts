@@ -16,7 +16,7 @@ export interface ApiProfile {
 /** [x0, y0, x1, y1] in pixels of the image that was sent to the model. */
 export type Box = [number, number, number, number]
 
-export type BlockKind = 'speech' | 'thought' | 'shout' | 'whisper' | 'narration' | 'system' | 'aside' | 'signage' | 'sfx' | 'other'
+export type BlockKind = 'speech' | 'thought' | 'shout' | 'whisper' | 'narration' | 'system' | 'aside' | 'signage' | 'sfx' | 'watermark' | 'other'
 
 /** Typeface family of the original lettering, as scanlators classify it. */
 export type FontRole = 'comic' | 'brush' | 'condensed' | 'sans' | 'serif' | 'handwritten'

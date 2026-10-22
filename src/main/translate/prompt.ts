@@ -34,7 +34,7 @@ ${intro}
 ${source}
 Translate every piece of readable text into ${settings.targetLanguage}.
 ${sfx}
-Skip scanlation credits, watermarks and website URLs.
+Scanlation watermarks, credits and website URLs written over the artwork (such as "YOU CAN FIND ALL CHAPTERS ON OUR WEBSITE: ...") are blocks of kind "watermark" with an empty translation: they are erased, not translated.
 
 Return EVERY text block, including small bubbles, one-word bubbles and short interjections: a missed bubble stays untranslated.
 
@@ -59,9 +59,9 @@ The software can be wrong: a box may surround artwork or a bubble's border with 
 ${source}
 Translate the text into ${settings.targetLanguage}.
 ${sfx}
-Scanlation credits, watermarks and website URLs are not translated. Korean, Japanese or Chinese writing left in the artwork of a page lettered in another language (shop signs, background writing, leftovers of the original edition) is part of the art: skip it${settings.translateSfx ? ', unless it is a sound effect' : ''}. Lettered text is always translated, system windows and status screens included.
+Scanlation watermarks, credits and website URLs written over the artwork (such as "YOU CAN FIND ALL CHAPTERS ON OUR WEBSITE: ...") are blocks of kind "watermark" with an empty translation: they are erased, not translated. Korean, Japanese or Chinese writing left in the artwork of a page lettered in another language (shop signs, background writing, leftovers of the original edition) is part of the art: skip it${settings.translateSfx ? ', unless it is a sound effect' : ''}. Lettered text is always translated, system windows and status screens included.
 
-Answer EVERY numbered box exactly once: put its number in the "ids" of the text block it belongs to, or in "skip" when it holds nothing to translate (artwork, a pattern, a bubble border, a watermark or credit, a sound effect that is not translated). A bubble whose text is split over several boxes is one block that lists all of them; the main bubble and a small line in its corner are always separate blocks. Separate bubbles, captions and side remarks beside a bubble are separate blocks too. A box left out stays untranslated on the page.
+Answer EVERY numbered box exactly once: put its number in the "ids" of the text block it belongs to, or in "skip" when it holds nothing to translate (artwork, a pattern, a bubble border, a sound effect that is not translated). A bubble whose text is split over several boxes is one block that lists all of them; the main bubble and a small line in its corner are always separate blocks. A box holding a watermark next to other lettering is two blocks that both list it: the watermark, and the other lettering on its own. Separate bubbles, captions and side remarks beside a bubble are separate blocks too. A box left out stays untranslated on the page.
 
 For each text block (one speech bubble, thought bubble, narration box, system window or caption = one block) return:
 - "ids": the numbers of the boxes holding this block's letters; never boxes that only hold the bubble's border, spikes or artwork around the text.
@@ -87,7 +87,7 @@ export function buildFollowUp(ids: number[], req: TranslateRequest, settings: Ap
 
 The attached image${req.key.length > 1 ? 's show' : ' shows'} blocks of lettering cut out of a manga/webtoon page, each with its number on a magenta tag at its left. ${source}
 Translate the text of boxes ${ids.join(', ')} into ${settings.targetLanguage}; ignore the other boxes.
-Answer each of these boxes exactly once: put its number in the "ids" of a text block, or in "skip" when it holds nothing to translate (artwork, a pattern, a bubble border, a watermark or credit${settings.translateSfx ? '' : ', a sound effect'}). Boxes that are parts of one sentence or bubble form one block that lists all of them.
+Answer each of these boxes exactly once: put its number in the "ids" of a text block, or in "skip" when it holds nothing to translate (artwork, a pattern, a bubble border${settings.translateSfx ? '' : ', a sound effect'}); a watermark is a block of kind "watermark". Boxes that are parts of one sentence or bubble form one block that lists all of them.
 
 For each text block return:
 - "ids": the numbers of the boxes holding this block's text.
@@ -100,7 +100,7 @@ Respond with ONLY a JSON object, no markdown fences and no commentary, in exactl
 function blockFields(target: string): string {
   return `- "original": the original text.
 - "translation": natural, fluent ${target}, matching the tone of the character. Keep it concise so it fits the bubble.
-- "kind": "speech" (regular dialogue bubble), "thought" (inner monologue: cloud, fuzzy or dark bubble), "shout" (yelling: jagged burst bubble or big bold lettering), "whisper" (said quietly: dashed or faint bubble, small light lettering), "narration" (caption box with a flat background), "system" (game-like system window, status screen or notification), "aside" (small remark in the corner of a bubble or beside a character, always its own block), "signage" (a sign, building name or label drawn on the artwork, such as a hospital or shop front; the translation is shown below the panel, not over the art), "sfx" (sound effect).
+- "kind": "speech" (regular dialogue bubble), "thought" (inner monologue: cloud, fuzzy or dark bubble), "shout" (yelling: jagged burst bubble or big bold lettering), "whisper" (said quietly: dashed or faint bubble, small light lettering), "narration" (caption box with a flat background), "system" (game-like system window, status screen or notification), "aside" (small remark in the corner of a bubble or beside a character, always its own block), "signage" (a sign, building name or label drawn on the artwork, such as a hospital or shop front; the translation is shown below the panel, not over the art), "sfx" (sound effect), "watermark" (a scanlation group's watermark, credit or website, to be erased).
 - "font": typeface of the original lettering: "comic" (standard comic lettering), "brush" (bold slanted marker/brush lettering), "condensed" (tall narrow sans-serif), "sans", "serif" or "handwritten" (small casual handwriting).
 - "italic": true if the original lettering is slanted.
 - "color": fill colour of the original letters as "#rrggbb".
@@ -109,7 +109,10 @@ function blockFields(target: string): string {
 
 const EXAMPLE_FIELDS = '"original":"","translation":"","kind":"speech","font":"comic","italic":false,"color":"#000000","outline":null'
 
-const KINDS: BlockKind[] = ['speech', 'thought', 'shout', 'whisper', 'narration', 'system', 'aside', 'signage', 'sfx', 'other']
+const KINDS: BlockKind[] = ['speech', 'thought', 'shout', 'whisper', 'narration', 'system', 'aside', 'signage', 'sfx', 'watermark', 'other']
+/** A web address: lettering that names one is a scanlation group's watermark, whatever the model calls it. */
+const WEBSITE = /\b[a-z0-9-]+\.(?:com|net|org|io|co|me|to|gg|cc|xyz|site|online|club|info)\b/i
+
 const FONT_ROLES: FontRole[] = ['comic', 'brush', 'condensed', 'sans', 'serif', 'handwritten']
 
 /**
@@ -175,9 +178,10 @@ function toBlock(
 ): { image: number; block: TextBlock; kept: MarkedRegion[] } | undefined {
   if (!item || typeof item !== 'object') return undefined
   const b = item as Record<string, unknown>
-  const translation = typeof b.translation === 'string' ? b.translation.trim() : ''
-  if (!translation) return undefined
   const original = typeof b.original === 'string' ? b.original : ''
+  const watermark = b.kind === 'watermark' || WEBSITE.test(original)
+  const translation = watermark ? '' : typeof b.translation === 'string' ? b.translation.trim() : ''
+  if (!translation && !watermark) return undefined
   const words = original.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length
   const placed = place(picked, fromBox(b, req), words)
   if (!placed) return undefined
@@ -192,7 +196,7 @@ function toBlock(
       letterHeight: placed.letterHeight,
       original,
       translation,
-      kind: KINDS.includes(b.kind as BlockKind) ? (b.kind as BlockKind) : 'other',
+      kind: watermark ? 'watermark' : KINDS.includes(b.kind as BlockKind) ? (b.kind as BlockKind) : 'other',
       font: FONT_ROLES.includes(b.font as FontRole) ? (b.font as FontRole) : undefined,
       italic: typeof b.italic === 'boolean' ? b.italic : undefined,
       color: toHex(b.color),

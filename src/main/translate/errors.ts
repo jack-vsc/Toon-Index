@@ -16,6 +16,16 @@ export class HttpError extends Error {
 /** The model answered, but not with the JSON the prompt asked for. */
 export class FormatError extends Error {}
 
+/** An answer cut off at the token limit; `partial` is what came before the cut. */
+export class TruncatedError extends FormatError {
+  constructor(
+    message: string,
+    readonly partial: string
+  ) {
+    super(message)
+  }
+}
+
 const QUOTA = /out of usage|usage limit|increase (your )?limits?|spend(ing)? limit|insufficient_quota|exceeded your current quota|quota exceeded|free-models-per-day/i
 const CREDITS = /insufficient (credits|balance|funds)|more credits|can only afford|payment required|credit balance/i
 const BLOCKED = /flagged|moderation|content[_ ](policy|filter)|safety|prohibited[_ ]content/i

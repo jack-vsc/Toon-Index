@@ -71,7 +71,8 @@ export function bubbleAt(scene: Scene, box: Box): Bubble | null {
   return bestInside >= area * 0.85 || (centred && bestInside >= area * 0.6) ? best : null
 }
 
-function insideCount(b: Bubble, box: Box): number {
+/** Pixels of `box` inside the bubble. */
+export function insideCount(b: Bubble, box: Box): number {
   const x0 = Math.max(0, Math.floor(box[0] - b.box[0]))
   const y0 = Math.max(0, Math.floor(box[1] - b.box[1]))
   const x1 = Math.min(b.w, Math.ceil(box[2] - b.box[0]))
