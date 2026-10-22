@@ -16,7 +16,7 @@ export interface ApiProfile {
 /** [x0, y0, x1, y1] in pixels of the image that was sent to the model. */
 export type Box = [number, number, number, number]
 
-export type BlockKind = 'speech' | 'thought' | 'shout' | 'narration' | 'system' | 'aside' | 'signage' | 'sfx' | 'other'
+export type BlockKind = 'speech' | 'thought' | 'shout' | 'whisper' | 'narration' | 'system' | 'aside' | 'signage' | 'sfx' | 'other'
 
 /** Typeface family of the original lettering, as scanlators classify it. */
 export type FontRole = 'comic' | 'brush' | 'condensed' | 'sans' | 'serif' | 'handwritten'
@@ -59,7 +59,15 @@ export interface AppSettings {
   skipStart: number
   skipEnd: number
   readerMode: ReaderMode
+  gpuSharing: GpuSharing
 }
+
+/**
+ * How the AIs share the GPU during a run: 'phased' runs one at a time over the whole chapter (detection,
+ * translation, lettering), for small GPUs and local translation models; 'together' goes page by page;
+ * 'auto' picks 'phased' for a local model on a GPU under 12 GB.
+ */
+export type GpuSharing = 'auto' | 'phased' | 'together'
 
 export interface PublicSettings extends AppSettings {
   /** By profile id. */
@@ -100,6 +108,82 @@ export interface MarkedRegion {
   letterHeight: number
   glyphs: number
 }
+
+/** A block of text found by the vision models, in pixels of the analysed image. */
+export interface VisionBlock {
+  box: Box
+  /** Text lines inside the block. */
+  lines: Box[]
+  letterHeight: number
+  /** Rough number of characters. */
+  glyphs: number
+  conf: number
+  /** Index of the speech bubble holding the block, -1 when it is not in one. */
+  bubble: number
+}
+
+export interface VisionBubble {
+  box: Box
+  /** Outline of the bubble's interior, [x, y] points. */
+  polygon: [number, number][]
+  conf: number
+  /** A system window or caption box around the text, not a speech bubble. */
+  frame: boolean
+}
+
+export interface VisionDetection {
+  blocks: VisionBlock[]
+  bubbles: VisionBubble[]
+  /** PNG, white where the models see lettering. */
+  textMask: Uint8Array
+}
+
+/** A chapter read from a link: its pages as downloaded (JPEG, PNG, WebP…), in reading order. */
+export interface WebChapter {
+  title: string
+  images: Uint8Array[]
+}
+
+/** Where fetching a chapter from a link is; 'challenge' = the site's bot check is shown to the person. */
+export type WebChapterProgress =
+  | { stage: 'loading' | 'challenge' | 'scrolling' }
+  | { stage: 'downloading'; done: number; total: number }
+
+/** The local AIs the app runs or uses: vision server, Ollama, YOLO training. */
+export type LocalAiId = 'vision' | 'ollama' | 'training'
+
+export interface LocalAiStatus {
+  id: LocalAiId
+  name: string
+  /** What it is used for. */
+  role: string
+  running: boolean
+  pids: number[]
+  /** Dedicated GPU memory of its processes, MiB; null until the first reading (it takes a few seconds). */
+  gpuMemory: number | null
+  /** Models loaded in memory (Ollama), with their share on the GPU. */
+  models: { name: string; sizeMiB: number; gpuMiB: number }[]
+}
+
+export interface GpuStatus {
+  name: string
+  /** Percent of time the GPU was busy over the last sample. */
+  utilization: number
+  memoryUsed: number
+  memoryTotal: number
+  temperature: number | null
+}
+
+export interface AiMonitorStatus {
+  /** null when nvidia-smi is not available. */
+  gpu: GpuStatus | null
+  ais: LocalAiStatus[]
+  /** Biggest other users of GPU memory (games, browsers), MiB. */
+  others: { name: string; pid: number; gpuMemory: number; capped: boolean }[]
+}
+
+/** What the monitor's buttons stop: one AI, only Ollama's loaded models, or everything. */
+export type AiStopTarget = LocalAiId | 'ollama-models' | 'all'
 
 /** Developer evaluation run (MI_EVAL_* environment variables): sample pages and a reference translation. */
 export interface EvalConfig {
@@ -142,10 +226,16 @@ export interface LibraryEntry {
   model: string
   /** data: URL of a small cover image. */
   cover: string
+  /** The work (Work.id in shared/works) the chapter belongs to. */
+  workId: string
+  chapter: number | null
+  /** Link the chapter was read from, when it came from a site. */
+  source?: string
 }
 
 export interface SaveLibraryInput {
   fileName: string
+  source?: string
   pageCount: number
   translatedPages: number
   original: Uint8Array
@@ -195,5 +285,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   speed: 'fast',
   skipStart: 0,
   skipEnd: 0,
-  readerMode: 'scroll'
+  readerMode: 'scroll',
+  gpuSharing: 'auto'
 }

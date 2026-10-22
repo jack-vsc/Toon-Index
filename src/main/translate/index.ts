@@ -74,13 +74,28 @@ export async function translate(req: TranslateRequest): Promise<TextBlock[][]> {
       const more = await ask(buildFollowUp(missing, req, settings), req.key, (raw) => parseBlocks(raw, req, true))
       more.blocks.forEach((list, i) => blocks[i].push(...list))
     }
-    return blocks
+    // Models return sound effects now and then even when told not to; they stay in the artwork.
+    const kept = settings.translateSfx ? blocks : blocks.map((list) => list.filter((b) => b.kind !== 'sfx'))
+    return kept.map((list) => list.map(matchCase))
   } catch (err) {
     if (controller.signal.aborted) throw new Error(CANCELLED)
     throw describeError(err, profile)
   } finally {
     active.delete(req.requestId)
   }
+}
+
+/**
+ * Lettering in capitals stays in capitals: small local models answer in sentence case even when the
+ * original (and the prompt's examples) are all uppercase.
+ */
+function matchCase(block: TextBlock): TextBlock {
+  const share = (text: string, upper: boolean): number => {
+    const letters = [...text].filter((c) => c.toLowerCase() !== c.toUpperCase())
+    return letters.length ? letters.filter((c) => (upper ? c === c.toUpperCase() : c === c.toLowerCase())).length / letters.length : 0
+  }
+  if (share(block.original, true) < 0.9 || share(block.translation, false) < 0.3) return block
+  return { ...block, translation: block.translation.toLocaleUpperCase('pt-BR') }
 }
 
 /** Sends one tiny request with an image, using a profile that may not be saved yet. */

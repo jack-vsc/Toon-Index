@@ -1,4 +1,5 @@
 import type { Box, EvalConfig, TextBlock } from '../../../shared/types'
+import { runPhased } from './gpuSharing'
 import type { OverlayInfo } from './overlay'
 import { canvasToBytes } from './pdf'
 import { TranslationJob } from './pipeline'
@@ -97,7 +98,7 @@ export async function runEvaluation(config: EvalConfig): Promise<void> {
         )
       )
     }
-    await job.run(settings.concurrency)
+    await job.run(settings.concurrency, await runPhased(settings))
     for (const page of job.pages) if (page.status === 'error') log(`page ${page.number} failed: ${page.error?.message} ${page.error?.detail ?? ''}`)
     await api.write('summary.json', JSON.stringify(summary, null, 1))
   } catch (err) {

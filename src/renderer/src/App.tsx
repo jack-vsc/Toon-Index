@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppError } from '../../shared/errors'
 import { activeProfile, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
+import type { Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
 import { LibraryView } from './components/LibraryView'
 import { ProgressView, statusText } from './components/ProgressView'
 import { Reader, type ReaderPage } from './components/Reader'
 import { SettingsDialog } from './components/SettingsDialog'
 import { SetupView, type SetupChoice } from './components/SetupView'
+import { AdminDashboard } from './components/AdminDashboard'
+import { AiMonitor } from './components/AiMonitor'
+import { runPhased } from './lib/gpuSharing'
+import { WebLinkInput } from './components/WebLinkInput'
 import { canvasToBlob, renderPage, thumbnailCanvas } from './lib/pdf'
 import { cleanIpcError, TranslationJob, type PageState } from './lib/pipeline'
 import { usePdfPages } from './lib/usePdfPages'
@@ -16,6 +21,8 @@ type View = 'home' | 'setup' | 'processing' | 'result'
 interface LoadedFile {
   name: string
   bytes: Uint8Array
+  /** Link the chapter was read from, when it came from a site. */
+  source?: string
 }
 
 interface ReaderSource {
@@ -45,6 +52,9 @@ export default function App() {
   const [zoom, setZoom] = useState(60)
   const [message, setMessage] = useState<string | null>(null)
   const [library, setLibrary] = useState<LibraryEntry[]>([])
+  const [works, setWorks] = useState<Work[]>([])
+  const [adminOpen, setAdminOpen] = useState(false)
+  const [aiMonitorOpen, setAiMonitorOpen] = useState(false)
   const job = useRef<TranslationJob | null>(null)
   const fileRef = useRef<LoadedFile | null>(null)
 
@@ -53,7 +63,11 @@ export default function App() {
     refreshLibrary()
   }, [])
 
-  const refreshLibrary = () => window.api.library.list().then(setLibrary)
+  // Listing the chapters indexes old ones into works, so works are read after it.
+  const refreshLibrary = async () => {
+    setLibrary(await window.api.library.list())
+    setWorks(await window.api.works.list())
+  }
 
   const profile = settings ? activeProfile(settings) : undefined
   const configured = !!settings && !!profile && settings.hasKey[profile.id] && !!profile.model
@@ -72,7 +86,7 @@ export default function App() {
   }))
   const readerPages = view === 'processing' ? jobPages : showOriginal ? originalPages : reader?.fromJob ? jobPages : pdfPages
 
-  async function openFile(selected: File) {
+  async function openFile(selected: File, source?: string) {
     if (!settings || !configured) {
       setSettingsOpen(true)
       return
@@ -80,7 +94,7 @@ export default function App() {
     setMessage(null)
     const bytes = new Uint8Array(await selected.arrayBuffer())
     disposeJob()
-    fileRef.current = { name: selected.name, bytes }
+    fileRef.current = { name: selected.name, bytes, source }
     setFile(fileRef.current)
     setSetupInfo(null)
     setView('setup')
@@ -108,10 +122,10 @@ export default function App() {
 
   async function translate(concurrency = settings?.concurrency ?? 3) {
     const current = job.current
-    if (!current) return
+    if (!current || !settings) return
     setRunning(true)
     setStopReason(null)
-    await current.run(concurrency)
+    await current.run(concurrency, await runPhased(settings))
     setRunning(false)
     setStopping(false)
     setStopReason(current.stopReason)
@@ -139,6 +153,7 @@ export default function App() {
     const { pdf, cover } = await job.current.buildPdf(translatedName(current.name))
     const entry = await window.api.library.save({
       fileName: current.name,
+      source: current.source,
       pageCount: job.current.pages.length,
       translatedPages: job.current.translatedCount,
       original: current.bytes,
@@ -298,105 +313,129 @@ export default function App() {
               Início
             </button>
           )}
+          <button className="icon" title="IAs e GPU" onClick={() => setAiMonitorOpen(true)}>
+            📊
+          </button>
           <button className="icon" title="Configurações" onClick={() => setSettingsOpen(true)}>
             ⚙
+          </button>
+          <button className="icon" title="Admin treino" onClick={() => setAdminOpen(true)}>
+            🧠
           </button>
         </div>
       </header>
 
-      {view === 'processing' && (
-        <div className="progress-strip">
-          <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${toTranslate ? (finished / toTranslate) * 100 : 0}%` }} />
-          </div>
-          <span>
-            {finished} de {toTranslate} páginas traduzidas{failed > 0 ? ` · ${failed} com erro` : ''}
-            {!running && pending > 0 ? ' · pausado' : ''}
-          </span>
-        </div>
-      )}
+      {adminOpen ? (
+        <main className="content" style={{ padding: 12, height: 'calc(100vh - 64px)', boxSizing: 'border-box' }}>
+          <AdminDashboard onClose={() => setAdminOpen(false)} />
+        </main>
+      ) : (
+        <>
+          {view === 'processing' && (
+            <div className="progress-strip">
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${toTranslate ? (finished / toTranslate) * 100 : 0}%` }} />
+              </div>
+              <span>
+                {finished} de {toTranslate} páginas traduzidas{failed > 0 ? ` · ${failed} com erro` : ''}
+                {!running && pending > 0 ? ' · pausado' : ''}
+              </span>
+            </div>
+          )}
 
-      {view === 'processing' && shownError && (
-        <div className="error-banner">
-          <div className="error-banner-text">
-            <strong>
-              {stopReason ? 'Tradução pausada: ' : `${failed} ${failed === 1 ? 'página falhou' : 'páginas falharam'}: `}
-            </strong>
-            {shownError.message}
-            {!stopReason && topError && topError.kinds > 1 && <span className="hint"> Há outros erros: veja a aba Páginas.</span>}
-            {shownError.detail && (
-              <details>
-                <summary>Detalhes técnicos</summary>
-                <pre>{shownError.detail}</pre>
-              </details>
-            )}
-          </div>
-          <div className="error-banner-actions">
-            {failed > 0 && (
-              <button onClick={() => retryPages()} disabled={stopping}>
-                Tentar de novo ({failed})
-              </button>
-            )}
-            <button className="secondary" onClick={() => setSettingsOpen(true)}>
-              Trocar API
-            </button>
-          </div>
-        </div>
-      )}
-
-      {message && (
-        <div className="banner" onClick={() => setMessage(null)}>
-          {message}
-        </div>
-      )}
-
-      <main className={`content ${showReader && readerMode === 'paged' ? 'no-scroll' : ''}`}>
-        {view === 'home' && (
-          <div className="home">
-            <h1>Traduza capítulos de mangá com IA</h1>
-            <p className="subtitle">
-              Envie o PDF do capítulo. Cada página é lida pela IA, o texto é traduzido e escrito por cima do original.
-            </p>
-            {settings && !configured && (
-              <div className="warning">
-                Configure sua chave de API e o modelo antes de começar.{' '}
-                <button className="link" onClick={() => setSettingsOpen(true)}>
-                  Abrir configurações
+          {view === 'processing' && shownError && (
+            <div className="error-banner">
+              <div className="error-banner-text">
+                <strong>
+                  {stopReason ? 'Tradução pausada: ' : `${failed} ${failed === 1 ? 'página falhou' : 'páginas falharam'}: `}
+                </strong>
+                {shownError.message}
+                {!stopReason && topError && topError.kinds > 1 && <span className="hint"> Há outros erros: veja a aba Páginas.</span>}
+                {shownError.detail && (
+                  <details>
+                    <summary>Detalhes técnicos</summary>
+                    <pre>{shownError.detail}</pre>
+                  </details>
+                )}
+              </div>
+              <div className="error-banner-actions">
+                {failed > 0 && (
+                  <button onClick={() => retryPages()} disabled={stopping}>
+                    Tentar de novo ({failed})
+                  </button>
+                )}
+                <button className="secondary" onClick={() => setSettingsOpen(true)}>
+                  Trocar API
                 </button>
               </div>
+            </div>
+          )}
+
+          {message && (
+            <div className="banner" onClick={() => setMessage(null)}>
+              {message}
+            </div>
+          )}
+
+          <main className={`content ${showReader && readerMode === 'paged' ? 'no-scroll' : ''}`}>
+            {view === 'home' && (
+              <div className="home">
+                <h1>Traduza capítulos de mangá com IA</h1>
+                <p className="subtitle">
+                  Envie o PDF do capítulo ou o link dele num site. Cada página é lida pela IA, o texto é traduzido e escrito por cima do original.
+                </p>
+                {settings && !configured && (
+                  <div className="warning">
+                    Configure sua chave de API e o modelo antes de começar.{' '}
+                    <button className="link" onClick={() => setSettingsOpen(true)}>
+                      Abrir configurações
+                    </button>
+                  </div>
+                )}
+                <DropZone onFile={openFile} disabled={!settings} />
+                <WebLinkInput onFile={openFile} disabled={!settings} />
+
+                <h2 className="section-title">Biblioteca</h2>
+                <LibraryView
+                  entries={library}
+                  works={works}
+                  onOpen={openFromLibrary}
+                  onDownload={downloadEntry}
+                  onDelete={deleteEntry}
+                  onWorksChanged={refreshLibrary}
+                />
+              </div>
             )}
-            <DropZone onFile={openFile} disabled={!settings} />
 
-            <h2 className="section-title">Biblioteca</h2>
-            <LibraryView entries={library} onOpen={openFromLibrary} onDownload={downloadEntry} onDelete={deleteEntry} />
-          </div>
-        )}
+            {view === 'setup' && file && settings && setupInfo && (
+              <SetupView
+                fileName={file.name}
+                numPages={setupInfo.numPages}
+                cover={setupInfo.cover}
+                settings={settings}
+                onStart={startTranslation}
+                onCancel={goHome}
+                onProfileChange={(activeProfileId) => saveSettingsPatch({ activeProfileId })}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+            )}
+            {view === 'setup' && !setupInfo && <div className="reader-loading center">Abrindo PDF…</div>}
 
-        {view === 'setup' && file && settings && setupInfo && (
-          <SetupView
-            fileName={file.name}
-            numPages={setupInfo.numPages}
-            cover={setupInfo.cover}
-            settings={settings}
-            onStart={startTranslation}
-            onCancel={goHome}
-            onProfileChange={(activeProfileId) => saveSettingsPatch({ activeProfileId })}
-            onOpenSettings={() => setSettingsOpen(true)}
-          />
-        )}
-        {view === 'setup' && !setupInfo && <div className="reader-loading center">Abrindo PDF…</div>}
+            {view === 'processing' && processingTab === 'grid' && (
+              <ProgressView pages={pages} onRetry={stopping ? undefined : (page) => retryPages([page])} />
+            )}
 
-        {view === 'processing' && processingTab === 'grid' && (
-          <ProgressView pages={pages} onRetry={stopping ? undefined : (page) => retryPages([page])} />
-        )}
-
-        {showReader && readerPages.length > 0 && <Reader pages={readerPages} mode={readerMode} zoom={zoom} />}
-        {showReader && readerPages.length === 0 && <div className="reader-loading center">Carregando…</div>}
-      </main>
+            {showReader && readerPages.length > 0 && <Reader pages={readerPages} mode={readerMode} zoom={zoom} />}
+            {showReader && readerPages.length === 0 && <div className="reader-loading center">Carregando…</div>}
+          </main>
+        </>
+      )}
 
       {settingsOpen && settings && (
         <SettingsDialog initial={settings} onClose={() => setSettingsOpen(false)} onSaved={setSettings} />
       )}
+      {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} />}
+      {aiMonitorOpen && <AiMonitor onClose={() => setAiMonitorOpen(false)} />}
     </div>
   )
 }

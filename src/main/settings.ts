@@ -59,6 +59,7 @@ function mergeSettings(raw: (Partial<AppSettings> & LegacySettings) | undefined,
     speed: raw?.speed ?? d.speed,
     skipStart: raw?.skipStart ?? d.skipStart,
     skipEnd: raw?.skipEnd ?? d.skipEnd,
+    gpuSharing: raw?.gpuSharing ?? d.gpuSharing,
     readerMode: raw?.readerMode ?? d.readerMode
   }
   const known = new Set(LANGUAGES.map((l) => l.value))
@@ -68,6 +69,7 @@ function mergeSettings(raw: (Partial<AppSettings> & LegacySettings) | undefined,
   if (!known.has(merged.targetLanguage)) merged.targetLanguage = d.targetLanguage
   if (!['fast', 'balanced', 'quality'].includes(merged.speed)) merged.speed = d.speed
   if (!['scroll', 'paged'].includes(merged.readerMode)) merged.readerMode = d.readerMode
+  if (!['auto', 'phased', 'together'].includes(merged.gpuSharing)) merged.gpuSharing = d.gpuSharing
   merged.concurrency = Math.min(8, Math.max(1, Math.round(merged.concurrency) || 1))
   merged.skipStart = Math.min(50, Math.max(0, Math.round(merged.skipStart) || 0))
   merged.skipEnd = Math.min(50, Math.max(0, Math.round(merged.skipEnd) || 0))
@@ -123,7 +125,7 @@ function writeStore(store: StoredFile): void {
 }
 
 export function getPublicSettings(): PublicSettings {
-  const { settings } = readStore()
+  const settings = getSettings()
   const hasKey: Record<string, boolean> = {}
   const keyHint: Record<string, string | null> = {}
   for (const { id } of settings.profiles) {
@@ -139,11 +141,23 @@ export function getPublicSettings(): PublicSettings {
   return { ...settings, hasKey, keyHint }
 }
 
+/** Profile of an evaluation run against another model, MI_EVAL_MODEL="<base url>|<model>" (a local server needs no key). */
+const EVAL_PROFILE = 'eval'
+
 export function getSettings(): AppSettings {
-  return readStore().settings
+  let settings = readStore().settings
+  // Evaluation runs (MI_EVAL_SFX=1) translate sound effects without touching the saved choice.
+  if (process.env.MI_EVAL_SFX === '1') settings = { ...settings, translateSfx: true }
+  const [baseUrl, model] = (process.env.MI_EVAL_MODEL ?? '').split('|')
+  if (baseUrl && model) {
+    const profile: ApiProfile = { id: EVAL_PROFILE, name: 'Avaliação', kind: 'openai', baseUrl, models: [model], model }
+    settings = { ...settings, profiles: [...settings.profiles, profile], activeProfileId: EVAL_PROFILE, concurrency: 1 }
+  }
+  return settings
 }
 
 export function getApiKey(profileId: string): string | undefined {
+  if (profileId === EVAL_PROFILE) return 'local'
   const entry = readStore().keys[profileId]
   return entry ? decryptKey(entry) : undefined
 }

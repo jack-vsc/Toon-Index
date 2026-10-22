@@ -1,3 +1,4 @@
+import { net } from 'electron'
 import { CANCELLED, type ModelOption, type TranslateRequest } from '../../shared/types'
 import { FormatError, HttpError } from './errors'
 
@@ -61,7 +62,9 @@ async function request(
   jsonMode: boolean,
   signal: AbortSignal
 ): Promise<string> {
-  const response = await fetch(`${trimUrl(baseUrl)}/chat/completions`, {
+  // Electron's fetch: Node's gives up when the answer takes over five minutes to start, as a local
+  // model on a small GPU may for a page of images.
+  const response = await net.fetch(`${trimUrl(baseUrl)}/chat/completions`, {
     method: 'POST',
     signal,
     headers: {

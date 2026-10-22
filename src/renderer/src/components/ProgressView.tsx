@@ -44,9 +44,10 @@ export function ProgressView({ pages, onRetry }: Props) {
 }
 
 export function statusText(page: PageState): string {
-  if (page.status === 'working' && page.parts && page.parts.total > 1) {
+  if (page.status === 'working' && page.parts && page.parts.total > 1 && (!page.stage || page.stage === 'Traduzindo')) {
     return `Traduzindo ${page.parts.done}/${page.parts.total}`
   }
+  if (page.status === 'working' && page.stage) return page.stage
   if (page.status === 'done') {
     const seconds = page.ms ? ` · ${Math.round(page.ms / 1000)}s` : ''
     return `${page.blockCount ?? 0} textos${seconds}`

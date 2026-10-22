@@ -10,15 +10,17 @@ const BLANK_ROW_BUSYNESS = 0.01
 /**
  * Splits a tall page into slices of roughly `sliceHeight` px. Cuts are placed on blank rows
  * (the gutters between webtoon panels) when possible, so no speech bubble is split; when no
- * gutter is found the slices overlap by `overlap` px instead.
+ * gutter is found the slices overlap by `overlap` px instead. Rows in `keep` (known text, whose blank
+ * line gaps look like gutters) are never cut.
  */
-export function planSlices(canvas: HTMLCanvasElement, sliceHeight: number, overlap: number): Slice[] {
+export function planSlices(canvas: HTMLCanvasElement, sliceHeight: number, overlap: number, keep: [number, number][] = []): Slice[] {
   const height = canvas.height
   if (height <= sliceHeight * 1.15) return [{ y0: 0, y1: height }]
 
   const busy = rowBusyness(canvas)
   const ratio = height / busy.length
-  const isBlank = (y: number) => busy[Math.min(busy.length - 1, Math.floor(y / ratio))] < BLANK_ROW_BUSYNESS
+  const isBlank = (y: number) =>
+    busy[Math.min(busy.length - 1, Math.floor(y / ratio))] < BLANK_ROW_BUSYNESS && !keep.some(([a, b]) => y > a && y < b)
 
   const slices: Slice[] = []
   let start = 0

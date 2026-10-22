@@ -1,14 +1,21 @@
 import type {
+  AiMonitorStatus,
+  AiStopTarget,
   ApiProfile,
   EvalConfig,
+  GpuStatus,
   LibraryEntry,
   ModelOption,
   PublicSettings,
   SaveLibraryInput,
   SaveSettingsInput,
   TextBlock,
-  TranslateRequest
+  TranslateRequest,
+  VisionDetection,
+  WebChapter,
+  WebChapterProgress
 } from '../shared/types'
+import type { Work } from '../shared/works'
 
 export interface MangaApi {
   getSettings(): Promise<PublicSettings>
@@ -19,6 +26,26 @@ export interface MangaApi {
   testApi(profile: ApiProfile, apiKey?: string): Promise<{ ms: number }>
   /** Returns one list of blocks per image in the request. */
   translate(req: TranslateRequest): Promise<TextBlock[][]>
+  /** Pretrained manga models (text + speech bubbles, LaMa inpainting) run by the Python vision server. */
+  vision: {
+    detect(image: Uint8Array): Promise<VisionDetection>
+    /** `mask` is a PNG, white where the page is repainted; returns the page as PNG. */
+    inpaint(image: Uint8Array, mask: Uint8Array): Promise<Uint8Array>
+  }
+  /** Chapters read from a link to a site's reader page. */
+  web: {
+    chapter(url: string): Promise<WebChapter>
+    cancel(): Promise<void>
+    /** Returns a function that stops listening. */
+    onProgress(callback: (p: WebChapterProgress) => void): () => void
+  }
+  /** Local AIs and the GPU they use; asking for the status keeps a background sampler running a while. */
+  ai: {
+    status(): Promise<AiMonitorStatus>
+    /** The GPU's totals only (quick); null without an NVIDIA GPU. */
+    gpu(): Promise<GpuStatus | null>
+    stop(target: AiStopTarget): Promise<void>
+  }
   /** Aborts running requests (all of them when no ids are given). */
   cancelTranslations(requestIds?: string[]): Promise<void>
   savePdf(bytes: Uint8Array, suggestedName: string): Promise<string | null>
@@ -28,6 +55,40 @@ export interface MangaApi {
     save(input: SaveLibraryInput): Promise<LibraryEntry>
     pdf(id: string, which: 'original' | 'translated'): Promise<Uint8Array>
     remove(id: string): Promise<void>
+  }
+  /** Works (titles) the library's chapters are grouped by, each with every name it is known by. */
+  works: {
+    list(): Promise<Work[]>
+    setNames(workId: string, names: string[]): Promise<Work[]>
+    /** Moves every chapter of `fromId` into `intoId`, which also takes its names. */
+    merge(intoId: string, fromId: string): Promise<Work[]>
+    move(entryId: string, target: { workId: string } | { newName: string }): Promise<Work[]>
+  }
+  train: {
+    listRuns(): Promise<string[]>
+    listActive(): Promise<string[]>
+    listArtifacts(run: string): Promise<string[]>
+    getArtifact(run: string, name: string): Promise<string | null>
+    tailLog(run: string, lines?: number): Promise<string>
+    start(pythonExe: string, script: string, args?: string[]): Promise<{ ok: boolean; runId?: string; pid?: number; error?: string }>
+    stop(runId?: string): Promise<boolean>
+    suspend(runId: string): Promise<boolean>
+    resume(runId: string): Promise<boolean>
+    status(): Promise<{ running: boolean; active: string[]; paused?: string[]; externalActive?: string[] }>
+    onLog(cb: (runId: string, text: string) => void): () => void
+    onStatus(cb: (status: any) => void): () => void
+    onArtifacts(cb: (runId: string, arts: string[]) => void): () => void
+    getMetrics(run: string): Promise<any | null>
+    onMetrics(cb: (runId: string, metrics: any) => void): () => void
+    getThumb(run: string, name: string, maxW?: number, maxH?: number): Promise<string | null>
+    getArtifactStamp(run: string): Promise<string>
+    getCopyPayload(run: string): Promise<{ argsLine: string | null; script: string; fullCommand: string | null }>
+    hasCheckpoint(run: string): Promise<boolean>
+    resumeRun(
+      pythonExe: string,
+      script: string,
+      runId: string
+    ): Promise<{ ok: boolean; runId?: string; pid?: number; error?: string }>
   }
   /** Developer evaluation runs; `config` resolves to null in normal use. */
   evaluation: {

@@ -384,6 +384,11 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
 
         <p className="hint">Páginas ao mesmo tempo, velocidade e intervalo são escolhidos ao abrir cada PDF.</p>
 
+        <p className="hint">
+          Balões e texto são encontrados por modelos prontos para mangá (scripts/manga_vision.py, pasta models/pretrained), e o
+          texto original é apagado com LaMa. Sem o Python/venv, o app usa o detector interno.
+        </p>
+
         {error && <p className="error">{error}</p>}
 
         <div className="modal-actions">

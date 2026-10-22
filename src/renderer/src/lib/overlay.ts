@@ -1,6 +1,17 @@
-import type { Box, FontRole, TextBlock } from '../../../shared/types'
+import type { BlockKind, Box, FontRole, TextBlock } from '../../../shared/types'
 import { FONTS } from './fonts'
 import { components, dilate, erode, isGlyph, odd, quantile, type Comp } from './glyphs'
+import {
+  addEraseArea,
+  addSfxEraseArea,
+  bubbleAt,
+  inpaintCanvas,
+  SFX_MIN_COVERAGE,
+  sfxShape,
+  type Bubble,
+  type Scene,
+  type SfxShape
+} from './scene'
 import { normalizeText, similarText } from './text'
 
 const MIN_FONT = 8
@@ -70,20 +81,33 @@ function isFootnote(block: TextBlock): boolean {
   return block.kind === 'signage' || (block.kind === 'narration' && !block.inkBoxes)
 }
 
-/** Erases the original text of every block, then writes the translations on top. Load fonts first (`ensureFonts`). */
-export function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]): OverlayInfo[] {
+/**
+ * Erases the original text of every block, then writes the translations on top. Load fonts first
+ * (`ensureFonts`). With the vision models' `scene`, LaMa repaints under the text and the translation
+ * is fitted to the detected bubble.
+ */
+export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[], scene: Scene | null = null): Promise<OverlayInfo[]> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const W = canvas.width
   const H = canvas.height
   // Locate all glyphs on the untouched page first, then erase, then write: no step sees another's output.
   const glyphs = blocks.map((block) => findGlyphs(ctx, block, W, H))
+  // Sound effects are brush strokes over the artwork: their shape comes from the models' text mask.
+  const sfx = blocks.map((block, i) => {
+    if (!scene || block.kind !== 'sfx') return null
+    const b = glyphs[i].bbox ?? block.textBox
+    const pad = Math.max(b[2] - b[0], b[3] - b[1]) * 0.1
+    return measureSfx(ctx, sfxShape(scene, expand(b, pad), glyphs[i].bbox ? glyphs[i] : null))
+  })
   const kept = new Set<number>()
   blocks.forEach((block, i) => {
     // Interjections and names that read the same in both languages keep their original lettering.
     const text = normalizeText(block.translation)
     if (!text || text === normalizeText(block.original)) kept.add(i)
     // Placed by the model's own box and no lettering there: writing it would cover the art, not the text.
-    if (!block.inkBoxes && !glyphs[i].bbox && !isFootnote(block)) kept.add(i)
+    if (!block.inkBoxes && !glyphs[i].bbox && !isFootnote(block) && !sfx[i]) kept.add(i)
+    // A sound effect the vision models see no lettering for is left alone rather than erased.
+    if (sfx[i] && sfx[i]!.shape.coverage < SFX_MIN_COVERAGE) kept.add(i)
   })
   const skipDraw = duplicates(blocks, glyphs, kept)
   for (const i of kept) skipDraw.add(i)
@@ -94,7 +118,8 @@ export function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]): Ove
   for (let i = 0; i < blocks.length; i++) {
     if (skipDraw.has(i) && !isFootnote(blocks[i])) skipErase.add(i)
   }
-  glyphs.forEach((g, i) => skipErase.has(i) || erase(ctx, g))
+  const erased = scene ? await eraseWithModels(canvas, scene, blocks, glyphs, sfx, skipErase) : false
+  if (!erased) glyphs.forEach((g, i) => skipErase.has(i) || erase(ctx, g))
 
   const footnotes: string[] = []
   blocks.forEach((block, i) => {
@@ -105,11 +130,220 @@ export function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]): Ove
   })
   if (footnotes.length) appendFootnotes(canvas, footnotes)
 
-  return blocks.map((block, i) => ({
-    drawn: !skipDraw.has(i),
-    letterHeight: glyphs[i].letterHeight,
-    ...(skipDraw.has(i) ? {} : typeset(ctx, block, glyphs[i], W, H))
-  }))
+  // A bubble holding one block is lettered from its own centre; one shared with other text is not.
+  const bubbles = blocks.map((block, i) => (scene && !skipDraw.has(i) ? bubbleAt(scene, glyphs[i].bbox ?? block.textBox) : null))
+  return blocks.map((block, i) => {
+    const bubble = bubbles[i]
+    const alone = bubble !== null && bubbles.filter((b) => b === bubble).length === 1
+    return {
+      drawn: !skipDraw.has(i),
+      letterHeight: glyphs[i].letterHeight,
+      ...(skipDraw.has(i) ? {} : sfx[i] ? drawSfx(ctx, block, sfx[i]!) : typeset(ctx, block, glyphs[i], W, H, bubble, alone))
+    }
+  })
+}
+
+/** One LaMa pass over everything to erase on the page. */
+async function eraseWithModels(
+  canvas: HTMLCanvasElement,
+  scene: Scene,
+  blocks: TextBlock[],
+  glyphs: Glyphs[],
+  sfx: (SfxLook | null)[],
+  skip: Set<number>
+): Promise<boolean> {
+  const mask = new Uint8Array(canvas.width * canvas.height)
+  let any = false
+  blocks.forEach((block, i) => {
+    if (skip.has(i)) return
+    const effect = sfx[i]
+    if (effect) {
+      addSfxEraseArea(mask, scene, effect.shape)
+      any = true
+      return
+    }
+    const g = glyphs[i]
+    const box = g.bbox ? (block.inkBoxes ? union(g.bbox, block.textBox) : g.bbox) : block.textBox
+    const letter = g.letterHeight || block.letterHeight || estimateLetter(block)
+    addEraseArea(mask, scene, box, letter, g.bbox ? g : null)
+    any = true
+  })
+  return any ? inpaintCanvas(canvas, mask) : true
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Sound effects
+// ---------------------------------------------------------------------------------------------------
+
+/** How a sound effect is drawn: along which line, how long and thick, in which colour. */
+interface SfxLook {
+  shape: SfxShape
+  cx: number
+  cy: number
+  /** Direction of the lettering, radians (canvas y points down). */
+  angle: number
+  /** Extent along and across that direction. */
+  length: number
+  thickness: number
+  /** Pixels of lettering: brush strokes cover about a third of their own bounding box. */
+  ink: number
+  fill: RGB | null
+}
+
+/** Direction and extent of the strokes (principal axis of their pixels) and their colour, before erasing. */
+function measureSfx(ctx: CanvasRenderingContext2D, shape: SfxShape): SfxLook {
+  const { box, w, h, mask } = shape
+  const xs: number[] = []
+  const ys: number[] = []
+  const step = Math.max(1, Math.round(Math.sqrt((w * h) / 20000)))
+  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) if (mask[y * w + x]) xs.push(x), ys.push(y)
+  const ink = xs.length * step * step
+  const flat: SfxLook = { shape, cx: box[0] + w / 2, cy: box[1] + h / 2, angle: 0, length: w, thickness: h, ink, fill: null }
+  if (xs.length < 30) return flat
+  const mx = xs.reduce((a, b) => a + b, 0) / xs.length
+  const my = ys.reduce((a, b) => a + b, 0) / ys.length
+  let sxx = 0
+  let syy = 0
+  let sxy = 0
+  for (let k = 0; k < xs.length; k++) {
+    const dx = xs[k] - mx
+    const dy = ys[k] - my
+    sxx += dx * dx
+    syy += dy * dy
+    sxy += dx * dy
+  }
+  // Latin lettering reads badly when steeper than this; tall stacks of Korean syllables are steeper.
+  const angle = clamp(0.5 * Math.atan2(2 * sxy, sxx - syy), -Math.PI / 4, Math.PI / 4)
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const along = xs.map((x, k) => (x - mx) * cos + (ys[k] - my) * sin)
+  const across = xs.map((x, k) => -(x - mx) * sin + (ys[k] - my) * cos)
+  // Strokes hold two colours, fill and outline: the fill is the one found deeper inside the strokes.
+  const d = ctx.getImageData(box[0], box[1], w, h).data
+  // The models' mask is a coarse blob that takes in artwork between the strokes: what matches the
+  // artwork just around it is left out.
+  const core = erode(mask, w, h, 3)
+  const around = dilate(mask, w, h, 15)
+  const ring: RGB[] = []
+  const all: { c: RGB; inner: boolean }[] = []
+  for (let p = 0; p < mask.length; p += step) {
+    const c: RGB = [d[p * 4], d[p * 4 + 1], d[p * 4 + 2]]
+    if (mask[p]) all.push({ c, inner: core[p] === 1 })
+    else if (around[p]) ring.push(c)
+  }
+  const bg = ring.length >= 20 ? medianRgb(ring) : null
+  const lettering = bg ? all.filter((s) => colorDistance(s.c, bg) > 50) : all
+  const strokes = lettering.length >= 20 ? lettering : all
+  return {
+    shape,
+    cx: box[0] + mx,
+    cy: box[1] + my,
+    angle,
+    length: quantile(along, 0.97) - quantile(along, 0.03),
+    thickness: quantile(across, 0.95) - quantile(across, 0.05),
+    ink,
+    fill: strokes.length >= 20 ? fillOf(strokes, bg) : null
+  }
+}
+
+/** Saturation, not raw chroma: a dark purple has little chroma yet is plainly coloured. */
+function saturation(c: RGB): number {
+  return (Math.max(...c) - Math.min(...c)) / Math.max(1, Math.max(...c))
+}
+
+/**
+ * 3-means from the lightest, darkest and most saturated colours: the saturated group, when it is
+ * plainly coloured, more so than the others, and not a speck.
+ */
+function colouredGroup(colors: RGB[]): RGB | null {
+  const pick = (score: (c: RGB) => number): RGB => colors.reduce((best, c) => (score(c) > score(best) ? c : best))
+  let centers: RGB[] = [pick(luminance), pick((c) => -luminance(c)), pick(saturation)]
+  let groups: RGB[][] = []
+  for (let it = 0; it < 8; it++) {
+    groups = [[], [], []]
+    for (const c of colors) {
+      let k = 0
+      for (let i = 1; i < 3; i++) if (colorDistance(c, centers[i]) < colorDistance(c, centers[k])) k = i
+      groups[k].push(c)
+    }
+    centers = groups.map((g, i) => (g.length ? medianRgb(g) : centers[i]))
+  }
+  const order = [0, 1, 2].sort((x, y) => saturation(centers[y]) - saturation(centers[x]))
+  const top = saturation(centers[order[0]])
+  if (top < 0.35 || groups[order[0]].length < colors.length * 0.08) return null
+  if (groups[order[1]].length && saturation(centers[order[1]]) > top - 0.2) return null
+  return centers[order[0]]
+}
+
+/**
+ * The fill colour of a sound effect's strokes. A coloured fill (purple, red) is often a minority of the
+ * pixels next to a white outline and the artwork the mask takes in, so it is looked for first as its
+ * own group; otherwise the strokes split in two (2-means from the lightest and darkest).
+ */
+function fillOf(strokes: { c: RGB; inner: boolean }[], bg: RGB | null): RGB {
+  const coloured = colouredGroup(strokes.map((s) => s.c))
+  if (coloured) return coloured
+  const lum = strokes.map((s) => luminance(s.c))
+  let a = strokes[lum.indexOf(Math.max(...lum))].c
+  let b = strokes[lum.indexOf(Math.min(...lum))].c
+  let side: boolean[] = []
+  for (let it = 0; it < 6; it++) {
+    side = strokes.map((s) => colorDistance(s.c, a) <= colorDistance(s.c, b))
+    const ga = strokes.filter((_, k) => side[k]).map((s) => s.c)
+    const gb = strokes.filter((_, k) => !side[k]).map((s) => s.c)
+    if (!ga.length || !gb.length) return medianRgb(strokes.map((s) => s.c))
+    a = medianRgb(ga)
+    b = medianRgb(gb)
+  }
+  const innerShare = (want: boolean): number => {
+    const group = strokes.filter((_, k) => side[k] === want)
+    return group.filter((s) => s.inner).length / Math.max(1, group.length)
+  }
+  // Two near tones are one colour shaded, not fill and outline.
+  if (colorDistance(a, b) < 60) return medianRgb(strokes.map((s) => s.c))
+  // A coloured tone beside a white, black or grey one is the fill: outlines are neutral.
+  const [sa, sb] = [saturation(a), saturation(b)]
+  if (Math.max(sa, sb) >= 0.3 && Math.abs(sa - sb) >= 0.2) return sa > sb ? a : b
+  // Otherwise the fill stands out from the artwork and the outline sits between them.
+  if (bg) return colorDistance(a, bg) >= colorDistance(b, bg) ? a : b
+  return innerShare(true) >= innerShare(false) ? a : b
+}
+
+/** Writes a translated sound effect on one line in brush lettering, along the original's direction and over its length. */
+function drawSfx(ctx: CanvasRenderingContext2D, block: TextBlock, look: SfxLook): { capHeight: number; fontSize: number; family: string } {
+  const text = block.translation.replace(/\s+/g, ' ').trim().toUpperCase()
+  const face = FONTS.brush
+  const weight = face.weights[face.weights.length - 1]
+  const metrics = faceMetrics(ctx, face.family, weight)
+  ctx.save()
+  ctx.font = `${weight} 100px ${face.family}`
+  const perPx = Math.max(1, ctx.measureText(text).width) / 100
+  // Within the original's extent, and covering about the area its strokes did (a stray patch of the
+  // models' mask stretches the extent, not the ink).
+  const byInk = Math.sqrt(look.ink / 0.35 / (perPx * metrics.capRatio))
+  // The models see only part of large brush strokes, so the ink can at most halve the size.
+  const extent = Math.min((look.length * 0.95) / perPx, (look.thickness * 0.9) / metrics.capRatio)
+  const size = Math.max(MIN_FONT * 1.5, Math.min(extent, Math.max(byInk, extent * 0.5)))
+  const cap = metrics.capRatio * size
+  // The colour measured on the page wins: the model only guesses it from a downscaled slice.
+  const fill = look.fill ? toHex(look.fill) : (block.color ?? '#ffffff')
+  // An outline keeps the effect readable over the artwork: the one the model read, else the opposite tone.
+  const stroke = block.outline ?? (luminance(fromHex(fill)) > 140 ? '#111111' : '#ffffff')
+  ctx.translate(look.cx, look.cy)
+  ctx.rotate(look.angle)
+  // Effects lean forward like the original brush lettering.
+  ctx.transform(1, 0, -0.12, 1, 0, 0)
+  ctx.font = `${weight} ${size}px ${face.family}`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = stroke
+  ctx.lineWidth = Math.max(2, cap * 0.22)
+  ctx.strokeText(text, 0, 0)
+  ctx.fillStyle = fill
+  ctx.fillText(text, 0, 0)
+  ctx.restore()
+  return { capHeight: Math.round(cap), fontSize: Math.round(size), family: face.family }
 }
 
 /** Adds a band below the page with *adendo lines (signage and similar). */
@@ -1019,6 +1253,8 @@ interface Profile {
   round: boolean
   /** The free space clearly keeps its width above and below the text, like a box. */
   square: boolean
+  /** A system window or caption box: its text keeps the original's proportions. */
+  frame: boolean
   bg: RGB
 }
 
@@ -1048,19 +1284,30 @@ function typeset(
   block: TextBlock,
   g: Glyphs,
   W: number,
-  H: number
+  H: number,
+  bubble: Bubble | null = null,
+  alone = false
 ): { capHeight: number; fontSize: number; family: string } {
   const text = matchCase(block.translation, block.original)
   const look = g.look
   const textBox = g.bbox ?? block.textBox
   const capHeight = look?.capHeight ?? block.letterHeight ?? estimateLetter(block) * 0.9
-  const profile = measureBubble(ctx, block, textBox, g.bbox !== null, capHeight, W, H)
+  const profile = bubble
+    ? bubbleProfile(ctx, bubble, textBox, capHeight, alone)
+    : measureBubble(ctx, block, textBox, g.bbox !== null, capHeight, W, H)
   const style = resolveStyle(ctx, block, look, profile)
   // Between the original's proportions and the bubble's: a one-line original in a round bubble becomes
   // a few lines, never a narrow column.
-  const targetAspect = look ? clamp(Math.sqrt(look.aspect * profile.aspect), profile.aspect, profile.aspect * 2.5) : profile.aspect
+  // Windows and caption boxes leave room for icons and gauges: their text keeps the original's shape.
+  const targetAspect = look
+    ? profile.frame
+      ? look.aspect
+      : clamp(Math.sqrt(look.aspect * profile.aspect), profile.aspect, profile.aspect * 2.5)
+    : profile.aspect
   // Same cap height as the original; smaller only when the translation does not fit otherwise.
-  const maxFont = Math.max(MIN_FONT, Math.min(capHeight / style.capRatio, Math.max(14, W / 10)))
+  // Whispers and side remarks are lettered smaller than the original's in scanlations.
+  const quiet = block.kind === 'whisper' || block.kind === 'aside' ? 0.8 : 1
+  const maxFont = Math.max(MIN_FONT, Math.min((quiet * capHeight) / style.capRatio, Math.max(14, W / 10)))
 
   let best: Layout | null = null
   for (const hyphenate of [false, true]) {
@@ -1129,7 +1376,12 @@ function resolveStyle(ctx: CanvasRenderingContext2D, block: TextBlock, look: Loo
     return { ink: m.ink, perimeter: (m.perimeter * (1 + sx)) / 2 / sx }
   }
   let weight = face.weights[Math.min(face.weights.length - 1, 1)]
-  if (look) {
+  // Shouts are lettered in the heaviest weight, whispers in the lightest, whatever the original did.
+  if (block.kind === 'shout') weight = face.weights[face.weights.length - 1]
+  // System windows are set in bold narrow type.
+  else if (block.kind === 'system') weight = face.weights.find((w) => w >= 500) ?? face.weights[face.weights.length - 1]
+  else if (block.kind === 'whisper') weight = face.weights[0]
+  else if (look) {
     let gap = Infinity
     for (const w of face.weights) {
       const d = Math.abs(Math.log(inkOf(w).ink / Math.max(0.01, look.ink)))
@@ -1139,17 +1391,34 @@ function resolveStyle(ctx: CanvasRenderingContext2D, block: TextBlock, look: Loo
   const metrics = faceMetrics(ctx, face.family, weight)
   const chosen = inkOf(weight)
   // Below this the measured lean is noise from the hand lettering.
-  const leaning = look ? (look.slant >= 0.08 ? look.slant : 0) : block.italic ? 0.2 : 0
+  const measuredLean = look ? (look.slant >= 0.08 ? look.slant : 0) : block.italic ? 0.2 : 0
+  // Thoughts, shouts and quiet remarks lean in scanlation lettering even when the original does not.
+  const leaning = Math.max(measuredLean, KIND_LEAN[block.kind] ?? 0)
   const lightBg = luminance(profile.bg) > 140
+  // Glowing letters measure as a mix of fill and glow, close to the background; the colour the model
+  // read stands out from it as the original does.
+  const contrast = (c: number[]) => Math.abs(luminance(c) - luminance(profile.bg))
+  const hinted = block.color ? fromHex(block.color) : null
+  const hintedOutline = block.outline ? fromHex(block.outline) : null
+  // A faint "fill" closer to the outline the model read than to its fill is the glow around the letters.
+  // Letters that stand out from the background were measured right, whatever the model says.
+  const faint = look !== null && contrast(look.fill) < 80
+  const glow = faint && hinted && hintedOutline && colorDistance(look.fill, hintedOutline) < colorDistance(look.fill, hinted)
+  const glowing = hintedOutline !== null && Math.max(...hintedOutline) - Math.min(...hintedOutline) > 80
+  const measured = look && !glow && !(hinted && contrast(look.fill) < contrast(hinted) * 0.6)
   return {
     family: face.family,
     weight,
     scaleX: widthOf(weight),
     slant: leaning - metrics.slant,
     // Stroking the outline with width b adds about outline length Ã— b / 2 of ink.
-    bold: look ? clamp((2 * (look.ink - chosen.ink)) / Math.max(0.1, chosen.perimeter), 0, 0.08) : 0,
-    fill: look ? toHex(look.fill) : (block.color ?? (lightBg ? '#111111' : '#ffffff')),
-    stroke: look ? (look.outline ? toHex(look.outline) : null) : (block.outline ?? null),
+    bold: Math.max(
+      look ? clamp((2 * (look.ink - chosen.ink)) / Math.max(0.1, chosen.perimeter), 0, 0.08) : 0,
+      block.kind === 'shout' ? 0.04 : 0
+    ),
+    fill: measured ? toHex(look.fill) : (block.color ?? (lightBg ? '#111111' : '#ffffff')),
+    // Faint letters without a measured outline get the coloured glow the model read (window text).
+    stroke: measured && (look.outline || !(faint && glowing)) ? (look.outline ? toHex(look.outline) : null) : (block.outline ?? null),
     strokeRatio: look?.outline ? clamp(look.outlineRatio, 0.08, 0.3) : 0.15,
     capRatio: metrics.capRatio,
     pitch: look && look.pitch > 0 ? clamp(look.pitch / look.capHeight, 1.3, 2.1) : LINE_PITCH,
@@ -1167,13 +1436,31 @@ function shapeOf(block: TextBlock, profile: Profile): Style['shape'] {
   return block.kind === 'narration' || block.kind === 'sfx' || block.kind === 'other' ? 'box' : 'ellipse'
 }
 
+/** Lean (horizontal shift per pixel of height) each kind of text gets at least. */
+const KIND_LEAN: Partial<Record<BlockKind, number>> = { thought: 0.18, shout: 0.15, whisper: 0.12, aside: 0.12 }
+
 /**
- * The lettering style read from the original's pixels: leaning hand lettering, narrow upright type
- * (system windows, captions) or regular comic lettering; very heavy strokes are shouts. The model's
- * hint decides when there are no pixels, and for serif type, which the measurements cannot tell apart.
+ * Scanlators letter each kind of text in its own face: dialogue, thoughts, shouts and captions in comic
+ * lettering (thoughts and shouts leaning, shouts heavier), whispers and side remarks by hand, system
+ * windows and signs in narrow type. Other text follows the original's pixels: leaning hand lettering,
+ * narrow upright type or comic lettering. The model's hint decides when there are no pixels, and for
+ * serif type, which the measurements cannot tell apart.
  */
 function chooseRole(block: TextBlock, look: Look | null, text: string): FontRole {
-  if (!look) return block.font ?? (block.kind === 'aside' ? 'handwritten' : block.kind === 'system' ? 'condensed' : 'comic')
+  switch (block.kind) {
+    case 'speech':
+    case 'thought':
+    case 'shout':
+    case 'narration':
+      return block.font === 'serif' ? 'serif' : 'comic'
+    case 'whisper':
+    case 'aside':
+      return 'handwritten'
+    case 'system':
+    case 'signage':
+      return block.font === 'serif' ? 'serif' : 'condensed'
+  }
+  if (!look) return block.font ?? 'comic'
   if (block.font === 'serif') return 'serif'
   if (look.slant >= 0.12) return look.weight > 0.2 ? 'brush' : 'handwritten'
   // Comic lettering is narrower than Comic Neue, but not by this much.
@@ -1248,6 +1535,8 @@ function faceMetrics(ctx: CanvasRenderingContext2D, family: string, weight: numb
   const sample = 'THE QUICK BROWN FOX JUMPS OVER'
   ctx.save()
   ctx.font = font
+  // The ascent is measured from the baseline in use: a 'top' or 'middle' left set by drawing skews it.
+  ctx.textBaseline = 'alphabetic'
   const cap = ctx.measureText('H').actualBoundingBoxAscent || size * 0.7
   const advance = ctx.measureText(sample).width / sample.length / cap
   ctx.restore()
@@ -1297,7 +1586,7 @@ function measureBubble(
   const cy = Math.round((textBox[1] + textBox[3]) / 2)
   const widths = new Float32Array(Math.max(0, lh))
   if (lw < 4 || lh < 4) {
-    return { widths, top: limit[1], cx, cy, spanTop: cy, spanBottom: cy, aspect: 1, round: false, square: false, bg: [255, 255, 255] }
+    return { widths, top: limit[1], cx, cy, spanTop: cy, spanBottom: cy, aspect: 1, round: false, square: false, frame: false, bg: [255, 255, 255] }
   }
 
   const d = ctx.getImageData(limit[0], limit[1], lw, lh).data
@@ -1395,6 +1684,102 @@ function measureBubble(
     aspect: centre / (2 * half),
     round,
     square,
+    frame: false,
+    bg
+  }
+}
+
+/**
+ * The free space from the detected bubble's outline: each row's width is the bubble's interior around
+ * the centre line. A bubble holding only this block is lettered around its own centre; a shared one
+ * around the original text.
+ */
+function bubbleProfile(ctx: CanvasRenderingContext2D, bubble: Bubble, textBox: Box, letterHeight: number, alone: boolean): Profile {
+  const { box, w, h } = bubble
+  // Keep clear of the border line, which the interior mask runs up to.
+  const mask = erode(bubble.mask, w, h, odd(Math.max(3, Math.round(letterHeight * 0.2))))
+  const runAt = (y: number, x: number): [number, number] | null => {
+    if (x < 0 || x >= w || !mask[y * w + x]) return null
+    let l = x
+    let r = x
+    while (l > 0 && mask[y * w + l - 1]) l--
+    while (r < w - 1 && mask[y * w + r + 1]) r++
+    return [l, r + 1]
+  }
+  let lcx = Math.round((textBox[0] + textBox[2]) / 2 - box[0])
+  let lcy = Math.round((textBox[1] + textBox[3]) / 2 - box[1])
+  // The body of the bubble: rows at least a third as wide as its widest (not the tail's tip).
+  const lefts = new Int32Array(h).fill(-1)
+  const rights = new Int32Array(h).fill(-1)
+  let widest = 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) if (mask[y * w + x]) (lefts[y] < 0 && (lefts[y] = x), (rights[y] = x + 1))
+    if (lefts[y] >= 0) widest = Math.max(widest, rights[y] - lefts[y])
+  }
+  let top = h
+  let bottom = 0
+  for (let y = 0; y < h; y++) if (lefts[y] >= 0 && rights[y] - lefts[y] >= widest / 3) (top = Math.min(top, y)), (bottom = y)
+  // A mask cut by the detector's box has a straight vertical side where the bubble is round: many rows
+  // end on the same column. That side is unknown, so the text keeps the original's centre there.
+  const body: number[] = []
+  for (let y = Math.round(top + (bottom - top) * 0.2); y <= Math.round(top + (bottom - top) * 0.8); y++) if (lefts[y] >= 0) body.push(y)
+  const straight = (edges: number[], extreme: number) =>
+    edges.length > 4 && edges.filter((e) => Math.abs(e - extreme) <= 1).length > edges.length * 0.35
+  const bodyLefts = body.map((y) => lefts[y])
+  const bodyRights = body.map((y) => rights[y])
+  const cutLeft = straight(bodyLefts, Math.min(...bodyLefts))
+  const cutRight = straight(bodyRights, Math.max(...bodyRights))
+  if (alone && top <= bottom) {
+    // Centre of the interior: the middle of the body's rows, and the middle of its widest runs. Windows
+    // and caption boxes keep the original's height: icons and gauges often fill the rest.
+    if (!bubble.frame) lcy = Math.round((top + bottom) / 2)
+    const mids: number[] = []
+    for (let y = Math.round(top + (bottom - top) * 0.3); y <= Math.round(top + (bottom - top) * 0.7); y++) {
+      const run = runAt(y, clamp(lcx, 0, w - 1)) ?? runAt(y, Math.round(w / 2))
+      if (run) mids.push((run[0] + run[1]) / 2)
+    }
+    if (mids.length && !cutLeft && !cutRight) lcx = Math.round(quantile(mids, 0.5))
+  }
+  const widths = new Float32Array(h)
+  let spanTop = lcy
+  let spanBottom = lcy
+  for (let y = 0; y < h; y++) {
+    // Decorations inside a window (highlights, bars) break its flat area; its sides bound the text.
+    const run: [number, number] | null = bubble.frame ? (lefts[y] >= 0 && lefts[y] <= lcx && rights[y] > lcx ? [lefts[y], rights[y]] : null) : runAt(y, clamp(lcx, 0, w - 1))
+    if (!run) continue
+    const left = lcx - run[0]
+    const right = run[1] - lcx
+    widths[y] = 2 * (cutLeft && cutRight ? Math.max(left, right) : cutLeft ? right : cutRight ? left : Math.min(left, right))
+  }
+  const minRow = Math.max(4, letterHeight * 0.8)
+  while (spanTop > 0 && widths[spanTop - 1] >= minRow) spanTop--
+  while (spanBottom < h - 1 && widths[spanBottom + 1] >= minRow) spanBottom++
+  if (!alone) {
+    // The original text fitted there, so the translation may use at least that much room.
+    const textWidth = (textBox[2] - textBox[0]) / FILL
+    for (let y = Math.max(0, textBox[1] - box[1]); y < Math.min(h, textBox[3] - box[1]); y++) widths[y] = Math.max(widths[y], textWidth)
+  }
+  const centre = widths[clamp(lcy, 0, h - 1)]
+  const height = Math.max(1, spanBottom - spanTop)
+  const fill = bubble.area / Math.max(1, w * h)
+  const cx = lcx + box[0]
+  const cy = lcy + box[1]
+  // The original text is erased by now, so its area shows the bubble's colour.
+  const tw = Math.max(1, Math.round(textBox[2] - textBox[0]))
+  const th = Math.max(1, Math.round(textBox[3] - textBox[1]))
+  const bg = medianColor(ctx.getImageData(Math.round(textBox[0]), Math.round(textBox[1]), tw, th).data, tw, [0, 0, tw, th]) as RGB
+  return {
+    widths,
+    top: box[1],
+    cx,
+    cy,
+    spanTop: spanTop + box[1],
+    spanBottom: spanBottom + box[1],
+    aspect: centre / height,
+    // An ellipse fills about 79% of its bounding box, a rectangle all of it (a cut one looks squarer).
+    round: fill < 0.9 || cutLeft || cutRight,
+    square: fill >= 0.93 && !cutLeft && !cutRight,
+    frame: bubble.frame,
     bg
   }
 }
@@ -1429,9 +1814,11 @@ function layoutAt(
   const centreWidth = usable(profile.cy - lineH / 2, profile.cy + lineH / 2)
   if (centreWidth <= 0 || lineH > spanH) return null
 
-  // Boxes keep the translation's own line breaks (a status window's title and fields); bubbles are
-  // re-broken to their shape.
-  const paragraphs = style.shape === 'box' ? text.split(/\s*\n\s*/) : [text]
+  // Status windows keep the translation's line breaks (a title and "field: value" lines); other text is
+  // re-broken to its space, as the model copies the original's breaks, which suit English lengths.
+  const given = text.split(/\s*\n\s*/)
+  const fields = given.length > 2 && given.filter((l) => /:\s*\S/.test(l)).length >= 2
+  const paragraphs = style.shape === 'box' && fields ? given : [given.join(' ')]
   const words: string[] = []
   const starts = new Set<number>()
   for (const paragraph of paragraphs) {
@@ -1456,7 +1843,8 @@ function layoutAt(
 
     const shape =
       style.shape === 'ellipse'
-        ? ys.map((y) => Math.sqrt(Math.max(0.2, 1 - ((y - centre) / (blockH * 0.62)) ** 2)))
+        ? // A pronounced diamond: first and last lines clearly shorter than the middle ones.
+          ys.map((y) => Math.sqrt(Math.max(0.2, 1 - ((y - centre) / (blockH * 0.52)) ** 2)))
         : ys.map(() => 1)
     const scale = total / shape.reduce((a, b) => a + b, 0)
     const targets = shape.map((s) => s * scale)
@@ -1653,6 +2041,11 @@ function medianRgb(samples: RGB[]): RGB {
 
 function colorDistance(a: RGB, b: RGB): number {
   return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]))
+}
+
+function fromHex(hex: string): RGB {
+  const n = parseInt(hex.slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
 
 function toHex(c: RGB): string {

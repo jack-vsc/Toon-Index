@@ -17,7 +17,7 @@ export function buildPrompt(req: TranslateRequest, settings: AppSettings): strin
       ? 'Detect the source language automatically.'
       : `The source language is ${settings.sourceLanguage}.`
   const sfx = settings.translateSfx
-    ? 'Also include sound effects / onomatopoeia (kind "sfx").'
+    ? `Also include sound effects / onomatopoeia drawn in the artwork (kind "sfx"), Korean, Japanese and Chinese ones too: each sound effect is one block, and its "translation" is the onomatopoeia a ${settings.targetLanguage} letterer would draw instead (short, uppercase: a laugh, a gulp, a thud), never a description of the sound and never the original characters: a Korean, Japanese or Chinese sound effect is always rewritten in Latin letters.`
     : 'Ignore sound effects / onomatopoeia drawn as part of the artwork; do not return them.'
 
   const multi = req.images.length > 1
@@ -59,7 +59,7 @@ The software can be wrong: a box may surround artwork or a bubble's border with 
 ${source}
 Translate the text into ${settings.targetLanguage}.
 ${sfx}
-Scanlation credits, watermarks and website URLs are not translated. Korean, Japanese or Chinese writing left in the artwork of a page lettered in another language (shop signs, background writing, leftovers of the original edition) is part of the art: skip it. Lettered text is always translated, system windows and status screens included.
+Scanlation credits, watermarks and website URLs are not translated. Korean, Japanese or Chinese writing left in the artwork of a page lettered in another language (shop signs, background writing, leftovers of the original edition) is part of the art: skip it${settings.translateSfx ? ', unless it is a sound effect' : ''}. Lettered text is always translated, system windows and status screens included.
 
 Answer EVERY numbered box exactly once: put its number in the "ids" of the text block it belongs to, or in "skip" when it holds nothing to translate (artwork, a pattern, a bubble border, a watermark or credit, a sound effect that is not translated). A bubble whose text is split over several boxes is one block that lists all of them; the main bubble and a small line in its corner are always separate blocks. Separate bubbles, captions and side remarks beside a bubble are separate blocks too. A box left out stays untranslated on the page.
 
@@ -100,7 +100,7 @@ Respond with ONLY a JSON object, no markdown fences and no commentary, in exactl
 function blockFields(target: string): string {
   return `- "original": the original text.
 - "translation": natural, fluent ${target}, matching the tone of the character. Keep it concise so it fits the bubble.
-- "kind": "speech" (regular dialogue bubble), "thought" (inner monologue: cloud, fuzzy or dark bubble), "shout" (yelling: jagged burst bubble or big bold lettering), "narration" (caption box with a flat background), "system" (game-like system window, status screen or notification), "aside" (small remark in the corner of a bubble or beside a character, always its own block), "signage" (a sign, building name or label drawn on the artwork, such as a hospital or shop front; the translation is shown below the panel, not over the art), "sfx" (sound effect).
+- "kind": "speech" (regular dialogue bubble), "thought" (inner monologue: cloud, fuzzy or dark bubble), "shout" (yelling: jagged burst bubble or big bold lettering), "whisper" (said quietly: dashed or faint bubble, small light lettering), "narration" (caption box with a flat background), "system" (game-like system window, status screen or notification), "aside" (small remark in the corner of a bubble or beside a character, always its own block), "signage" (a sign, building name or label drawn on the artwork, such as a hospital or shop front; the translation is shown below the panel, not over the art), "sfx" (sound effect).
 - "font": typeface of the original lettering: "comic" (standard comic lettering), "brush" (bold slanted marker/brush lettering), "condensed" (tall narrow sans-serif), "sans", "serif" or "handwritten" (small casual handwriting).
 - "italic": true if the original lettering is slanted.
 - "color": fill colour of the original letters as "#rrggbb".
@@ -109,7 +109,7 @@ function blockFields(target: string): string {
 
 const EXAMPLE_FIELDS = '"original":"","translation":"","kind":"speech","font":"comic","italic":false,"color":"#000000","outline":null'
 
-const KINDS: BlockKind[] = ['speech', 'thought', 'shout', 'narration', 'system', 'aside', 'signage', 'sfx', 'other']
+const KINDS: BlockKind[] = ['speech', 'thought', 'shout', 'whisper', 'narration', 'system', 'aside', 'signage', 'sfx', 'other']
 const FONT_ROLES: FontRole[] = ['comic', 'brush', 'condensed', 'sans', 'serif', 'handwritten']
 
 /**

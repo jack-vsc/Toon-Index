@@ -5,3 +5,13 @@ src/renderer/public/pdfjs/
 *.log
 samples/cap53 portugues/
 samples/eval/
+.env
+.env.*
+**/chapter-meta.json
+models/pretrained/
+# Local Python environment, model weights and training runs
+.venv/
+__pycache__/
+weights/
+runs/
+*.pt

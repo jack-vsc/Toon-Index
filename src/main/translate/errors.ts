@@ -24,7 +24,7 @@ const VISION = /image input|support(s)? images?|vision|image_url|multimodal/i
 const MODEL = /model.{0,40}(not found|does not exist|is not a valid|invalid|unknown|not available)|no endpoints found|not a valid model/i
 const RATE = /rate.?limit|too many requests|resource.?exhausted/i
 const SERVER = /overloaded|unavailable|bad gateway|timed? ?out|internal server error/i
-const NETWORK = /fetch failed|enotfound|econnrefused|econnreset|etimedout|getaddrinfo|network/i
+const NETWORK = /fetch failed|enotfound|econnrefused|econnreset|etimedout|getaddrinfo|network|net::ERR_/i
 
 /** Turns whatever a provider threw into a message that says what happened and what to do. */
 export function describeError(err: unknown, profile: ApiProfile): Error {

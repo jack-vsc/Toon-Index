@@ -1,6 +1,12 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { FATAL_ERRORS, toAppError, type AppError } from '../../../shared/errors'
-import { CANCELLED, type Box, type MarkedRegion, type PageImage, type TextBlock } from '../../../shared/types'
+import {
+  CANCELLED,
+  type Box,
+  type MarkedRegion,
+  type PageImage,
+  type TextBlock
+} from '../../../shared/types'
 import { detectText, drawKey, drawMarks, type TextRegion } from './detect'
 import { buildPdf, type OutputPage } from './exportPdf'
 import { ensureFonts } from './fonts'
@@ -17,6 +23,7 @@ import {
   thumbnailCanvas
 } from './pdf'
 import { planSlices } from './slicing'
+import { analyzePage, regionsInSlice, type Scene } from './scene'
 import { normalizeText, similarText } from './text'
 
 /** Output resolution (page width in px). */
@@ -45,7 +52,18 @@ export interface PageState {
   /** Full-size output image (translated, or original for skipped pages). */
   imageUrl?: string
   parts?: { done: number; total: number }
+  /** What a working page is waiting for or doing, when pages go through the steps together (phased runs). */
+  stage?: string
   ms?: number
+}
+
+/** A page after detection: what is kept between the steps of a phased run (the page is rendered again). */
+interface Detected {
+  started: number
+  widthPt: number
+  heightPt: number
+  tall: boolean
+  scene: Scene | null
 }
 
 export class TranslationJob {
@@ -98,12 +116,17 @@ export class TranslationJob {
     }
   }
 
-  /** Translates every selected page that is not done yet. */
-  async run(concurrency: number): Promise<void> {
+  /**
+   * Translates every selected page that is not done yet. `phased` runs one AI at a time on the GPU for
+   * the whole chapter (detection, then translation, then erasing and lettering) instead of page by page,
+   * so a local translation model gets the GPU to itself.
+   */
+  async run(concurrency: number, phased = false): Promise<void> {
     this.cancelled = false
     this.stopReason = null
     this.limiter = new Limiter(concurrency)
     this.retry()
+    if (phased) return this.runPhased(concurrency)
     // Pages are picked when a worker is free, so pages retried during the run join it.
     const claimed = new Set<number>()
     const worker = async () => {
@@ -116,6 +139,47 @@ export class TranslationJob {
       }
     }
     await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker))
+  }
+
+  private async runPhased(concurrency: number): Promise<void> {
+    const pending = this.pages.filter((p) => p.status === 'pending').map((p) => p.number)
+    const detected = new Map<number, Detected>()
+    for (const number of pending) {
+      if (this.cancelled) break
+      await this.guard(number, async () => {
+        const { started, widthPt, heightPt, tall, scene } = await this.detect(number, 'Detectando texto')
+        detected.set(number, { started, widthPt, heightPt, tall, scene })
+        this.update(number, { stage: 'Aguardando tradução' })
+      })
+    }
+    // The vision models leave the GPU to the translation model.
+    await window.api.ai.stop('vision').catch(() => undefined)
+    const translated = new Map<number, TextBlock[]>()
+    const queue = [...detected.keys()]
+    const worker = async () => {
+      for (let number = queue.shift(); number !== undefined && !this.cancelled; number = queue.shift()) {
+        const page = detected.get(number)!
+        await this.guard(number, async () => {
+          this.update(number, { stage: 'Traduzindo' })
+          const canvas = await renderForTranslation(this.doc, number)
+          translated.set(number, await this.translateSlices(number, prepareSlices(canvas, page.tall, page.scene)))
+          this.update(number, { stage: 'Aguardando redesenho' })
+        })
+      }
+    }
+    await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker))
+    // And the translation model leaves it to the inpainting model.
+    if (!this.cancelled) await window.api.ai.stop('ollama-models').catch(() => undefined)
+    for (const [number, blocks] of translated) {
+      if (this.cancelled) break
+      const page = detected.get(number)!
+      await this.guard(number, async () => {
+        this.update(number, { stage: 'Redesenhando' })
+        const canvas = await renderForTranslation(this.doc, number)
+        await this.draw(number, { ...page, canvas, prepared: prepareSlices(canvas, page.tall, page.scene) }, blocks)
+      })
+    }
+    for (const number of pending) if (!this.cancelled && this.pages.find((p) => p.number === number)?.status === 'working') this.update(number, { status: 'pending', stage: undefined })
   }
 
   /** Puts failed pages (the given ones, or all) back in the queue. */
@@ -167,71 +231,98 @@ export class TranslationJob {
   }
 
   private async processPage(pageNumber: number): Promise<void> {
-    const started = performance.now()
-    this.update(pageNumber, { status: 'working', error: undefined, parts: undefined })
+    await this.guard(pageNumber, async () => {
+      const page = await this.detect(pageNumber)
+      const blocks = await this.translateSlices(pageNumber, page.prepared)
+      await this.draw(pageNumber, page, blocks)
+    })
+  }
+
+  /** Runs one step of a page; a failure marks the page (and stops the run when every page would fail alike). */
+  private async guard(pageNumber: number, step: () => Promise<unknown>): Promise<void> {
     try {
-      const { widthPt, heightPt } = await pageSize(this.doc, pageNumber)
-      const tall = isTallPage(widthPt, heightPt)
-      const canvas = await renderForTranslation(this.doc, pageNumber)
-      const prepared = prepareSlices(canvas, tall)
-
-      const chunks = chunk(prepared, MAX_IMAGES_PER_REQUEST)
-      let done = 0
-      this.update(pageNumber, { parts: { done, total: chunks.length } })
-      const results = await Promise.all(
-        chunks.map((part) =>
-          this.limiter.run(async () => {
-            if (this.cancelled) throw new Error(CANCELLED)
-            const { images, key, regions } = await markedImages(part)
-            const requestId = crypto.randomUUID()
-            this.activeRequests.add(requestId)
-            try {
-              const blocks = await window.api.translate({ images, key, regions, pageNumber, requestId })
-              this.update(pageNumber, { parts: { done: ++done, total: chunks.length } })
-              return blocks.flatMap((list, i) => list.map((b) => toPageSpace(b, part[i].scale, part[i].offsetY)))
-            } finally {
-              this.activeRequests.delete(requestId)
-            }
-          })
-        )
-      )
-      if (this.cancelled) throw new Error(CANCELLED)
-
-      const blocks = dedupe(results.flat())
-      this.blocks.set(pageNumber, blocks)
-      await ensureFonts()
-      const pagePx = canvas.height
-      const before = this.onPageRendered ? cropCanvas(canvas, { x: 0, y: 0, width: canvas.width, height: pagePx }, Infinity) : null
-      const drawn = drawOverlay(canvas, blocks)
-      const heightPtOut = heightPt * (canvas.height / pagePx)
-      if (before) {
-        const regions = prepared.flatMap((p) =>
-          p.regions.map(({ box: b }): Box => [b[0] * p.scale, b[1] * p.scale + p.offsetY, b[2] * p.scale, b[3] * p.scale + p.offsetY])
-        )
-        await this.onPageRendered?.(pageNumber, before, canvas, regions, drawn)
-      }
-
-      const jpeg = await canvasToBytes(canvas, 'image/jpeg', 0.9)
-      this.outputs.set(pageNumber, { jpeg, widthPt, heightPt: heightPtOut })
-      this.update(pageNumber, {
-        status: 'done',
-        blockCount: blocks.length,
-        ms: performance.now() - started,
-        imageUrl: jpegUrl(jpeg),
-        thumbUrl: URL.createObjectURL(await canvasToBlob(thumbnailCanvas(canvas, THUMB_LONG_SIDE), 'image/jpeg', 0.8))
-      })
+      await step()
     } catch (err) {
       if (this.cancelled) {
-        this.update(pageNumber, { status: 'pending', parts: undefined })
+        this.update(pageNumber, { status: 'pending', parts: undefined, stage: undefined })
         return
       }
       const error = toAppError(err)
-      this.update(pageNumber, { status: 'error', error })
+      this.update(pageNumber, { status: 'error', error, stage: undefined })
       if (FATAL_ERRORS.has(error.code)) {
         this.stopReason = error
         this.cancel()
       }
     }
+  }
+
+  /** Renders the page and finds its text and bubbles. */
+  private async detect(pageNumber: number, stage?: string): Promise<Detected & { canvas: HTMLCanvasElement; prepared: PreparedSlice[] }> {
+    const started = performance.now()
+    this.update(pageNumber, { status: 'working', error: undefined, parts: undefined, stage })
+    const { widthPt, heightPt } = await pageSize(this.doc, pageNumber)
+    const tall = isTallPage(widthPt, heightPt)
+    const canvas = await renderForTranslation(this.doc, pageNumber)
+    const scene = await analyzePage(canvas)
+    return { started, widthPt, heightPt, tall, scene, canvas, prepared: prepareSlices(canvas, tall, scene) }
+  }
+
+  /** Sends the page's slices to the model; blocks come back in page pixels. */
+  private async translateSlices(pageNumber: number, prepared: PreparedSlice[]): Promise<TextBlock[]> {
+    const chunks = chunk(prepared, MAX_IMAGES_PER_REQUEST)
+    let done = 0
+    this.update(pageNumber, { parts: { done, total: chunks.length } })
+    const results = await Promise.all(
+      chunks.map((part) =>
+        this.limiter.run(async () => {
+          if (this.cancelled) throw new Error(CANCELLED)
+          const { images, key, regions } = await markedImages(part)
+          const requestId = crypto.randomUUID()
+          this.activeRequests.add(requestId)
+          try {
+            const blocks = await window.api.translate({ images, key, regions, pageNumber, requestId })
+            this.update(pageNumber, { parts: { done: ++done, total: chunks.length } })
+            return blocks.flatMap((list, i) => list.map((b) => toPageSpace(b, part[i].scale, part[i].offsetY)))
+          } finally {
+            this.activeRequests.delete(requestId)
+          }
+        })
+      )
+    )
+    if (this.cancelled) throw new Error(CANCELLED)
+    return dedupe(results.flat())
+  }
+
+  /** Erases the original lettering, writes the translation and stores the finished page. */
+  private async draw(
+    pageNumber: number,
+    page: Detected & { canvas: HTMLCanvasElement; prepared: PreparedSlice[] },
+    blocks: TextBlock[]
+  ): Promise<void> {
+    const { canvas, prepared, scene, widthPt, heightPt } = page
+    this.blocks.set(pageNumber, blocks)
+    await ensureFonts()
+    const pagePx = canvas.height
+    const before = this.onPageRendered ? cropCanvas(canvas, { x: 0, y: 0, width: canvas.width, height: pagePx }, Infinity) : null
+    const drawn = await drawOverlay(canvas, blocks, scene)
+    const heightPtOut = heightPt * (canvas.height / pagePx)
+    if (before) {
+      const regions = prepared.flatMap((p) =>
+        p.regions.map(({ box: b }): Box => [b[0] * p.scale, b[1] * p.scale + p.offsetY, b[2] * p.scale, b[3] * p.scale + p.offsetY])
+      )
+      await this.onPageRendered?.(pageNumber, before, canvas, regions, drawn)
+    }
+
+    const jpeg = await canvasToBytes(canvas, 'image/jpeg', 0.9)
+    this.outputs.set(pageNumber, { jpeg, widthPt, heightPt: heightPtOut })
+    this.update(pageNumber, {
+      status: 'done',
+      stage: undefined,
+      blockCount: blocks.length,
+      ms: performance.now() - page.started,
+      imageUrl: jpegUrl(jpeg),
+      thumbUrl: URL.createObjectURL(await canvasToBlob(thumbnailCanvas(canvas, THUMB_LONG_SIDE), 'image/jpeg', 0.8))
+    })
   }
 
   private async renderOriginal(pageNumber: number): Promise<OutputPage> {
@@ -280,20 +371,38 @@ export async function renderForTranslation(doc: PDFDocumentProxy, pageNumber: nu
 }
 
 /** Cuts the page into the overlapping images sent to the model and finds the text on each. */
-export function prepareSlices(canvas: HTMLCanvasElement, tall: boolean): PreparedSlice[] {
+export function prepareSlices(canvas: HTMLCanvasElement, tall: boolean, scene: Scene | null = null): PreparedSlice[] {
   const sliceHeight = Math.round(canvas.width * SLICE_ASPECT)
-  const slices = planSlices(canvas, sliceHeight, Math.round(sliceHeight * SLICE_OVERLAP))
+  const keep = (scene?.blocks ?? []).map((b): [number, number] => [b.box[1] - b.letterHeight, b.box[3] + b.letterHeight])
+  const slices = planSlices(canvas, sliceHeight, Math.round(sliceHeight * SLICE_OVERLAP), keep)
   const aiLongSide = tall ? AI_LONG_SIDE_TALL : AI_LONG_SIDE
-  const prepared = slices.map((slice) => {
+  const prepared: PreparedSlice[] = []
+  for (const slice of slices) {
     const crop = cropCanvas(canvas, { x: 0, y: slice.y0, width: canvas.width, height: slice.y1 - slice.y0 }, aiLongSide)
-    // Text touching a cut between overlapping slices is whole in the neighbouring slice.
+    const scale = canvas.width / crop.width
     const cutTop = slice.y0 > 0
     const cutBottom = slice.y1 < canvas.height
-    const regions = detectText(crop).filter((r) => !(cutTop && r.box[1] <= 2) && !(cutBottom && r.box[3] >= crop.height - 2))
-    return { crop, regions, offsetY: slice.y0, scale: canvas.width / crop.width }
-  })
+    const found = detectText(crop).filter((r) => !(cutTop && r.box[1] <= 2) && !(cutBottom && r.box[3] >= crop.height - 2))
+    // The models find the text; the built-in detector only adds what they missed (small remarks), and
+    // the translation model skips its boxes that hold no text.
+    const regions = scene
+      ? withExtras(regionsInSlice(scene, slice.y0, slice.y1, scale), regionsInSlice(scene, slice.y0, slice.y1, scale, true), found)
+      : found
+    prepared.push({ crop, regions, offsetY: slice.y0, scale })
+  }
   boxOnce(prepared)
   return prepared
+}
+
+/** `around` also holds the models' blocks cut by the slice edge: lines of those found here are not extra. */
+function withExtras(models: TextRegion[], around: TextRegion[], extra: TextRegion[]): TextRegion[] {
+  const area = (b: Box) => Math.max(1, (b[2] - b[0]) * (b[3] - b[1]))
+  const overlaps = (a: Box, b: Box) => {
+    const ix = Math.min(a[2], b[2]) - Math.max(a[0], b[0])
+    const iy = Math.min(a[3], b[3]) - Math.max(a[1], b[1])
+    return ix > 0 && iy > 0 && ix * iy > 0.2 * Math.min(area(a), area(b))
+  }
+  return [...models, ...extra.filter((e) => !around.some((m) => overlaps(m.box, e.box)))]
 }
 
 /**

@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { activeProfile, type AppSettings, type PublicSettings, type Speed } from '../../../shared/types'
+import { activeProfile, type AppSettings, type GpuSharing, type PublicSettings, type Speed } from '../../../shared/types'
 import { LanguageSelect } from './LanguageSelect'
 
 export type RunOptions = Pick<
   AppSettings,
-  'sourceLanguage' | 'targetLanguage' | 'concurrency' | 'speed' | 'translateSfx' | 'skipStart' | 'skipEnd'
+  'sourceLanguage' | 'targetLanguage' | 'concurrency' | 'speed' | 'translateSfx' | 'skipStart' | 'skipEnd' | 'gpuSharing'
 >
 
 export interface SetupChoice {
@@ -26,6 +26,12 @@ interface Props {
   onOpenSettings: () => void
 }
 
+const GPU_LABEL: Record<GpuSharing, string> = {
+  auto: 'Automático (separa com modelo local em GPU pequena)',
+  phased: 'Uma IA de cada vez (GPU com pouca memória)',
+  together: 'Tudo junto, página por página (GPU com bastante memória)'
+}
+
 const SPEED_LABEL: Record<Speed, string> = {
   fast: 'Rápido (raciocínio baixo)',
   balanced: 'Equilibrado',
@@ -40,7 +46,8 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
     speed: settings.speed,
     translateSfx: settings.translateSfx,
     skipStart: settings.skipStart,
-    skipEnd: settings.skipEnd
+    skipEnd: settings.skipEnd,
+    gpuSharing: settings.gpuSharing
   }))
   const [mode, setMode] = useState<'all' | 'range'>('all')
   const [from, setFrom] = useState(1)
@@ -159,6 +166,21 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
           <input type="checkbox" checked={draft.translateSfx} onChange={(e) => patch({ translateSfx: e.target.checked })} />
           Traduzir onomatopeias
         </label>
+
+        <section>
+          <label className="field-label">Uso da GPU</label>
+          <select value={draft.gpuSharing} onChange={(e) => patch({ gpuSharing: e.target.value as GpuSharing })}>
+            {(Object.keys(GPU_LABEL) as GpuSharing[]).map((g) => (
+              <option key={g} value={g}>
+                {GPU_LABEL[g]}
+              </option>
+            ))}
+          </select>
+          <p className="hint">
+            Uma de cada vez: detecta o capítulo todo, depois traduz, depois redesenha, liberando a GPU entre as etapas. Deixa
+            modelos locais bem mais rápidos em placas de até 8 GB.
+          </p>
+        </section>
 
         <section>
           <label className="field-label">API</label>
