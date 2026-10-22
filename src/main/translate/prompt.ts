@@ -230,9 +230,13 @@ function place(
       if (!kept.includes(r) && kept.some((k) => continues(k, r))) kept.push(r), (grew = true)
     }
   }
-  // Every word is at least one piece of ink: fewer pieces than words is a box beside the text the model
-  // read (a bubble's spiky border next to a small remark), and lettering it there would be the wrong size.
-  if (kept.reduce((n, r) => n + r.glyphs, 0) < words) return undefined
+  // Every word is at least one piece of ink: far fewer pieces than words is a box beside the text the
+  // model read (a bubble's spiky border next to a small remark, a face), and lettering it there would be
+  // the wrong size. Longer text may come in half as many pieces, its small lines run together into one
+  // band (chapter 53: a status window 26 pieces for 47 words, a face 3 for 7); a remark of a word or two
+  // must not, being exactly what a border spike passes for ("READING DRONE." on one).
+  const pieces = kept.reduce((n, r) => n + r.glyphs, 0)
+  if (words <= 2 ? pieces < words : pieces * 2 < words) return undefined
   const inkBoxes = kept.map((r) => r.box)
   const letterHeight = Math.max(...kept.map((r) => r.letterHeight))
   return { image, box: unionAll(inkBoxes), kept: [...kept, ...picked.filter((r) => r.image !== image)], inkBoxes, letterHeight }
