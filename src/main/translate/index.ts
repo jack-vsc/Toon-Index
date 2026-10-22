@@ -6,6 +6,7 @@ import { appError, isAppError } from '../../shared/errors'
 import {
   activeProfile,
   CANCELLED,
+  isLocalProfile,
   type ApiProfile,
   type AppSettings,
   type ModelOption,
@@ -131,6 +132,8 @@ export async function listModels(profile: ApiProfile, typedKey?: string): Promis
 }
 
 function requireReady(profile: ApiProfile, apiKey: string | undefined): string {
+  // A model served on this computer takes any key.
+  if (!apiKey && isLocalProfile(profile)) apiKey = 'local'
   if (!apiKey) throw appError({ code: 'auth', message: `A API "${profile.name}" está sem chave. Cadastre a chave nas configurações.` })
   if (profile.kind === 'openai' && !profile.baseUrl.trim()) {
     throw appError({ code: 'model', message: `Informe a URL base da API "${profile.name}" nas configurações.` })

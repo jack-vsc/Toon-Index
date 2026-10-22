@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppError } from '../../shared/errors'
-import { activeProfile, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
+import { activeProfile, profileReady, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
 import type { Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
 import { LibraryView } from './components/LibraryView'
@@ -70,7 +70,7 @@ export default function App() {
   }
 
   const profile = settings ? activeProfile(settings) : undefined
-  const configured = !!settings && !!profile && settings.hasKey[profile.id] && !!profile.model
+  const configured = !!settings && profileReady(profile, settings.hasKey)
   const readerMode: ReaderMode = settings?.readerMode ?? 'scroll'
 
   const inResult = view === 'result' && !!reader

@@ -86,6 +86,21 @@ export function activeProfile(settings: AppSettings): ApiProfile | undefined {
   return settings.profiles.find((p) => p.id === settings.activeProfileId) ?? settings.profiles[0]
 }
 
+/** A model served on this computer (Ollama, LM Studio…): it needs no API key. */
+export function isLocalProfile(profile: ApiProfile): boolean {
+  if (profile.kind !== 'openai') return false
+  try {
+    return /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0)$/i.test(new URL(profile.baseUrl).hostname)
+  } catch {
+    return false
+  }
+}
+
+/** Whether translating with the profile can start: a model chosen and, unless it runs here, a saved key. */
+export function profileReady(profile: ApiProfile | undefined, hasKey: Record<string, boolean>): boolean {
+  return !!profile && !!profile.model && (!!hasKey[profile.id] || isLocalProfile(profile))
+}
+
 export interface PageImage {
   base64: string
   mimeType: 'image/jpeg' | 'image/png'

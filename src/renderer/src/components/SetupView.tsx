@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { activeProfile, type AppSettings, type GpuSharing, type PublicSettings, type Speed } from '../../../shared/types'
+import { activeProfile, isLocalProfile, profileReady, type AppSettings, type GpuSharing, type PublicSettings, type Speed } from '../../../shared/types'
 import { LanguageSelect } from './LanguageSelect'
 
 export type RunOptions = Pick<
@@ -61,7 +61,7 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
   const skipEnd = clamp(draft.skipEnd, 0, numPages - 1 - skipStart)
   const count = mode === 'all' ? numPages - skipStart - skipEnd : last - first + 1
   const profile = activeProfile(settings)
-  const ready = !!profile && settings.hasKey[profile.id] && !!profile.model
+  const ready = profileReady(profile, settings.hasKey)
 
   function start() {
     if (mode === 'all') {
@@ -189,7 +189,7 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
               {settings.profiles.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name} · {p.model || 'sem modelo'}
-                  {settings.hasKey[p.id] ? '' : ' (sem chave)'}
+                  {settings.hasKey[p.id] || isLocalProfile(p) ? '' : ' (sem chave)'}
                 </option>
               ))}
             </select>

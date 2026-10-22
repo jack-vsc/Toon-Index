@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toAppError, type AppError } from '../../../shared/errors'
-import type { ApiProfile, AppSettings, ModelOption, PublicSettings } from '../../../shared/types'
+import { isLocalProfile, type ApiProfile, type AppSettings, type ModelOption, type PublicSettings } from '../../../shared/types'
 import { cleanIpcError } from '../lib/pipeline'
 import { LanguageSelect } from './LanguageSelect'
 
@@ -41,6 +41,16 @@ const PRESETS: Preset[] = [
       model: 'gemini-2.5-flash'
     }
   },
+  {
+    label: 'Ollama (local)',
+    profile: {
+      name: 'Ollama (local)',
+      kind: 'openai',
+      baseUrl: 'http://localhost:11434/v1',
+      models: ['qwen3-vl:4b-instruct'],
+      model: 'qwen3-vl:4b-instruct'
+    }
+  },
   { label: 'Outra', profile: { name: 'Minha API', kind: 'openai', baseUrl: '', models: [], model: '' } }
 ]
 
@@ -64,7 +74,7 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
   const fetched = models[profile.id] ?? []
   const isOpenRouter = profile.kind === 'openai' && profile.baseUrl.includes('openrouter.ai')
   const patch = (p: Partial<AppSettings>) => setSettings((s) => ({ ...s, ...p }))
-  const keyReady = (id: string) => !!keys[id]?.trim() || !!hasKey[id]
+  const keyReady = (p: ApiProfile) => !!keys[p.id]?.trim() || !!hasKey[p.id] || isLocalProfile(p)
 
   function patchProfile(id: string, p: Partial<ApiProfile>) {
     setSettings((s) => ({ ...s, profiles: s.profiles.map((x) => (x.id === id ? { ...x, ...p } : x)) }))
@@ -182,7 +192,7 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
                   </span>
                 </div>
                 {p.id === settings.activeProfileId && <span className="badge">em uso</span>}
-                {!keyReady(p.id) && <span className="badge warn">sem chave</span>}
+                {!keyReady(p) && <span className="badge warn">sem chave</span>}
               </div>
             ))}
           </div>
@@ -213,7 +223,7 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
           </div>
 
           <div>
-            <label className="field-label">Chave de API</label>
+            <label className="field-label">Chave de API{isLocalProfile(profile) && ' (opcional)'}</label>
             {hasKey[profile.id] && !replacing[profile.id] ? (
               <div className="row key-saved">
                 <span className="badge">✓ salva</span>
@@ -234,6 +244,15 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
                   setTests(({ [profile.id]: _old, ...rest }) => rest)
                 }}
               />
+            )}
+            {isLocalProfile(profile) && (
+              <p className="hint">
+                Modelo rodando neste computador: não precisa de chave. Instale o{' '}
+                <a href="https://ollama.com/download" target="_blank" rel="noreferrer">
+                  Ollama
+                </a>{' '}
+                e baixe o modelo com <code>ollama pull {profile.model || 'qwen3-vl:4b-instruct'}</code>.
+              </p>
             )}
             {profile.kind === 'cursor' && (
               <p className="hint">

@@ -1,6 +1,6 @@
 import { AuthenticationError, ConfigurationError, NetworkError, RateLimitError } from '@cursor/sdk'
 import { appError, type AppError } from '../../shared/errors'
-import type { ApiProfile } from '../../shared/types'
+import { isLocalProfile, type ApiProfile } from '../../shared/types'
 
 export class HttpError extends Error {
   constructor(
@@ -66,6 +66,9 @@ function classify(err: unknown, profile: ApiProfile): AppError {
     return { code: 'server', message: 'O servidor da API falhou ou está sobrecarregado. Tente de novo em instantes.', detail }
   }
   if (err instanceof NetworkError || is(NETWORK)) {
+    if (isLocalProfile(profile)) {
+      return { code: 'network', message: `Nada respondendo em ${profile.baseUrl}. Abra o Ollama (ou o servidor local) e tente de novo.`, detail }
+    }
     const where = profile.kind === 'cursor' ? 'ao Cursor' : `em ${profile.baseUrl}`
     return { code: 'network', message: `Não foi possível conectar ${where}. Verifique a internet e a URL base.`, detail }
   }
