@@ -3,6 +3,8 @@ import { CANCELLED, type ModelOption, type TranslateRequest } from '../../shared
 import { HttpError, TruncatedError } from './errors'
 
 const MAX_ATTEMPTS = 3
+/** A rate limit (OpenRouter's "temporarily rate-limited upstream") lasts minutes, not seconds. */
+const RATE_LIMIT_ATTEMPTS = 7
 const MAX_OUTPUT_TOKENS = 8192
 
 /** Works with any OpenAI-compatible chat completions API (OpenAI, Gemini, OpenRouter, Ollama...). */
@@ -43,8 +45,15 @@ async function withRetries(
         attempt--
         continue
       }
-      if (attempt >= MAX_ATTEMPTS || !isTransient(err)) throw err
-      await sleep(Math.min(20, err.retryAfter ?? 2 * 2 ** (attempt - 1)) * 1000, signal)
+      if (!isTransient(err)) throw err
+      const limited = err.status === 429
+      if (attempt >= (limited ? RATE_LIMIT_ATTEMPTS : MAX_ATTEMPTS)) throw err
+      // 5, 10, 20, 40, 60, 60 s on a rate limit (about three minutes in all); pages running side by side
+      // wait a little apart, so they do not all come back at the same moment.
+      const backoff = limited ? Math.min(60, 5 * 2 ** (attempt - 1)) : Math.min(20, 2 * 2 ** (attempt - 1))
+      const seconds = err.retryAfter ? Math.min(60, err.retryAfter) : backoff * (0.8 + 0.4 * Math.random())
+      console.warn(`[translate] HTTP ${err.status}, trying again in ${Math.round(seconds)}s (attempt ${attempt + 1})`)
+      await sleep(seconds * 1000, signal)
     }
   }
 }
