@@ -110,9 +110,11 @@ class Vision:
             x0, y0, x1, y1 = clip_box(x0, y0, x1, y1, W, H)
             if x1 - x0 < 3 or y1 - y0 < 3:
                 continue
-            tight, line_boxes, letter = measure_block(mask, lines, (x0, y0, x1, y1))
-            # Rough character count: each line holds about width / (0.6 * letter height) characters.
+            tight, line_boxes, letter, pieces = measure_block(mask, lines, (x0, y0, x1, y1))
+            # Rough character count: each line holds about width / (0.6 * letter height) characters. Lines
+            # not told apart give one tall line and far too few; the pieces of ink are counted then.
             chars = sum(max(1, round((b[2] - b[0]) / (0.6 * letter))) for b in line_boxes) or max(1, round((tight[2] - tight[0]) / (0.6 * letter)))
+            chars = max(chars, pieces)
             cx, cy = (tight[0] + tight[2]) // 2, (tight[1] + tight[3]) // 2
             bubble = -1
             best = 0
@@ -290,7 +292,7 @@ def measure_block(seg, line_map, box):
             keep[i] = True
     own = keep[labels]
     if not own.any():
-        return [x0, y0, x1, y1], [], max(6.0, min(x1 - x0, y1 - y0) * 0.6)
+        return [x0, y0, x1, y1], [], max(6.0, min(x1 - x0, y1 - y0) * 0.6), 0
     ys, xs = np.nonzero(own)
     # The pixel mask can miss a line of very big lettering; the detector's box (slightly loose) cannot.
     ix, iy = (x1 - x0) * 0.08, (y1 - y0) * 0.08
@@ -323,7 +325,11 @@ def measure_block(seg, line_map, box):
     if count > len(runs):
         letter = min(letter, (tight[3] - tight[1]) / (count * 1.3))
 
-    return tight, lines, max(4.0, letter)
+    letter = max(4.0, letter)
+    # Pieces of ink: every word is at least one, however its letters join (script, a merged band of lines).
+    specks = max(3, int((letter * 0.12) ** 2))
+    pieces = int(sum(1 for i in range(1, n) if keep[i] and stats[i][4] >= specks))
+    return tight, lines, letter, pieces
 
 
 class Region:

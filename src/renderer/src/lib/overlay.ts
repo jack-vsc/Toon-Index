@@ -114,10 +114,8 @@ export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]
   blocks.forEach((block, i) => {
     if (!skipDraw.has(i) && isFootnote(block)) skipDraw.add(i)
   })
-  const skipErase = new Set(kept)
-  for (let i = 0; i < blocks.length; i++) {
-    if (skipDraw.has(i) && !isFootnote(blocks[i])) skipErase.add(i)
-  }
+  // Signs, logos and titles stay in the artwork, as scans do: their translation goes in a footnote.
+  const skipErase = new Set(skipDraw)
   const erased = scene ? await eraseWithModels(canvas, scene, blocks, glyphs, sfx, skipErase) : false
   if (!erased) glyphs.forEach((g, i) => skipErase.has(i) || erase(ctx, g))
 
