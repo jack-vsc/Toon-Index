@@ -2,18 +2,19 @@ import { useEffect, useRef, useState } from 'react'
 import type { AppError } from '../../shared/errors'
 import { activeProfile, profileReady, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
 import type { ReadingRecord } from '../../shared/reading'
-import type { RemoteJob } from '../../shared/remoteJobs'
+import type { RemoteJob, RemoteQueue } from '../../shared/remoteJobs'
 import type { UpdatesStatus } from '../../shared/updates'
 import type { Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
-import { LibraryView } from './components/LibraryView'
+import { HomeFeed, LibraryView, useLibrary, WorkPage } from './components/LibraryView'
+import { Sidebar, type Page } from './components/Sidebar'
 import { ProgressView, statusText } from './components/ProgressView'
 import { Reader, type ReaderPage } from './components/Reader'
 import { SettingsDialog } from './components/SettingsDialog'
 import { SetupView, type SetupChoice } from './components/SetupView'
-import { AdminDashboard } from './components/AdminDashboard'
 import { AiMonitor } from './components/AiMonitor'
 import { PhoneDialog } from './components/PhoneDialog'
+import { BatchDialog } from './components/BatchDialog'
 import { runPhased } from './lib/gpuSharing'
 import { WebLinkInput } from './components/WebLinkInput'
 import { canvasToBlob, renderPage, thumbnailCanvas } from './lib/pdf'
@@ -60,10 +61,13 @@ export default function App() {
   const [works, setWorks] = useState<Work[]>([])
   const [reading, setReading] = useState<ReadingRecord[]>([])
   const [updates, setUpdates] = useState<UpdatesStatus | null>(null)
-  const [adminOpen, setAdminOpen] = useState(false)
   const [aiMonitorOpen, setAiMonitorOpen] = useState(false)
   const [phoneOpen, setPhoneOpen] = useState(false)
   const [remoteJob, setRemoteJob] = useState<RemoteJob | null>(null)
+  const [queue, setQueue] = useState<RemoteQueue | null>(null)
+  const [batchOpen, setBatchOpen] = useState(false)
+  /** Where the home view is: the first page, the library, or a work's page. */
+  const [page, setPage] = useState<Page>({ kind: 'home' })
   const job = useRef<TranslationJob | null>(null)
   const fileRef = useRef<LoadedFile | null>(null)
   /** A phone's request is being worked on (the state above only shows it). */
@@ -75,10 +79,13 @@ export default function App() {
     window.api.getSettings().then(setSettings)
     refreshLibrary()
     window.api.updates.status().then(setUpdates)
+    window.api.remote.queue().then(setQueue)
+    const stopQueue = window.api.remote.onChanged(() => window.api.remote.queue().then(setQueue))
     const stopUpdates = window.api.updates.onChanged(() => window.api.updates.status().then(setUpdates))
     // Chapters read in the browser arrive while the app is open (and may bring new works).
     const stopReading = window.api.reading.onChanged(refreshLibrary)
     return () => {
+      stopQueue()
       stopUpdates()
       stopReading()
     }
@@ -120,6 +127,15 @@ export default function App() {
     }
   }, [view, configured, settings])
   const readerMode: ReaderMode = settings?.readerMode ?? 'scroll'
+
+  // Pausing the queue stops the chapter it is on (runRemote puts it back in the queue). The local AIs
+  // are stopped at once too: the page they are on would otherwise run to its end, holding the GPU.
+  useEffect(() => {
+    if (!queue?.paused || !remoteBusy.current) return
+    void window.api.web.cancel()
+    job.current?.cancel()
+    void Promise.all([window.api.ai.stop('ollama-models'), window.api.ai.stop('vision')]).catch(() => undefined)
+  }, [queue?.paused])
 
   const inResult = view === 'result' && !!reader
   const pdfPages = usePdfPages(inResult && !showOriginal && !reader.fromJob ? reader.translated : null)
@@ -174,20 +190,29 @@ export default function App() {
       if (remote.kind === 'link') {
         await update({ message: 'Abrindo o site' })
         const chapter = await window.api.web.chapter(remote.url!)
-        selected = new File([(await webChapterToPdf(chapter)) as BlobPart], `${chapter.title}.pdf`, { type: 'application/pdf' })
+        // A range's chapters are named for the work they were asked for, so they land in it.
+        const name = remote.batch ? remote.name : chapter.title
+        selected = new File([(await webChapterToPdf(chapter)) as BlobPart], `${name}.pdf`, { type: 'application/pdf' })
       } else {
         selected = new File([pdf as BlobPart], remote.name, { type: 'application/pdf' })
       }
       await update({ message: 'Traduzindo' })
       if (!(await openFile(selected, remote.url))) throw new Error('Não foi possível abrir o PDF.')
       await startTranslation(defaultChoice(job.current!.numPages, current))
+      if ((await window.api.remote.queue()).paused) throw new Paused()
       if (!savedEntry.current && job.current && job.current.translatedCount > 0) await finish()
       if (!savedEntry.current) throw new Error(job.current?.stopReason?.message ?? 'Nenhuma página foi traduzida.')
       await update({ status: 'done', message: undefined, entryId: savedEntry.current })
       goHome()
-      setMessage(`Pedido do celular traduzido e salvo na biblioteca: ${selected.name.replace(/\.pdf$/i, '')}`)
+      setMessage(`${remote.batch ? 'Traduzido' : 'Pedido do celular traduzido'} e salvo na biblioteca: ${selected.name.replace(/\.pdf$/i, '')}`)
     } catch (err) {
-      await update({ status: 'failed', message: cleanIpcError(err) })
+      if (err instanceof Paused || (await window.api.remote.queue()).paused) {
+        // Back to the queue, to start over when resumed; the local AIs leave the GPU meanwhile.
+        await update({ status: 'queued', message: undefined })
+        await Promise.all([window.api.ai.stop('ollama-models'), window.api.ai.stop('vision')]).catch(() => undefined)
+      } else {
+        await update({ status: 'failed', message: cleanIpcError(err) })
+      }
       goHome()
     } finally {
       remoteBusy.current = false
@@ -325,14 +350,34 @@ export default function App() {
   const shownError = stopReason ?? topError?.error
   const title = view === 'result' ? reader?.title : file?.name
   const showReader = (view === 'processing' && processingTab === 'read') || view === 'result'
+  const libraryData = useLibrary(library, works, reading, updates)
+  const shownWork = page.kind === 'work' ? libraryData.groups.find((g) => g.work.id === page.id) : undefined
+
+  function goTo(next: Page) {
+    setPage(next)
+    document.querySelector('main.content')?.scrollTo(0, 0)
+  }
 
   return (
-    <div className="app">
+    <div className={`app ${view === 'home' ? 'with-sidebar' : ''}`}>
+      {view === 'home' && (
+        <Sidebar
+          page={page}
+          fresh={libraryData.fresh.size}
+          onPage={goTo}
+          onBatch={() => setBatchOpen(true)}
+          onPhone={() => setPhoneOpen(true)}
+          onAi={() => setAiMonitorOpen(true)}
+          onSettings={() => setSettingsOpen(true)}
+        />
+      )}
+      <div className="main-col">
+      {view !== 'home' && (
       <header className="topbar">
         <div className="brand">
           <span className="logo">漫</span>
           <span>Manga Index</span>
-          {view !== 'home' && title && <span className="file-name">· {title}</span>}
+          {title && <span className="file-name">· {title}</span>}
         </div>
         <div className="topbar-actions">
           {view === 'processing' && (
@@ -394,32 +439,16 @@ export default function App() {
               {reader.translated && <button onClick={() => download(reader.translated!, reader.title)}>⬇ Baixar PDF</button>}
             </>
           )}
-          {view !== 'home' && (
-            <button className="secondary" onClick={goHome} disabled={running}>
-              Início
-            </button>
-          )}
-          <button className="icon" title="Celular" onClick={() => setPhoneOpen(true)}>
-            📱
-          </button>
-          <button className="icon" title="IAs e GPU" onClick={() => setAiMonitorOpen(true)}>
-            📊
+          <button className="secondary" onClick={goHome} disabled={running}>
+            Início
           </button>
           <button className="icon" title="Configurações" onClick={() => setSettingsOpen(true)}>
             ⚙
           </button>
-          <button className="icon" title="Admin treino" onClick={() => setAdminOpen(true)}>
-            🧠
-          </button>
         </div>
       </header>
+      )}
 
-      {adminOpen ? (
-        <main className="content" style={{ padding: 12, height: 'calc(100vh - 64px)', boxSizing: 'border-box' }}>
-          <AdminDashboard onClose={() => setAdminOpen(false)} />
-        </main>
-      ) : (
-        <>
           {view === 'processing' && (
             <div className="progress-strip">
               <div className="progress-bar">
@@ -460,6 +489,8 @@ export default function App() {
             </div>
           )}
 
+          {queue && <BatchBar queue={queue} running={remoteJob} />}
+
           {message && (
             <div className="banner" onClick={() => setMessage(null)}>
               {message}
@@ -467,14 +498,14 @@ export default function App() {
           )}
 
           <main className={`content ${showReader && readerMode === 'paged' ? 'no-scroll' : ''}`}>
-            {view === 'home' && (
-              <div className="home">
-                {remoteJob && (
-                  <div className="banner remote-banner">
-                    📱 Pedido do celular: {remoteJob.kind === 'link' ? remoteJob.url : remoteJob.name} — abrindo…
-                  </div>
-                )}
-                <h1>Traduza capítulos de mangá com IA</h1>
+            {view === 'home' && remoteJob && !remoteJob.batch && (
+              <div className="banner remote-banner">
+                📱 Pedido do celular: {remoteJob.kind === 'link' ? remoteJob.url : remoteJob.name} — abrindo…
+              </div>
+            )}
+            {view === 'home' && page.kind === 'home' && (
+              <HomeFeed data={libraryData} updates={updates} onPick={(id) => goTo({ kind: 'work', id })}>
+              <div className="translate-box">
                 <p className="subtitle">
                   Envie o PDF do capítulo ou o link dele num site. Cada página é lida pela IA, o texto é traduzido e escrito por cima do original.
                 </p>
@@ -488,19 +519,33 @@ export default function App() {
                 )}
                 <DropZone onFile={openFile} disabled={!settings} />
                 <WebLinkInput onFile={openFile} disabled={!settings} />
-
-                <h2 className="section-title">Biblioteca</h2>
-                <LibraryView
-                  entries={library}
-                  works={works}
-                  reading={reading}
-                  updates={updates}
-                  onOpen={openFromLibrary}
-                  onDownload={downloadEntry}
-                  onDelete={deleteEntry}
-                  onWorksChanged={refreshLibrary}
-                />
+                <div className="batch-open">
+                  <button className="secondary" onClick={() => setBatchOpen(true)} disabled={!settings}>
+                    Traduzir vários capítulos de uma obra
+                  </button>
+                </div>
               </div>
+              </HomeFeed>
+            )}
+            {view === 'home' && page.kind === 'library' && (
+              <LibraryView data={libraryData} updates={updates} onPick={(id) => goTo({ kind: 'work', id })} onWorksChanged={refreshLibrary} />
+            )}
+            {view === 'home' && page.kind === 'work' && shownWork && (
+              <WorkPage
+                key={shownWork.work.id}
+                group={shownWork}
+                data={libraryData}
+                updates={updates}
+                others={libraryData.groups.map((g) => g.work).filter((w) => w.id !== shownWork.work.id)}
+                onBack={() => goTo({ kind: 'library' })}
+                onOpen={openFromLibrary}
+                onDownload={downloadEntry}
+                onDelete={deleteEntry}
+                onWorksChanged={refreshLibrary}
+              />
+            )}
+            {view === 'home' && page.kind === 'work' && !shownWork && (
+              <p className="hint center">Essa obra não está mais na biblioteca (foi juntada com outra?).</p>
             )}
 
             {view === 'setup' && file && settings && setupInfo && (
@@ -532,14 +577,13 @@ export default function App() {
             )}
             {showReader && readerPages.length === 0 && <div className="reader-loading center">Carregando…</div>}
           </main>
-        </>
-      )}
+      </div>
 
       {settingsOpen && settings && (
         <SettingsDialog initial={settings} onClose={() => setSettingsOpen(false)} onSaved={setSettings} />
       )}
-      {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} />}
       {aiMonitorOpen && <AiMonitor onClose={() => setAiMonitorOpen(false)} />}
+      {batchOpen && <BatchDialog works={works} reading={reading} onClose={() => setBatchOpen(false)} />}
       {phoneOpen && <PhoneDialog onClose={() => setPhoneOpen(false)} />}
     </div>
   )
@@ -580,4 +624,43 @@ function defaultChoice(numPages: number, s: AppSettings): SetupChoice {
       gpuSharing: s.gpuSharing
     }
   }
+}
+
+/** Thrown when the queue was paused mid-chapter: the chapter goes back to the queue. */
+class Paused extends Error {}
+
+/**
+ * The ranges of chapters being translated: which one now, how many wait, and pausing (the chapter
+ * running goes back to the queue and the GPU is freed) or dropping the rest.
+ */
+function BatchBar({ queue, running }: { queue: RemoteQueue; running: RemoteJob | null }) {
+  const waiting = queue.jobs.filter((j) => j.batch && j.status === 'queued')
+  const failed = queue.jobs.filter((j) => j.batch && j.status === 'failed' && Date.now() - j.updatedAt < 86_400_000)
+  const now = running?.batch ? running : null
+  if (!now && !waiting.length) return null
+  return (
+    <div className={`banner batch-bar ${queue.paused ? 'paused' : ''}`}>
+      <span>
+        {queue.paused
+          ? `⏸ Tradução em lote pausada: ${waiting.length} ${waiting.length === 1 ? 'capítulo' : 'capítulos'} na fila`
+          : now
+            ? `📚 Traduzindo ${now.name} · mais ${waiting.length} na fila`
+            : `📚 ${waiting.length} na fila: começa assim que o app estiver livre na tela inicial`}
+        {failed.length > 0 && ` · ${failed.length} falharam: ${failed.map((f) => f.batch!.chapter).join(', ')}`}
+      </span>
+      <span className="batch-bar-buttons">
+        <button className="small" onClick={() => window.api.remote.pause(!queue.paused)}>
+          {queue.paused ? 'Continuar' : 'Pausar'}
+        </button>
+        <button
+          className="secondary small"
+          onClick={() => {
+            if (confirm(`Tirar da fila os ${waiting.length} capítulos que faltam?`)) void window.api.remote.clearBatch()
+          }}
+        >
+          Cancelar o resto
+        </button>
+      </span>
+    </div>
+  )
 }

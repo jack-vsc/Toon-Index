@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'browser_screen.dart';
@@ -5,6 +7,7 @@ import 'downloads.dart';
 import 'library_screen.dart';
 import 'models.dart';
 import 'reader_screen.dart';
+import 'theme.dart';
 
 /// One work: its other names, every chapter read (and where), the ones translated on the PC, and
 /// marking chapters read somewhere the apps could not see.
@@ -61,7 +64,7 @@ class _WorkScreenState extends State<WorkScreen> {
     if (_downloaded.contains(c.id)) {
       return IconButton(
         tooltip: 'Baixado: tocar para apagar do celular',
-        icon: const Icon(Icons.offline_pin, color: Color(0xFF4CCF8A)),
+        icon: const Icon(Icons.offline_pin, color: readGreen),
         onPressed: () => _removeDownload(c),
       );
     }
@@ -84,13 +87,14 @@ class _WorkScreenState extends State<WorkScreen> {
     final view = widget.view;
     final aliases = view.work.names.skip(1).map(displayName).toList();
     return Scaffold(
-      appBar: AppBar(title: Text(view.work.name)),
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(backgroundColor: Colors.transparent),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.only(bottom: 16),
         children: [
-          if (aliases.isNotEmpty) Text('Também: ${aliases.join(' · ')}', style: const TextStyle(color: Colors.grey)),
-          const SizedBox(height: 6),
-          Text(statusText(view), style: const TextStyle(color: Color(0xFF4CCF8A))),
+          _Header(view: view, api: widget.api, aliases: aliases),
+          const SizedBox(height: 4),
+          Text(statusText(view), style: const TextStyle(color: readGreen)),
           if (view.update != null) ...[
             const SizedBox(height: 12),
             FilledButton.icon(
@@ -112,7 +116,7 @@ class _WorkScreenState extends State<WorkScreen> {
                     label: Text(r.read
                         ? '${chapterLabel(r.chapter)} ✓'
                         : '${chapterLabel(r.chapter)} · ${r.progress != null ? '${(r.progress! * 100).round()}%' : '…'}'),
-                    labelStyle: TextStyle(color: r.read ? const Color(0xFF4CCF8A) : const Color(0xFFFF8A5C)),
+                    labelStyle: TextStyle(color: r.read ? readGreen : accentSoft),
                     onPressed: r.url.isEmpty
                         ? null
                         : () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: r.url))),
@@ -157,8 +161,64 @@ class _WorkScreenState extends State<WorkScreen> {
             ],
           ),
           if (_message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!)),
-        ],
+        ].map((w) => w is _Header ? w : Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: w)).toList(),
       ),
     );
+  }
+}
+
+/// The work's cover over a blurred copy of it, its names and tags (MangaDex's title page).
+class _Header extends StatelessWidget {
+  const _Header({required this.view, required this.api, required this.aliases});
+
+  final WorkView view;
+  final Api api;
+  final List<String> aliases;
+
+  @override
+  Widget build(BuildContext context) {
+    final cover = coverUrlOf(view, api);
+    final top = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    return Stack(children: [
+      if (cover != null)
+        Positioned.fill(
+          child: ClipRect(
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: Image.network(cover,
+                  headers: api.authHeaders, fit: BoxFit.cover, color: Colors.black54, colorBlendMode: BlendMode.darken, errorBuilder: (_, _, _) => const SizedBox()),
+            ),
+          ),
+        ),
+      Positioned.fill(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Theme.of(context).scaffoldBackgroundColor]),
+          ),
+        ),
+      ),
+      Padding(
+        padding: EdgeInsets.fromLTRB(16, top, 16, 16),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          SizedBox(width: 110, child: CoverImage(url: cover, api: api)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(view.work.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, height: 1.15)),
+              if (aliases.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(aliases.join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              ],
+              const SizedBox(height: 8),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                Tag(view.work.isNovel ? 'NOVEL' : 'MANGÁ'),
+                if (view.translated.isNotEmpty) Tag('${view.translated.length} TRADUZIDOS'),
+                if (view.update != null) Tag('NOVO · ${chapterLabel(view.update!.latest)}', color: accent),
+              ]),
+            ]),
+          ),
+        ]),
+      ),
+    ]);
   }
 }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { CatalogSite } from '../shared/catalog'
 import type { LibraryEntry, SaveLibraryInput } from '../shared/types'
 import { MAX_SOURCES } from '../shared/updates'
 import { findWork, formatOf, normalizeName, parseChapterName, withName, type Work, type WorkFormat } from '../shared/works'
@@ -124,6 +125,58 @@ export function setWorkNames(workId: string, names: string[]): Work[] {
         ? { ...w, names: w.names.filter((n) => !keys.has(normalizeName(n))) }
         : w
   )
+  saveWorks(works)
+  return works
+}
+
+/** A work's own cover, from the catalog sites; the library shows its latest chapter's otherwise. */
+const workCoverPath = (workId: string): string => {
+  if (!/^[a-f0-9-]+$/i.test(workId)) throw new Error('ID inválido')
+  return join(root(), 'work-covers', `${workId}.jpg`)
+}
+
+export function readWorkCover(workId: string): Buffer | null {
+  const path = workCoverPath(workId)
+  return existsSync(path) ? readFileSync(path) : null
+}
+
+/** By work id, the covers of works that have one, as data URLs for the library. */
+export function workCovers(): Record<string, string> {
+  const covers: Record<string, string> = {}
+  for (const work of listWorks()) {
+    const jpeg = readWorkCover(work.id)
+    if (jpeg) covers[work.id] = `data:image/jpeg;base64,${jpeg.toString('base64')}`
+  }
+  return covers
+}
+
+/**
+ * What the catalog sites know of a work: names no other work of its kind has, its pages there (after the
+ * ones set by hand, up to the limit) and a cover. Notes the lookup either way.
+ */
+export function applyCatalog(
+  workId: string,
+  found: { names: string[]; sources: string[]; sites: CatalogSite[]; cover: Buffer | null }
+): Work[] {
+  const all = listWorks()
+  const work = all.find((w) => w.id === workId)
+  if (!work) throw new Error('Obra não encontrada.')
+  const taken = new Set(
+    all.filter((w) => w.id !== workId && formatOf(w) === formatOf(work)).flatMap((w) => w.names.map(normalizeName))
+  )
+  // Very short names ("Item") would catch chapters of other works.
+  const names = found.names.filter((n) => normalizeName(n).length >= 4 && !taken.has(normalizeName(n)))
+  const sources = [...new Set([...(work.sources ?? []), ...found.sources])].slice(0, MAX_SOURCES)
+  const updated: Work = {
+    ...names.reduce(withName, work),
+    ...(sources.length && { sources }),
+    catalog: { checkedAt: Date.now(), sites: [...new Set([...(work.catalog?.sites ?? []), ...found.sites])] }
+  }
+  if (found.cover) {
+    mkdirSync(join(root(), 'work-covers'), { recursive: true })
+    writeFileSync(workCoverPath(workId), found.cover)
+  }
+  const works = all.map((w) => (w.id === workId ? updated : w))
   saveWorks(works)
   return works
 }

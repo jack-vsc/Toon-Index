@@ -164,8 +164,8 @@ export type WebChapterProgress =
   | { stage: 'loading' | 'challenge' | 'scrolling' }
   | { stage: 'downloading'; done: number; total: number }
 
-/** The local AIs the app runs or uses: vision server, Ollama, YOLO training. */
-export type LocalAiId = 'vision' | 'ollama' | 'training'
+/** The local AIs the app runs or uses: vision server and Ollama. */
+export type LocalAiId = 'vision' | 'ollama'
 
 export interface LocalAiStatus {
   id: LocalAiId

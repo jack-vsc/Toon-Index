@@ -34,6 +34,15 @@ export async function fetchWebChapter(url: string, sender: WebContents): Promise
     callback({ requestHeaders: headers })
   })
   plainUserAgent(ses)
+  const mangadex = /^https:\/\/mangadex\.org\/chapter\/([0-9a-f-]{36})/i.exec(url)?.[1]
+  if (mangadex) {
+    try {
+      return await mangadexChapter(mangadex, ses, job, progress)
+    } finally {
+      ses.webRequest.onBeforeSendHeaders(null)
+      if (running === job) running = null
+    }
+  }
   const win = new BrowserWindow({
     show: false,
     width: 1100,
@@ -77,6 +86,39 @@ export async function fetchWebChapter(url: string, sender: WebContents): Promise
   }
 }
 
+/** MangaDex's reader draws its pages from its image API, which gives their addresses directly. */
+async function mangadexChapter(
+  id: string,
+  ses: Electron.Session,
+  job: { cancelled: boolean },
+  progress: (p: WebChapterProgress) => void
+): Promise<WebChapter> {
+  progress({ stage: 'loading' })
+  const json = async (url: string): Promise<unknown> => {
+    const res = await ses.fetch(url)
+    if (!res.ok) throw new Error(`O MangaDex respondeu ${res.status}.`)
+    return res.json()
+  }
+  const server = (await json(`https://api.mangadex.org/at-home/server/${id}`)) as { baseUrl: string; chapter: { hash: string; data: string[] } }
+  const info = (await json(`https://api.mangadex.org/chapter/${id}?includes[]=manga`)) as {
+    data: { attributes: { chapter: string | null; title: string | null }; relationships: { type: string; attributes?: { title: Record<string, string> } }[] }
+  }
+  const titles = info.data.relationships.find((r) => r.type === 'manga')?.attributes?.title ?? {}
+  const work = titles.en ?? Object.values(titles)[0] ?? 'MangaDex'
+  const urls = server.chapter.data.map((file) => `${server.baseUrl}/data/${server.chapter.hash}/${file}`)
+  if (!urls.length) throw new Error('Esse capítulo do MangaDex não tem páginas (pode estar só num site oficial).')
+  const images: Uint8Array[] = []
+  for (const [i, page] of urls.entries()) {
+    check(job)
+    progress({ stage: 'downloading', done: i, total: urls.length })
+    const res = await ses.fetch(page)
+    if (!res.ok) throw new Error(`Não foi possível baixar a página ${i + 1} do MangaDex (HTTP ${res.status}).`)
+    images.push(new Uint8Array(await res.arrayBuffer()))
+  }
+  progress({ stage: 'downloading', done: urls.length, total: urls.length })
+  return { title: `${work} Chapter ${info.data.attributes.chapter ?? ''}`.trim(), images }
+}
+
 export function cancelWebChapter(): void {
   if (!running) return
   running.cancelled = true
@@ -87,6 +129,20 @@ export function cancelWebChapter(): void {
 /** Sites turn away browsers that announce themselves as Electron. */
 export function plainUserAgent(ses: Electron.Session): void {
   ses.setUserAgent(ses.getUserAgent().replace(/\s(Electron|manga-index)\/\S+/gi, ''))
+}
+
+/** A window never shown, for reading sites' pages unattended (new chapters, looking works up). */
+export function hiddenWindow(): BrowserWindow {
+  plainUserAgent(session.fromPartition(PARTITION))
+  const win = new BrowserWindow({
+    show: false,
+    width: 1100,
+    height: 900,
+    webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, backgroundThrottling: false }
+  })
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.setAudioMuted(true)
+  return win
 }
 
 function check(job: { cancelled: boolean }): void {

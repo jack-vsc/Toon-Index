@@ -14,6 +14,7 @@ import 'package:manga_index/downloads.dart';
 import 'package:manga_index/library_screen.dart';
 import 'package:manga_index/models.dart';
 import 'package:manga_index/reader_screen.dart';
+import 'package:manga_index/theme.dart';
 import 'package:manga_index/translate_screen.dart';
 import 'package:manga_index/work_screen.dart';
 
@@ -33,17 +34,12 @@ Future<void> loadFonts() async {
   await (FontLoader('MaterialIcons')..addFont(font('materialicons-regular.otf'))).load();
 }
 
-ThemeData theme() => ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFFF5D73), brightness: Brightness.dark, surface: const Color(0xFF1D1F26)),
-      scaffoldBackgroundColor: const Color(0xFF14151A),
-      useMaterial3: true,
-    );
 
 Future<void> shoot(WidgetTester tester, Widget screen, String name) async {
   final boundary = GlobalKey();
   await tester.pumpWidget(RepaintBoundary(
     key: boundary,
-    child: MaterialApp(debugShowCheckedModeBanner: false, theme: theme(), home: screen),
+    child: MaterialApp(debugShowCheckedModeBanner: false, theme: appTheme(), home: screen),
   ));
   await tester.runAsync(() async {
     // Images decode outside the fake clock.

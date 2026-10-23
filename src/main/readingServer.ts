@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
-import { listLibrary, listWorks, readCover, readLibraryPdf } from './library'
+import { listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover } from './library'
 import { unreadUpdates } from '../shared/updates'
 import { displayName } from '../shared/works'
 import { updatesStatus } from './updates'
@@ -80,11 +80,17 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   if (req.method === 'GET' && path === '/api/library') {
     // Covers go one by one (/api/cover/…), so the list stays small.
     const chapters = listLibrary().map(({ cover, ...entry }) => ({ ...entry, hasCover: !!cover }))
-    return send(res, 200, { works: listWorks(), reading: listReading(), chapters, updates: newChapters(), ntfyTopic: updatesStatus().ntfyTopic })
+    const works = listWorks().map((w) => ({ ...w, hasCover: !!readWorkCover(w.id) }))
+    return send(res, 200, { works, reading: listReading(), chapters, updates: newChapters(), ntfyTopic: updatesStatus().ntfyTopic })
   }
   const cover = /^\/api\/cover\/([a-f0-9-]+)$/i.exec(path)
   if (req.method === 'GET' && cover) {
     const jpeg = readCover(cover[1])
+    return jpeg ? sendBytes(res, 'image/jpeg', jpeg) : send(res, 404, { error: 'Sem capa.' })
+  }
+  const workCover = /^\/api\/work-cover\/([a-f0-9-]+)$/i.exec(path)
+  if (req.method === 'GET' && workCover) {
+    const jpeg = readWorkCover(workCover[1])
     return jpeg ? sendBytes(res, 'image/jpeg', jpeg) : send(res, 404, { error: 'Sem capa.' })
   }
   const pdf = /^\/api\/pdf\/([a-f0-9-]+)\/(original|translated)$/i.exec(path)

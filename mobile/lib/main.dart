@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'api.dart';
 import 'library_screen.dart';
 import 'pair_screen.dart';
+import 'theme.dart';
 import 'translate_screen.dart';
 
 void main() => runApp(const MangaIndexApp());
@@ -55,17 +56,11 @@ class _MangaIndexAppState extends State<MangaIndexApp> {
 
   @override
   Widget build(BuildContext context) {
-    // The PC app's colors.
-    final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFFFF5D73),
-      brightness: Brightness.dark,
-      surface: const Color(0xFF1D1F26),
-    );
     return MaterialApp(
       title: 'Manga Index',
       navigatorKey: _navigator,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorScheme: scheme, scaffoldBackgroundColor: const Color(0xFF14151A), useMaterial3: true),
+      theme: appTheme(),
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : _connection == null

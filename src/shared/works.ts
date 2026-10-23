@@ -14,7 +14,11 @@ export interface Work {
   format?: 'novel'
   /** Up to three pages of the work on sites (its chapter list), checked for new chapters. */
   sources?: string[]
+  /** When the work was looked up on the catalog sites (shared/catalog.ts), and the ones it was found on. */
+  catalog?: { checkedAt: number; sites: CatalogSite[] }
 }
+
+import type { CatalogSite } from './catalog'
 
 export type WorkFormat = 'comic' | 'novel'
 
@@ -102,8 +106,11 @@ export function chapterInUrl(url: string): number | null {
 function parseUrl(url: string): ChapterName {
   try {
     const segments = new URL(url).pathname.split('/').filter(Boolean)
-    const i = segments.findIndex((s) => CHAPTER.test(s.replace(/[-_]/g, ' ')))
-    const chapterSeg = i >= 0 ? CHAPTER.exec(segments[i].replace(/[-_]/g, ' ')) : null
+    // "chapter-53", or "chapter/53" split in two.
+    const label = (i: number): string =>
+      (/^(chapter|capitulo|cap|ch|episode|ep)$/i.test(segments[i]) && /^\d/.test(segments[i + 1] ?? '') ? `${segments[i]} ${segments[i + 1]}` : segments[i]).replace(/[-_]/g, ' ')
+    const i = segments.findIndex((_s, j) => CHAPTER.test(label(j)))
+    const chapterSeg = i >= 0 ? CHAPTER.exec(label(i)) : null
     // The work's segment comes before the chapter's, perhaps with others between ("/novels/name/post/capitulo-5").
     const named = (s: string) => /[a-z].*[-_].*[a-z]/i.test(s)
     const slug = i > 0 ? (segments.slice(0, i).reverse().find(named) ?? segments[i - 1]) : segments.find(named)

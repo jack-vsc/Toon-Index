@@ -41,7 +41,11 @@ const api: MangaApi = {
     list: () => ipcRenderer.invoke('works:list'),
     setNames: (workId, names) => ipcRenderer.invoke('works:names', workId, names),
     merge: (intoId, fromId) => ipcRenderer.invoke('works:merge', intoId, fromId),
-    move: (entryId, target) => ipcRenderer.invoke('works:move', entryId, target)
+    move: (entryId, target) => ipcRenderer.invoke('works:move', entryId, target),
+    covers: () => ipcRenderer.invoke('works:covers'),
+    chapters: (match) => ipcRenderer.invoke('works:chapters', match),
+    search: (query) => ipcRenderer.invoke('works:search', query),
+    link: (workId, matches) => ipcRenderer.invoke('works:link', workId, matches)
   },
   devices: {
     status: () => ipcRenderer.invoke('devices:status'),
@@ -65,6 +69,10 @@ const api: MangaApi = {
   remote: {
     list: () => ipcRenderer.invoke('remote:list'),
     take: () => ipcRenderer.invoke('remote:take'),
+    queue: () => ipcRenderer.invoke('remote:queue'),
+    pause: (paused) => ipcRenderer.invoke('remote:pause', paused),
+    batch: (work, site, chapters) => ipcRenderer.invoke('remote:batch', work, site, chapters),
+    clearBatch: () => ipcRenderer.invoke('remote:clear-batch'),
     update: (id, patch) => ipcRenderer.invoke('remote:update', id, patch),
     onChanged: (callback) => {
       const listener = () => callback()
@@ -89,55 +97,6 @@ const api: MangaApi = {
         ipcRenderer.removeListener('reading:changed', listener)
       }
     }
-  },
-  train: {
-    listRuns: () => ipcRenderer.invoke('train:listRuns'),
-    listActive: () => ipcRenderer.invoke('train:listActive'),
-    listArtifacts: (run: string) => ipcRenderer.invoke('train:listArtifacts', run),
-    getArtifact: (run: string, name: string) => ipcRenderer.invoke('train:getArtifact', run, name),
-    tailLog: (run: string, lines?: number) => ipcRenderer.invoke('train:tailLog', run, lines),
-    start: (pythonExe: string, script: string, args?: string[]) => ipcRenderer.invoke('train:start', pythonExe, script, args),
-    stop: (runId?: string) => ipcRenderer.invoke('train:stop', runId),
-    suspend: (runId: string) => ipcRenderer.invoke('train:suspend', runId),
-    resume: (runId: string) => ipcRenderer.invoke('train:resume', runId),
-    status: () => ipcRenderer.invoke('train:status'),
-    onLog: (cb: (runId: string, text: string) => void) => {
-      const listener = (_e: any, runId: string, text: string) => cb(runId, text)
-      ipcRenderer.on('train:log', listener)
-      return () => {
-        ipcRenderer.removeListener('train:log', listener)
-      }
-    },
-    onStatus: (cb: (status: any) => void) => {
-      const listener = (_e: any, status: any) => cb(status)
-      ipcRenderer.on('train:status', listener)
-      return () => {
-        ipcRenderer.removeListener('train:status', listener)
-      }
-    },
-    onArtifacts: (cb: (runId: string, arts: string[]) => void) => {
-      const listener = (_e: any, runId: string, arts: string[]) => cb(runId, arts)
-      ipcRenderer.on('train:artifacts', listener)
-      return () => {
-        ipcRenderer.removeListener('train:artifacts', listener)
-      }
-    }
-    ,
-    getMetrics: (run: string) => ipcRenderer.invoke('train:metrics', run),
-    onMetrics: (cb: (runId: string, metrics: any) => void) => {
-      const listener = (_e: any, runId: string, metrics: any) => cb(runId, metrics)
-      ipcRenderer.on('train:metrics', listener)
-      return () => {
-        ipcRenderer.removeListener('train:metrics', listener)
-      }
-    }
-    ,
-    getThumb: (run: string, name: string, maxW?: number, maxH?: number) => ipcRenderer.invoke('train:getThumb', run, name, maxW, maxH),
-    getArtifactStamp: (run: string) => ipcRenderer.invoke('train:artifactStamp', run),
-    getCopyPayload: (run: string) => ipcRenderer.invoke('train:copyPayload', run),
-    hasCheckpoint: (run: string) => ipcRenderer.invoke('train:hasCheckpoint', run),
-    resumeRun: (pythonExe: string, script: string, runId: string) =>
-      ipcRenderer.invoke('train:resumeRun', pythonExe, script, runId)
   },
   evaluation: {
     config: () => ipcRenderer.invoke('eval:config'),

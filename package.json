@@ -13,7 +13,8 @@
     "build": "npm run assets && electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder --win",
+    "shortcut": "node scripts/desktop-shortcut.mjs"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.35",

@@ -2,7 +2,7 @@
 // the phone only shows them and sends readings back; matching names to works happens on the PC.
 
 class Work {
-  Work({required this.id, required this.names, required this.createdAt, required this.isNovel});
+  Work({required this.id, required this.names, required this.createdAt, required this.isNovel, this.hasCover = false});
 
   final String id;
 
@@ -11,6 +11,9 @@ class Work {
   final int createdAt;
   final bool isNovel;
 
+  /// A cover the PC found on MangaDex, mgeko or comix (/api/work-cover/…).
+  final bool hasCover;
+
   String get name => displayName(names.first);
 
   factory Work.fromJson(Map<String, dynamic> j) => Work(
@@ -18,6 +21,7 @@ class Work {
         names: (j['names'] as List).cast<String>(),
         createdAt: (j['createdAt'] as num).toInt(),
         isNovel: j['format'] == 'novel',
+        hasCover: j['hasCover'] == true,
       );
 }
 

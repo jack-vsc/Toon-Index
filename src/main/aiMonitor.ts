@@ -1,7 +1,6 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import type { AiMonitorStatus, AiStopTarget, GpuStatus, LocalAiId, LocalAiStatus } from '../shared/types'
-import { stopTraining } from './trainManager'
 import { stopVision, visionPid } from './vision'
 
 /**
@@ -38,7 +37,7 @@ while ($true) {
       $memory[$Matches[1]] = [int64]$s.CookedValue + [int64]$memory[$Matches[1]]
     }
   }
-  $procs = @(Get-CimInstance Win32_Process | Where-Object { $memory.ContainsKey([string]$_.ProcessId) -or $_.Name -like 'ollama*' -or $_.Name -like 'llama-server*' -or ($_.Name -like 'python*' -and $_.CommandLine -match 'manga_vision|train|yolo') } |
+  $procs = @(Get-CimInstance Win32_Process | Where-Object { $memory.ContainsKey([string]$_.ProcessId) -or $_.Name -like 'ollama*' -or $_.Name -like 'llama-server*' -or ($_.Name -like 'python*' -and $_.CommandLine -match 'manga_vision') } |
     ForEach-Object { @{ pid = $_.ProcessId; name = $_.Name; cmd = [string]$_.CommandLine } })
   [Console]::Out.WriteLine((@{ procs = $procs; memory = $memory } | ConvertTo-Json -Compress -Depth 4))
   Start-Sleep -Seconds 2
@@ -126,14 +125,12 @@ function owner(p: ProcRow): LocalAiId | null {
   // Ollama runs each loaded model in a llama-server process of its own.
   if (/^ollama|^llama-server/i.test(p.name)) return 'ollama'
   if (/manga_vision/i.test(p.cmd)) return 'vision'
-  if (/^python/i.test(p.name) && /train|yolo/i.test(p.cmd)) return 'training'
   return null
 }
 
 const AIS: Record<LocalAiId, { name: string; role: string }> = {
   vision: { name: 'Servidor de visão', role: 'Detecção de texto e balões, apagamento (LaMa)' },
-  ollama: { name: 'Ollama', role: 'Modelos de linguagem locais (tradução)' },
-  training: { name: 'Treino YOLO', role: 'Treinamento do detector' }
+  ollama: { name: 'Ollama', role: 'Modelos de linguagem locais (tradução)' }
 }
 
 export async function aiStatus(): Promise<AiMonitorStatus> {
@@ -206,10 +203,6 @@ export async function stopAi(target: AiStopTarget): Promise<void> {
     kill(pidsOf('vision'))
   }
   if (target === 'ollama' || target === 'all') kill(pidsOf('ollama'))
-  if (target === 'training' || target === 'all') {
-    stopTraining()
-    kill(pidsOf('training'))
-  }
   // The next reading should not show what was just stopped.
   lastSample = null
 }

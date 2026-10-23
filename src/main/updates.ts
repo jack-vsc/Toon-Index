@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, session, shell } from 'electron'
+import { app, BrowserWindow, Notification, shell } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -6,7 +6,8 @@ import { latestChapter, MAX_SOURCES, type PageLink, type SourceCheck, type Updat
 import { displayName, type Work } from '../shared/works'
 import { listWorks, saveWorkSources } from './library'
 import { listReading } from './reading'
-import { isChallenged, open, PARTITION, plainUserAgent, sleep } from './webChapter'
+import { autoLink, mangadexLatest } from './catalog'
+import { hiddenWindow, isChallenged, open, sleep } from './webChapter'
 
 /** The sites are checked this often while the app is open; more would only burden them. */
 const EVERY_MS = 2 * 60 * 60_000
@@ -109,17 +110,10 @@ export async function checkNow(): Promise<void> {
   if (running) return
   running = true
   for (const listener of listeners) listener()
-  const ses = session.fromPartition(PARTITION)
-  plainUserAgent(ses)
-  const win = new BrowserWindow({
-    show: false,
-    width: 1100,
-    height: 900,
-    webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, backgroundThrottling: false }
-  })
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  win.webContents.setAudioMuted(true)
+  const win = hiddenWindow()
   try {
+    // Works not looked up yet on the catalog sites get their names, cover and pages there first.
+    await autoLink(win).catch((err: Error) => console.warn('[catalog] auto link failed:', err.message))
     const sources = [...new Set(listWorks().flatMap((w) => w.sources ?? []))]
     for (const [i, source] of sources.entries()) {
       if (i > 0) await sleep(BETWEEN_SITES_MS)
@@ -139,6 +133,12 @@ export async function checkNow(): Promise<void> {
 async function checkSource(win: BrowserWindow, source: string): Promise<SourceCheck> {
   const failed = (error: string): SourceCheck => ({ checkedAt: Date.now(), latest: null, latestUrl: null, error })
   try {
+    // MangaDex draws its chapter list from its API, which answers directly.
+    if (/^https:\/\/mangadex\.org\//i.test(source)) {
+      const found = await mangadexLatest(source)
+      if (!found) return failed('Nenhum capítulo em inglês ou português no MangaDex.')
+      return { checkedAt: Date.now(), latest: found.chapter, latestUrl: found.url }
+    }
     await open(win, source)
     // The check runs unattended: a site asking for a bot check is left for when the person opens it.
     for (let waited = 0; await isChallenged(win); waited += 1_000) {
@@ -150,8 +150,11 @@ async function checkSource(win: BrowserWindow, source: string): Promise<SourceCh
       `[...document.querySelectorAll('a[href]')].map((a) => ({ href: a.href, text: (a.innerText || a.textContent || '').trim().slice(0, 120) }))`
     )) as PageLink[]
     // A site that moved to another address sends the old links there.
+    // The work's name is taken from the link given: a site's list of every work it lands on instead has none.
     const landed = win.webContents.getURL()
-    const found = latestChapter(landed, links)
+    const page = new URL(source)
+    page.hostname = new URL(landed).hostname
+    const found = latestChapter(page.href, links)
     if (!found && new URL(landed).hostname !== new URL(source).hostname) {
       return failed(`O link levou para ${new URL(landed).hostname}: o site pode ter mudado de endereço ou saído do ar. Troque o link.`)
     }

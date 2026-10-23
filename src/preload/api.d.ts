@@ -17,8 +17,9 @@ import type {
 } from '../shared/types'
 import type { DevicesStatus, PairingCode } from '../shared/devices'
 import type { HistoryWork, ReadingRecord } from '../shared/reading'
-import type { RemoteJob } from '../shared/remoteJobs'
-import type { UpdatesStatus } from '../shared/updates'
+import type { RemoteJob, RemoteQueue } from '../shared/remoteJobs'
+import type { ChapterLink, UpdatesStatus } from '../shared/updates'
+import type { CatalogMatch, CatalogResult } from '../shared/catalog'
 import type { Work } from '../shared/works'
 
 export interface MangaApi {
@@ -67,6 +68,14 @@ export interface MangaApi {
     /** Moves every chapter of `fromId` into `intoId`, which also takes its names. */
     merge(intoId: string, fromId: string): Promise<Work[]>
     move(entryId: string, target: { workId: string } | { newName: string }): Promise<Work[]>
+    /** By work id, the covers found on the catalog sites (data URLs). */
+    covers(): Promise<Record<string, string>>
+    /** Every chapter of a work on MangaDex or mgeko, in order. */
+    chapters(match: Pick<CatalogMatch, 'site' | 'url'>): Promise<ChapterLink[]>
+    /** Looks a name up on MangaDex, mgeko and comix. */
+    search(query: string): Promise<CatalogResult[]>
+    /** Takes the chosen matches' names, pages and cover into the work. */
+    link(workId: string, matches: CatalogMatch[]): Promise<Work[]>
   }
   /** Phones paired with the app (the Android app reaches it on the home network or Tailscale). */
   devices: {
@@ -95,6 +104,14 @@ export interface MangaApi {
     /** The next queued job, now marked running, with the PDF the phone sent (null for a link). */
     take(): Promise<{ job: RemoteJob; pdf: Uint8Array | null } | null>
     update(id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>): Promise<void>
+    /** Every job, and whether the queue is paused. */
+    queue(): Promise<RemoteQueue>
+    /** Pauses (nothing new starts) or resumes the queue. */
+    pause(paused: boolean): Promise<RemoteQueue>
+    /** Queues a range of a work's chapters, to translate in order. */
+    batch(work: string, site: string, chapters: ChapterLink[]): Promise<RemoteQueue>
+    /** Takes the queued chapters of those ranges off the queue. */
+    clearBatch(): Promise<RemoteQueue>
     /** Returns a function that stops listening. */
     onChanged(callback: () => void): () => void
   }
@@ -114,32 +131,6 @@ export interface MangaApi {
     openExtension(): Promise<string>
     /** Returns a function that stops listening. */
     onChanged(callback: () => void): () => void
-  }
-  train: {
-    listRuns(): Promise<string[]>
-    listActive(): Promise<string[]>
-    listArtifacts(run: string): Promise<string[]>
-    getArtifact(run: string, name: string): Promise<string | null>
-    tailLog(run: string, lines?: number): Promise<string>
-    start(pythonExe: string, script: string, args?: string[]): Promise<{ ok: boolean; runId?: string; pid?: number; error?: string }>
-    stop(runId?: string): Promise<boolean>
-    suspend(runId: string): Promise<boolean>
-    resume(runId: string): Promise<boolean>
-    status(): Promise<{ running: boolean; active: string[]; paused?: string[]; externalActive?: string[] }>
-    onLog(cb: (runId: string, text: string) => void): () => void
-    onStatus(cb: (status: any) => void): () => void
-    onArtifacts(cb: (runId: string, arts: string[]) => void): () => void
-    getMetrics(run: string): Promise<any | null>
-    onMetrics(cb: (runId: string, metrics: any) => void): () => void
-    getThumb(run: string, name: string, maxW?: number, maxH?: number): Promise<string | null>
-    getArtifactStamp(run: string): Promise<string>
-    getCopyPayload(run: string): Promise<{ argsLine: string | null; script: string; fullCommand: string | null }>
-    hasCheckpoint(run: string): Promise<boolean>
-    resumeRun(
-      pythonExe: string,
-      script: string,
-      runId: string
-    ): Promise<{ ok: boolean; runId?: string; pid?: number; error?: string }>
   }
   /** Developer evaluation runs; `config` resolves to null in normal use. */
   evaluation: {

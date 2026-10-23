@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { rmSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AiStopTarget, ApiProfile, SaveLibraryInput, SaveSettingsInput, TranslateRequest } from '../shared/types'
@@ -15,46 +15,45 @@ import {
   moveToWork,
   readLibraryPdf,
   saveToLibrary,
-  setWorkNames
+  setWorkNames,
+  workCovers
 } from './library'
+import type { CatalogMatch } from '../shared/catalog'
+import { chapterList, linkWork, searchCatalogToChoose } from './catalog'
+import type { ChapterLink } from '../shared/updates'
 import type { HistoryWork } from '../shared/reading'
 import { finishedInApp, forgetReading, importHistory, listReading, markRead, onReadingChanged, scanHistory } from './reading'
 import { devicesStatus, newPairingCode, revokeDevice, setPhonesEnabled } from './devices'
 import type { RemoteJob } from '../shared/remoteJobs'
-import { listRemoteJobs, onRemoteJobsChanged, requeueInterrupted, takeRemoteJob, updateRemoteJob } from './remoteJobs'
+import {
+  addBatch,
+  clearBatch,
+  listRemoteJobs,
+  onRemoteJobsChanged,
+  pauseRemoteJobs,
+  remoteQueue,
+  requeueInterrupted,
+  takeRemoteJob,
+  updateRemoteJob
+} from './remoteJobs'
 import { checkNow, onUpdatesChanged, setNtfy, setWorkSources, startUpdates, stopUpdates, updatesStatus } from './updates'
 import { READING_PORT, restartReadingServer, startReadingServer, stopReadingServer } from './readingServer'
 import { getPublicSettings, saveSettings } from './settings'
 import { cancelTranslations, listModels, testApi, translate } from './translate'
 import { detect as visionDetect, inpaint as visionInpaint, stopVision } from './vision'
-import {
-  listRuns,
-  listActiveRuns,
-  listArtifacts,
-  readArtifactBase64,
-  tailLog,
-  startTraining,
-  stopTraining,
-  suspendTraining,
-  resumeTraining,
-  trainingStatus,
-  getArtifactThumbnail,
-  readMetrics,
-  getArtifactStamp,
-  getRunCopyPayload,
-  resumeRunTraining,
-  runHasCheckpoint
-} from './trainManager'
 
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
+  const windowIcon = join(app.getAppPath(), 'build', 'icon.png')
   const win = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 900,
     minHeight: 600,
     title: 'Manga Index',
+    // The app's own icon in the taskbar (the desktop shortcut runs Electron itself).
+    ...(existsSync(windowIcon) && { icon: windowIcon }),
     backgroundColor: '#14151a',
     show: !snapshotRequested(),
     autoHideMenuBar: true,
@@ -69,29 +68,6 @@ function createWindow(): void {
   })
   mainWindow = win
 
-  win.on('close', async (e) => {
-    const status = trainingStatus()
-    if (!status.running || win.isDestroyed()) return
-    e.preventDefault()
-    const result = await dialog.showMessageBox(win, {
-      type: 'question',
-      buttons: ['Continuar em background', 'Parar treinamento e fechar'],
-      defaultId: 0,
-      cancelId: 0,
-      title: 'Treinamento em andamento',
-      message: 'O treinamento ainda está rodando. O que você quer fazer?',
-      detail: 'Se escolher "Continuar em background", o app será minimizado e o treinamento seguirá rodando. Você pode reabrir o app pelo ícone na barra de tarefas.'
-    })
-    if (result.response === 0) {
-      // Continuar em background: esconde a janela, mas não fecha
-      win.hide()
-    } else {
-      // Parar treinamento e fechar
-      stopTraining()
-      mainWindow = null
-      win.destroy()
-    }
-  })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -170,6 +146,10 @@ function registerIpc(): void {
     return devicesStatus(READING_PORT)
   })
   ipcMain.handle('remote:list', () => listRemoteJobs())
+  ipcMain.handle('remote:queue', () => remoteQueue())
+  ipcMain.handle('remote:pause', (_e, paused: boolean) => pauseRemoteJobs(paused))
+  ipcMain.handle('remote:batch', (_e, work: string, site: string, chapters: ChapterLink[]) => addBatch(work, site, chapters))
+  ipcMain.handle('remote:clear-batch', () => clearBatch())
   ipcMain.handle('remote:take', () => takeRemoteJob())
   ipcMain.handle('remote:update', (_e, id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>) =>
     updateRemoteJob(id, patch)
@@ -178,26 +158,11 @@ function registerIpc(): void {
   ipcMain.handle('updates:check', () => checkNow())
   ipcMain.handle('updates:sources', (_e, workId: string, sources: string[]) => setWorkSources(workId, sources))
   ipcMain.handle('updates:ntfy', (_e, enabled: boolean) => setNtfy(enabled))
+  ipcMain.handle('works:covers', () => workCovers())
+  ipcMain.handle('works:chapters', (_e, match: Pick<CatalogMatch, 'site' | 'url'>) => chapterList(match))
+  ipcMain.handle('works:search', (_e, query: string) => searchCatalogToChoose(query))
+  ipcMain.handle('works:link', (_e, workId: string, matches: CatalogMatch[]) => linkWork(workId, matches))
   ipcMain.handle('works:move', (_e, entryId: string, target: { workId: string } | { newName: string }) => moveToWork(entryId, target))
-  // Training management IPC
-  ipcMain.handle('train:listRuns', () => listRuns())
-  ipcMain.handle('train:listActive', () => listActiveRuns())
-  ipcMain.handle('train:listArtifacts', (_e, run: string) => listArtifacts(run))
-  ipcMain.handle('train:getArtifact', (_e, run: string, name: string) => readArtifactBase64(run, name))
-  ipcMain.handle('train:getThumb', (_e, run: string, name: string, maxW?: number, maxH?: number) => getArtifactThumbnail(run, name, maxW ?? 240, maxH ?? 160))
-  ipcMain.handle('train:tailLog', (_e, run: string, lines?: number) => tailLog(run, lines ?? 200))
-  ipcMain.handle('train:start', (_e, pythonExe: string, script: string, args?: string[]) => startTraining(pythonExe, script, args ?? []))
-  ipcMain.handle('train:stop', (_e, runId?: string) => stopTraining(runId))
-  ipcMain.handle('train:suspend', (_e, runId: string) => suspendTraining(runId))
-  ipcMain.handle('train:resume', (_e, runId: string) => resumeTraining(runId))
-  ipcMain.handle('train:metrics', (_e, run: string) => readMetrics(run))
-  ipcMain.handle('train:status', () => trainingStatus())
-  ipcMain.handle('train:artifactStamp', (_e, run: string) => getArtifactStamp(run))
-  ipcMain.handle('train:copyPayload', (_e, run: string) => getRunCopyPayload(run))
-  ipcMain.handle('train:hasCheckpoint', (_e, run: string) => runHasCheckpoint(run))
-  ipcMain.handle('train:resumeRun', (_e, pythonExe: string, script: string, runId: string) =>
-    resumeRunTraining(pythonExe, script, runId)
-  )
   registerEvalIpc()
 }
 

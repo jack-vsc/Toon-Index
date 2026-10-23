@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'browser_screen.dart';
 import 'models.dart';
+import 'theme.dart';
 import 'translate_screen.dart';
 import 'work_screen.dart';
 
@@ -91,6 +92,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final views = (_library?.views ?? []).where((v) => v.matches(_query)).toList();
+    final fresh = views.where((v) => v.update != null).toList();
+    final current = ([...views]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity))).where((v) => v.continueUrl != null).firstOrNull;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manga Index'),
@@ -122,118 +125,203 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: _refresh,
-        child: ListView(
-          // Room under the last work for the button.
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-          children: [
-            TextField(
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Buscar obra por qualquer nome…'),
-              onChanged: (q) => setState(() => _query = q),
-            ),
-            if (_loading && _library == null) const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator())),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Text(
-                  _library == null ? _error! : '$_error\nMostrando a última biblioteca sincronizada.',
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+        child: CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+              sliver: SliverList.list(children: [
+                TextField(
+                  decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Buscar obra por qualquer nome…'),
+                  onChanged: (q) => setState(() => _query = q),
                 ),
+                if (_loading && _library == null) const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator())),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Text(
+                      _library == null ? _error! : '$_error\nMostrando a última biblioteca sincronizada.',
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ),
+                if (_library != null && views.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(40),
+                    child: Text('Nada por aqui ainda. O que você ler e traduzir aparece nesta lista.', textAlign: TextAlign.center),
+                  ),
+                if (_query.isEmpty && current != null) ...[
+                  const SizedBox(height: 16),
+                  _Hero(view: current, api: widget.api, onOpen: () => _openWork(current), onBrowse: _browse),
+                ],
+                if (_query.isEmpty && fresh.isNotEmpty) ...[
+                  const SizedBox(height: 22),
+                  Text('Capítulos novos', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  for (final view in fresh) _UpdateRow(view: view, api: widget.api, onOpen: () => _openWork(view), onBrowse: _browse),
+                ],
+                if (views.isNotEmpty) ...[
+                  const SizedBox(height: 22),
+                  Row(children: [
+                    Text('Biblioteca', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 10),
+                    Text('${views.length} OBRAS', style: monoLabel()),
+                  ]),
+                  const SizedBox(height: 10),
+                ],
+              ]),
+            ),
+            SliverPadding(
+              // Room under the last row for the button.
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 96),
+              sliver: SliverGrid.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 140,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.48,
+                ),
+                itemCount: views.length,
+                itemBuilder: (_, i) => _Poster(view: views[i], api: widget.api, onOpen: () => _openWork(views[i])),
               ),
-            if (_library != null && views.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(40),
-                child: Text('Nada por aqui ainda. O que você ler e traduzir aparece nesta lista.', textAlign: TextAlign.center),
-              ),
-            for (final view in views) _WorkTile(view: view, api: widget.api, onChanged: _refresh, onBrowse: _browse),
+            ),
           ],
         ),
       ),
     );
   }
+
+  Future<void> _openWork(WorkView view) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => WorkScreen(view: view, api: widget.api)));
+    _refresh();
+  }
 }
 
-class _WorkTile extends StatelessWidget {
-  const _WorkTile({required this.view, required this.api, required this.onChanged, required this.onBrowse});
+/// The work read last, big: where it was left and what came out since.
+class _Hero extends StatelessWidget {
+  const _Hero({required this.view, required this.api, required this.onOpen, required this.onBrowse});
 
   final WorkView view;
   final Api api;
-  final Future<void> Function() onChanged;
+  final VoidCallback onOpen;
   final Future<void> Function(String url) onBrowse;
 
   @override
   Widget build(BuildContext context) {
-    final cover = view.translated.where((c) => c.hasCover).firstOrNull;
     final url = view.continueUrl;
-    return Card(
-      margin: const EdgeInsets.only(top: 10),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () async {
-          await Navigator.push(context, MaterialPageRoute(builder: (_) => WorkScreen(view: view, api: api)));
-          onChanged();
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: SizedBox(
-                  width: 52,
-                  height: 72,
-                  child: cover != null
-                      ? Image.network('${api.base}/api/cover/${cover.id}', headers: api.authHeaders, fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const _NoCover())
-                      : const _NoCover(),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text.rich(
-                      TextSpan(children: [
-                        TextSpan(text: view.work.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                        if (view.work.isNovel) const TextSpan(text: '  novel', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      ]),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(statusText(view), style: const TextStyle(color: Color(0xFF4CCF8A), fontSize: 13)),
-                    if (view.update != null)
-                      InkWell(
-                        onTap: () => onBrowse(view.update!.url),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Text(updateText(view.update!), style: const TextStyle(color: Color(0xFFFF8A5C), fontSize: 13, fontWeight: FontWeight.w600)),
-                        ),
-                      ),
-                    if (view.translated.isNotEmpty)
-                      Text('${view.translated.length} traduzidos no PC', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                  ],
-                ),
-              ),
-              if (url != null)
-                IconButton(
-                  tooltip: 'Continuar',
-                  icon: const Icon(Icons.play_circle_fill, color: Color(0xFFFF5D73), size: 32),
-                  onPressed: () => onBrowse(url),
-                ),
-            ],
+    return InkWell(
+      onTap: onOpen,
+      borderRadius: BorderRadius.circular(14),
+      child: Ink(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(14)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(width: 96, child: CoverImage(url: coverUrlOf(view, api), api: api)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('CONTINUAR LENDO', style: monoLabel(color: accent)),
+              const SizedBox(height: 6),
+              Text(view.work.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text(statusText(view), style: const TextStyle(color: readGreen, fontSize: 12)),
+              const SizedBox(height: 10),
+              Wrap(spacing: 8, runSpacing: 6, children: [
+                if (url != null)
+                  FilledButton.icon(
+                    onPressed: () => onBrowse(url),
+                    icon: const Icon(Icons.play_arrow, size: 18),
+                    label: const Text('Continuar'),
+                    style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                  ),
+                if (view.update != null)
+                  OutlinedButton(
+                    onPressed: () => onBrowse(view.update!.url),
+                    style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                    child: Text('Cap. ${chapterLabel(view.update!.latest)}'),
+                  ),
+              ]),
+            ]),
           ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// A new chapter out, as in MangaDex's latest updates.
+class _UpdateRow extends StatelessWidget {
+  const _UpdateRow({required this.view, required this.api, required this.onOpen, required this.onBrowse});
+
+  final WorkView view;
+  final Api api;
+  final VoidCallback onOpen;
+  final Future<void> Function(String url) onBrowse;
+
+  @override
+  Widget build(BuildContext context) {
+    final update = view.update!;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(10),
+        child: Ink(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(10)),
+          child: Row(children: [
+            SizedBox(width: 40, child: CoverImage(url: coverUrlOf(view, api), api: api, radius: 5)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(view.work.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 2),
+                Text('Capítulo ${chapterLabel(update.latest)}', style: const TextStyle(fontSize: 13)),
+                Text(update.site.toUpperCase(), style: monoLabel(size: 10)),
+              ]),
+            ),
+            FilledButton(
+              onPressed: () => onBrowse(update.url),
+              style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+              child: const Text('Ler'),
+            ),
+          ]),
         ),
       ),
     );
   }
 }
 
-class _NoCover extends StatelessWidget {
-  const _NoCover();
+/// A cover in the grid (comix): title under it, and how far it was read.
+class _Poster extends StatelessWidget {
+  const _Poster({required this.view, required this.api, required this.onOpen});
+
+  final WorkView view;
+  final Api api;
+  final VoidCallback onOpen;
 
   @override
-  Widget build(BuildContext context) =>
-      ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest, child: const Center(child: Text('📚')));
+  Widget build(BuildContext context) {
+    final upTo = view.readUpTo;
+    final meta = [
+      upTo != null ? 'CAP. ${chapterLabel(upTo)}' : (view.records.isEmpty ? 'NÃO LIDO' : 'LENDO'),
+      if (view.work.isNovel) 'NOVEL',
+    ].join(' · ');
+    return InkWell(
+      onTap: onOpen,
+      borderRadius: BorderRadius.circular(8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Stack(children: [
+          CoverImage(url: coverUrlOf(view, api), api: api),
+          if (view.update != null) Positioned(top: 6, left: 6, child: Tag('NOVO · ${chapterLabel(view.update!.latest)}', color: accent)),
+        ]),
+        const SizedBox(height: 6),
+        Text(view.work.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),
+        const SizedBox(height: 3),
+        Text(meta, maxLines: 1, overflow: TextOverflow.ellipsis, style: monoLabel(size: 10)),
+      ]),
+    );
+  }
 }
+
 
 /// "Lido até o cap. 53 · parou no cap. 54 (40%) · site.com · há 3 dias", as in the PC app.
 String statusText(WorkView view) {

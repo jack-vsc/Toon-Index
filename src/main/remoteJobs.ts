@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { RemoteJob } from '../shared/remoteJobs'
+import type { RemoteJob, RemoteQueue } from '../shared/remoteJobs'
 
 /** Finished ones are kept a while for the phone to see how they went. */
 const KEEP_DONE_DAYS = 7
@@ -19,19 +19,58 @@ export function onRemoteJobsChanged(listener: () => void): void {
 }
 
 export function listRemoteJobs(): RemoteJob[] {
+  return remoteQueue().jobs
+}
+
+export function remoteQueue(): RemoteQueue {
   try {
-    const jobs = (JSON.parse(readFileSync(listPath(), 'utf8')) as { jobs: RemoteJob[] }).jobs
+    const stored = JSON.parse(readFileSync(listPath(), 'utf8')) as Partial<RemoteQueue>
     const old = Date.now() - KEEP_DONE_DAYS * 86_400_000
-    return jobs.filter((j) => j.status === 'queued' || j.status === 'running' || j.updatedAt > old)
+    const jobs = (stored.jobs ?? []).filter((j) => j.status === 'queued' || j.status === 'running' || j.updatedAt > old)
+    return { jobs, paused: stored.paused === true }
   } catch {
-    return []
+    return { jobs: [], paused: false }
   }
 }
 
-function save(jobs: RemoteJob[]): void {
+function save(jobs: RemoteJob[], paused = remoteQueue().paused): void {
   mkdirSync(dir(), { recursive: true })
-  writeFileSync(listPath(), JSON.stringify({ jobs }, null, 2))
+  writeFileSync(listPath(), JSON.stringify({ jobs, paused }, null, 2))
   for (const listener of listeners) listener()
+}
+
+/** Pausing leaves the queue as it is; the window stops the chapter running and puts it back. */
+export function pauseRemoteJobs(paused: boolean): RemoteQueue {
+  save(listRemoteJobs(), paused)
+  return remoteQueue()
+}
+
+/** A range of a work's chapters, translated in order, after whatever is queued already. */
+export function addBatch(work: string, site: string, chapters: { chapter: number; url: string }[]): RemoteQueue {
+  const clean = work.trim()
+  if (!clean) throw new Error('Informe o nome da obra.')
+  if (!chapters.length) throw new Error('Nenhum capítulo nessa faixa.')
+  const now = Date.now()
+  const added: RemoteJob[] = chapters.map((c, i) => ({
+    id: randomUUID(),
+    kind: 'link',
+    url: c.url,
+    name: `${clean} Chapter ${c.chapter}`,
+    device: 'PC',
+    // Apart by a millisecond each, so they keep their order.
+    createdAt: now + i,
+    updatedAt: now + i,
+    status: 'queued',
+    batch: { work: clean, chapter: c.chapter, site }
+  }))
+  save([...listRemoteJobs(), ...added])
+  return remoteQueue()
+}
+
+/** Takes every queued chapter of the ranges asked for on the PC off the queue. */
+export function clearBatch(): RemoteQueue {
+  save(listRemoteJobs().filter((j) => !(j.batch && j.status === 'queued')))
+  return remoteQueue()
 }
 
 export function addLinkJob(url: string, device: string): RemoteJob {
@@ -61,7 +100,8 @@ function add(fields: Pick<RemoteJob, 'kind' | 'name' | 'device'> & { url?: strin
  * when the app closed go back to the queue first.
  */
 export function takeRemoteJob(): { job: RemoteJob; pdf: Uint8Array | null } | null {
-  const jobs = listRemoteJobs()
+  const { jobs, paused } = remoteQueue()
+  if (paused) return null
   const next = jobs.find((j) => j.status === 'queued')
   if (!next) return null
   const job: RemoteJob = { ...next, status: 'running', message: 'Começando', updatedAt: Date.now() }

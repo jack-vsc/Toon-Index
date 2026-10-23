@@ -44,19 +44,30 @@ export interface PageLink {
 
 const CHAPTER_TEXT = /(?:\b(?:chapter|chap|ch|cap(?:[ií]tulo)?|ep(?:is[oó]dio|isode)?)\.?\s*[-#:]?\s*|#)(\d+(?:[.,]\d+)?)/i
 
+export interface ChapterLink {
+  chapter: number
+  url: string
+}
+
+/** The highest chapter among a work page's links (see chapterLinks). */
+export function latestChapter(source: string, links: PageLink[]): ChapterLink | null {
+  return chapterLinks(source, links).at(-1) ?? null
+}
+
 /**
- * The highest chapter among a work page's links. Only links to the same site that carry the work's
- * name in their path count, so "popular this week" lists of other works around it are left out.
+ * The chapters among a work page's links, in order, one link each. Only links to the same site that
+ * carry the work's name in their path count, so "popular this week" lists of other works around it
+ * are left out; `onlyThisWork` says the links are all the work's (a list of its chapters alone).
  */
-export function latestChapter(source: string, links: PageLink[]): { chapter: number; url: string } | null {
+export function chapterLinks(source: string, links: PageLink[], onlyThisWork = false): ChapterLink[] {
   let page: URL
   try {
     page = new URL(source)
   } catch {
-    return null
+    return []
   }
   const slug = workSlug(page.pathname)
-  let best: { chapter: number; url: string } | null = null
+  const found = new Map<number, string>()
   for (const link of links) {
     let url: URL
     try {
@@ -66,21 +77,25 @@ export function latestChapter(source: string, links: PageLink[]): { chapter: num
     }
     if (stripWww(url.hostname) !== stripWww(page.hostname)) continue
     const path = decodeURIComponent(url.pathname).toLowerCase()
-    if (slug ? !path.includes(slug) : !path.startsWith(page.pathname.toLowerCase())) continue
+    if (!onlyThisWork && (slug ? !path.includes(slug) : !path.startsWith(page.pathname.toLowerCase()))) continue
     const fromText = CHAPTER_TEXT.exec(link.text)
     const chapter = chapterInUrl(url.href) ?? (fromText ? parseFloat(fromText[1].replace(',', '.')) : null)
     // Years and ids that look like chapter numbers.
-    if (chapter === null || chapter > 5000) continue
-    if (!best || chapter > best.chapter) best = { chapter, url: url.href }
+    if (chapter === null || chapter > 5000 || found.has(chapter)) continue
+    // Sites list a chapter once per group that translated it; the first is the newest upload.
+    found.set(chapter, url.href.replace(/#.*$/, ''))
   }
-  return best
+  return [...found].map(([chapter, url]) => ({ chapter, url })).sort((a, b) => a.chapter - b.chapter)
 }
 
-/** "/series/solo-leveling-ragnarok-7f873ca6/" → "solo-leveling-ragnarok" (without the site's id). */
+/**
+ * "/series/solo-leveling-ragnarok-7f873ca6/" → "solo-leveling-ragnarok", "/manga/overgeared-mg1/" → "overgeared":
+ * without the site's id, which its chapter links may leave out.
+ */
 function workSlug(pathname: string): string | null {
   const segments = decodeURIComponent(pathname).toLowerCase().split('/').filter(Boolean)
   const slug = [...segments].reverse().find((s) => /[a-z].*[-_].*[a-z]/.test(s))
-  return slug ? slug.replace(/[-_](?=[a-z]*\d)[a-z0-9]{4,}$/, '') : null
+  return slug ? slug.replace(/[-_](?=[a-z]*\d)[a-z0-9]{2,}$/, '') : null
 }
 
 const stripWww = (host: string): string => host.replace(/^www\./, '')

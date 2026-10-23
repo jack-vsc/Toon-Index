@@ -1,15 +1,18 @@
 :root {
-  --bg: #14151a;
-  --panel: #1d1f26;
-  --panel-2: #262934;
-  --border: #323644;
-  --text: #e8e9ee;
-  --muted: #9a9fb0;
-  --accent: #ff5d73;
+  /* MangaDex's dark theme and orange, with comix's small mono capitals for labels. */
+  --bg: #131315;
+  --sidebar: #19191c;
+  --panel: #1e1e22;
+  --panel-2: #29292e;
+  --border: #33333a;
+  --text: #ededf0;
+  --muted: #9e9ea8;
+  --accent: #ff6740;
   --accent-2: #ff8a5c;
   --ok: #4ccf8a;
   --err: #ff6b6b;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
 }
@@ -29,8 +32,13 @@ button {
   padding: 8px 14px;
   cursor: pointer;
   color: #fff;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  background: var(--accent);
   font-weight: 600;
+  transition: filter 0.12s, background 0.12s;
+}
+
+button:not(:disabled):hover {
+  filter: brightness(1.08);
 }
 
 button:disabled {
@@ -102,7 +110,7 @@ a {
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  background: var(--accent);
 }
 
 .file-name {
@@ -614,111 +622,6 @@ a {
 }
 
 /* Full-screen image viewer (training artifacts, etc.) */
-.image-lightbox-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  background: rgba(6, 8, 12, 0.94);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.image-lightbox-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  background: rgba(0, 0, 0, 0.45);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.image-lightbox-title {
-  font-size: 13px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 50vw;
-}
-
-.image-lightbox-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.image-lightbox-actions button {
-  min-width: 40px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: none;
-  background: var(--panel-2);
-  color: var(--text);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.image-lightbox-actions button:hover {
-  background: #3a3f4a;
-}
-
-.image-lightbox-close {
-  background: var(--accent) !important;
-  color: #fff !important;
-}
-
-.image-lightbox-stage {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  cursor: grab;
-}
-
-.image-lightbox-stage:active {
-  cursor: grabbing;
-}
-
-.image-lightbox-wrapper {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.image-lightbox-content {
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-}
-
-.image-lightbox-img {
-  max-width: min(96vw, 100%);
-  max-height: min(78vh, 100%);
-  object-fit: contain;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-.image-lightbox-loading {
-  color: var(--muted);
-  font-size: 15px;
-}
-
-.image-lightbox-hint {
-  flex-shrink: 0;
-  text-align: center;
-  font-size: 12px;
-  color: #666;
-  padding: 8px 12px 14px;
-  margin: 0;
-}
-
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1145,6 +1048,8 @@ details pre {
 .works {
   display: grid;
   gap: 22px;
+  /* Long lists of other names are cut, not widening the page. */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .work-head {
@@ -1395,4 +1300,564 @@ details pre {
 .source-check {
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* Catalog sites */
+
+.catalog-site {
+  margin: 10px 0 4px;
+}
+
+.catalog-site-name {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.catalog-match {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.catalog-match input {
+  width: auto;
+  flex: none;
+  margin: 0;
+}
+
+.catalog-match:hover,
+.catalog-match.chosen {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.catalog-match img,
+.catalog-nocover {
+  width: 40px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.catalog-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.catalog-alts {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-twin {
+  color: var(--accent-2);
+  font-size: 12px;
+}
+
+/* Translating a range of chapters */
+
+.batch-open {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.batch-dialog {
+  width: min(640px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.batch-range {
+  align-items: center;
+}
+
+.batch-range input {
+  width: 80px;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: default;
+}
+
+.batch-bar.paused {
+  opacity: 0.85;
+}
+
+.batch-bar-buttons {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+/* ---------- Layout: sidebar and pages (MangaDex-like) ---------- */
+
+.app.with-sidebar {
+  flex-direction: row;
+}
+
+.main-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.mono {
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.sidebar {
+  width: 220px;
+  flex: none;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  font-size: 17px;
+  font-weight: 700;
+  padding: 6px 8px 16px;
+  text-align: left;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: none;
+  color: var(--text);
+  font-weight: 500;
+  padding: 9px 12px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.sidebar-item:hover {
+  background: var(--panel-2);
+}
+
+.sidebar-item.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.sidebar-icon {
+  display: grid;
+  place-items: center;
+  opacity: 0.9;
+}
+
+.sidebar-badge {
+  margin-left: auto;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.sidebar-item.active .sidebar-badge {
+  background: #fff;
+  color: var(--accent);
+}
+
+.sidebar-group {
+  color: var(--muted);
+  padding: 16px 12px 6px;
+}
+
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 32px 60px;
+}
+
+.page-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.page-head h1 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.home-section {
+  margin-top: 34px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.translate-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px;
+}
+
+.translate-box .subtitle {
+  text-align: left;
+  margin-bottom: 16px;
+}
+
+.translate-box .dropzone {
+  padding: 34px 20px;
+}
+
+/* Hero: the work being read (MangaDex's "Popular New Titles") */
+
+.hero,
+.work-hero {
+  position: relative;
+  display: flex;
+  gap: 26px;
+  padding: 26px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.hero-bg {
+  position: absolute;
+  inset: -40px;
+  background-size: cover;
+  background-position: center 30%;
+  filter: blur(28px) brightness(0.35) saturate(1.3);
+  transform: scale(1.1);
+}
+
+.hero > *:not(.hero-bg),
+.work-hero > *:not(.hero-bg) {
+  position: relative;
+}
+
+.hero-cover {
+  background: none;
+  padding: 0;
+  flex: none;
+}
+
+.poster {
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-2);
+  display: grid;
+  place-items: center;
+  font-size: 34px;
+  position: relative;
+}
+
+.poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hero .poster {
+  width: 190px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  justify-content: center;
+}
+
+.hero-text h2 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.15;
+  cursor: pointer;
+}
+
+.work-hero h1 {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1.15;
+}
+
+.accent-label {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.hero-status {
+  margin: 0;
+  color: #d6d6dc;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.tag.link-tag:hover {
+  background: var(--accent);
+}
+
+/* Poster grid (comix) */
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 22px 16px;
+  margin-top: 18px;
+}
+
+.poster-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 140px;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.poster-card {
+  background: none;
+  padding: 0;
+  text-align: left;
+  color: var(--text);
+  font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.poster-card .poster {
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.poster-card:hover .poster {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.poster-card:hover {
+  filter: none;
+}
+
+.poster-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.poster-meta {
+  color: var(--muted);
+}
+
+.poster-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* New chapters (MangaDex's "Latest Updates") */
+
+.update-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 10px;
+}
+
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.update-cover {
+  background: none;
+  padding: 0;
+  flex: none;
+}
+
+.thumb {
+  width: 54px;
+  aspect-ratio: 2 / 3;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel-2);
+  display: grid;
+  place-items: center;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.update-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.update-title {
+  background: none;
+  padding: 0;
+  color: var(--text);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Work page (MangaDex's title page) */
+
+.work-poster {
+  width: 210px;
+  flex: none;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.work-hero .work-aliases {
+  color: #c9c9d1;
+  font-size: 13px;
+  white-space: normal;
+}
+
+.back {
+  align-self: flex-start;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.work-page .work-editor {
+  margin-top: 16px;
+}
+
+.chapter-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.chapter-row {
+  display: grid;
+  grid-template-columns: 110px 90px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  background: var(--panel);
+  border-left: 3px solid transparent;
+}
+
+.chapter-row + .chapter-row {
+  border-top: 1px solid var(--border);
+}
+
+.chapter-row.read {
+  border-left-color: var(--ok);
+}
+
+.chapter-num {
+  font-weight: 600;
+}
+
+.chapter-state {
+  font-size: 13px;
+  color: var(--accent-2);
+}
+
+.chapter-state.read {
+  color: var(--ok);
+}
+
+.chapter-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.library-toolbar {
+  flex-wrap: wrap;
 }

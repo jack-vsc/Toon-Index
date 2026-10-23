@@ -209,7 +209,7 @@ class BrowserStartPage extends StatelessWidget {
           for (final view in withUrl)
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.play_circle_fill, color: Color(0xFFFF5D73)),
+              leading: const Icon(Icons.play_circle_fill, color: Color(0xFFFF6740)),
               title: Text(view.work.name, maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text(Uri.parse(view.continueUrl!).host.replaceFirst(RegExp(r'^www\.'), ''), maxLines: 1),
               onTap: () => onOpen(view.continueUrl!),
