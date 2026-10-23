@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
+import 'downloads.dart';
 import 'library_screen.dart';
 import 'models.dart';
+import 'reader_screen.dart';
 
 /// One work: its other names, every chapter read (and where), the ones translated on the PC, and
 /// marking chapters read somewhere the apps could not see.
@@ -20,6 +22,52 @@ class WorkScreen extends StatefulWidget {
 class _WorkScreenState extends State<WorkScreen> {
   final _chapter = TextEditingController();
   String? _message;
+  Set<String> _downloaded = {};
+
+  /// Chapters being downloaded, with how much arrived (null: size unknown).
+  final _downloading = <String, double?>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshDownloads();
+  }
+
+  Future<void> _refreshDownloads() async {
+    final ids = await Downloads.downloaded();
+    if (mounted) setState(() => _downloaded = ids);
+  }
+
+  Future<void> _download(LibraryChapter c) async {
+    setState(() => _downloading[c.id] = null);
+    try {
+      await Downloads.download(widget.api, c.id, onProgress: (p) => mounted ? setState(() => _downloading[c.id] = p) : null);
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      _downloading.remove(c.id);
+      await _refreshDownloads();
+    }
+  }
+
+  Future<void> _removeDownload(LibraryChapter c) async {
+    await Downloads.remove(c.id);
+    await _refreshDownloads();
+  }
+
+  Widget _downloadButton(LibraryChapter c) {
+    if (_downloading.containsKey(c.id)) {
+      return SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, value: _downloading[c.id]));
+    }
+    if (_downloaded.contains(c.id)) {
+      return IconButton(
+        tooltip: 'Baixado: tocar para apagar do celular',
+        icon: const Icon(Icons.offline_pin, color: Color(0xFF4CCF8A)),
+        onPressed: () => _removeDownload(c),
+      );
+    }
+    return IconButton(tooltip: 'Baixar para ler sem internet', icon: const Icon(Icons.download), onPressed: () => _download(c));
+  }
 
   Future<void> _markRead() async {
     final chapter = double.tryParse(_chapter.text.trim().replaceAll(',', '.'));
@@ -79,6 +127,8 @@ class _WorkScreenState extends State<WorkScreen> {
                     : null,
                 title: Text(c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title),
                 subtitle: Text(c.translatedPages == c.pageCount ? '${c.pageCount} páginas' : '${c.translatedPages} de ${c.pageCount} páginas traduzidas'),
+                trailing: _downloadButton(c),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: c))),
               ),
           ],
           const SizedBox(height: 24),

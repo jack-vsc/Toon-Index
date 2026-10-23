@@ -81,18 +81,27 @@ export function reportReading(report: ReadingReport): (ReadingRecord & { work: s
 
 /** A translated chapter of the library read to its last page in the app. */
 export function finishedInApp(entryId: string): void {
+  readInApp(entryId, 1)
+}
+
+/**
+ * How far into a library chapter the reader got in the app (the PC's or the phone's, which may send
+ * it later, `at` the time it was read); the last page counts as read.
+ */
+export function readInApp(entryId: string, progress: number, at = Date.now()): void {
   const meta = readMeta(entryId)
   if (meta.chapter === null) return
+  const clamped = Math.min(1, Math.max(0, progress))
   saveReading(
     upsert(listReading(), {
       workId: meta.workId,
       chapter: meta.chapter,
-      status: 'read',
-      progress: 1,
+      status: clamped >= 1 ? 'read' : 'reading',
+      progress: clamped,
       url: meta.source ?? '',
       title: meta.title,
       source: 'app',
-      updatedAt: Date.now()
+      updatedAt: at
     })
   )
 }

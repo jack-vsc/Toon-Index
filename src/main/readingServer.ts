@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
 import { listLibrary, listWorks, readCover, readLibraryPdf } from './library'
-import { finishedInApp, forgetReading, listReading, markRead, reportReading } from './reading'
+import { finishedInApp, forgetReading, listReading, markRead, readInApp, reportReading } from './reading'
 
 /** The browser extension (extension/background.js) and the phone app reach the app here. */
 export const READING_PORT = 47321
@@ -83,12 +83,26 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   }
   const pdf = /^\/api\/pdf\/([a-f0-9-]+)\/(original|translated)$/i.exec(path)
   if (req.method === 'GET' && pdf) {
-    return sendBytes(res, 'application/pdf', Buffer.from(await readLibraryPdf(pdf[1], pdf[2] as 'original' | 'translated')))
+    const bytes = await readLibraryPdf(pdf[1], pdf[2] as 'original' | 'translated').catch(() => null)
+    return bytes ? sendBytes(res, 'application/pdf', Buffer.from(bytes)) : send(res, 404, { error: 'Capítulo não encontrado no PC.' })
   }
   if (req.method === 'POST' && path === '/api/reading') return send(res, 200, report(await readBody(req)))
   if (req.method === 'POST' && path === '/api/reading/finished') {
     const { entryId } = (await readBody(req)) as { entryId: string }
     finishedInApp(entryId)
+    return send(res, 200, { ok: true })
+  }
+  // Chapters read in the phone's reader: one, or the ones kept while the PC could not be reached.
+  if (req.method === 'POST' && path === '/api/reading/app') {
+    const body = await readBody(req)
+    for (const r of (Array.isArray(body) ? body : [body]) as { entryId?: unknown; progress?: unknown; at?: unknown }[]) {
+      if (typeof r?.entryId !== 'string' || typeof r.progress !== 'number') continue
+      try {
+        readInApp(r.entryId, r.progress, typeof r.at === 'number' ? r.at : undefined)
+      } catch {
+        // The chapter was deleted from the library meanwhile.
+      }
+    }
     return send(res, 200, { ok: true })
   }
   if (req.method === 'POST' && path === '/api/reading/mark') {

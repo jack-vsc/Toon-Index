@@ -94,6 +94,8 @@ class Api {
   }
 
   Future<Library> library() async {
+    // Readings made while away go first, so the library that comes back already has them.
+    await flushPending();
     final response = await _send((url) => http.get(url('/api/library'), headers: authHeaders));
     // The PC sends UTF-8 without saying so; response.body would read it as Latin-1.
     final text = utf8.decode(response.bodyBytes);
@@ -106,6 +108,24 @@ class Api {
 
   Future<void> forget(String workId, double? chapter) =>
       _post('/api/reading/forget', {'workId': workId, 'chapter': chapter});
+
+  /// How far into a library chapter the phone's reader got (1: to the end). Kept on the phone when
+  /// the PC cannot be reached, and sent with the next request that gets through.
+  Future<void> reportAppReading(String entryId, double progress) async {
+    await Store.addPending({'entryId': entryId, 'progress': progress, 'at': DateTime.now().millisecondsSinceEpoch});
+    try {
+      await flushPending();
+    } on ApiException {
+      // Stays queued.
+    }
+  }
+
+  Future<void> flushPending() async {
+    final pending = await Store.loadPending();
+    if (pending.isEmpty) return;
+    await _post('/api/reading/app', pending);
+    await Store.removePending(pending);
+  }
 
   Future<void> _post(String path, Object body) =>
       _send((url) => http.post(url(path), headers: {...authHeaders, 'Content-Type': 'application/json'}, body: jsonEncode(body)));
@@ -150,6 +170,7 @@ class Api {
 class Store {
   static const _connection = 'connection';
   static const _library = 'library';
+  static const _pending = 'pending';
 
   static Future<Connection?> loadConnection() async {
     final text = (await SharedPreferences.getInstance()).getString(_connection);
@@ -171,4 +192,31 @@ class Store {
   }
 
   static Future<void> saveLibrary(String json) async => (await SharedPreferences.getInstance()).setString(_library, json);
+
+  /// Readings not yet sent to the PC, oldest first.
+  static Future<List<Map<String, dynamic>>> loadPending() async {
+    final text = (await SharedPreferences.getInstance()).getString(_pending);
+    return text == null ? [] : (jsonDecode(text) as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<void> addPending(Map<String, dynamic> reading) async {
+    final pending = await loadPending();
+    // Only the latest position of each chapter matters.
+    pending.removeWhere((r) => r['entryId'] == reading['entryId'] && (r['progress'] as num) <= (reading['progress'] as num));
+    pending.add(reading);
+    await (await SharedPreferences.getInstance()).setString(_pending, jsonEncode(pending));
+  }
+
+  /// Drops the readings just sent; ones added meanwhile stay.
+  static Future<void> removePending(List<Map<String, dynamic>> sent) async {
+    bool wasSent(Map<String, dynamic> r) => sent.any((s) => s['entryId'] == r['entryId'] && s['at'] == r['at']);
+    final pending = (await loadPending()).where((r) => !wasSent(r)).toList();
+    await (await SharedPreferences.getInstance()).setString(_pending, jsonEncode(pending));
+  }
+
+  /// The page a chapter was left at in the phone's reader (0-based).
+  static Future<int> loadPage(String entryId) async => (await SharedPreferences.getInstance()).getInt('page:$entryId') ?? 0;
+
+  static Future<void> savePage(String entryId, int page) async =>
+      (await SharedPreferences.getInstance()).setInt('page:$entryId', page);
 }
