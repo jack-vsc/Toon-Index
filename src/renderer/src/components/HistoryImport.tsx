@@ -80,6 +80,7 @@ export function HistoryImport({ onClose, onImported }: Props) {
                   <input type="checkbox" checked={chosen.has(i)} onChange={() => toggle(i)} />
                   <span>
                     <strong>{displayName(w.name)}</strong>
+                    {w.format === 'novel' && <span className="format-tag">novel</span>}
                     {w.workId && <span className="read-mark"> já na biblioteca</span>}
                     <br />
                     <span className="hint">

@@ -1,3 +1,5 @@
+import type { WorkFormat } from './works'
+
 /**
  * Chapters read in the browser (sent by the extension), found in the browsers' history or read
  * translated in the app. Each work keeps where it was left, so it survives the site it was read on.
@@ -45,6 +47,7 @@ export interface HistoryWork {
   name: string
   /** The known work it would go to, when one matches. */
   workId: string | null
+  format: WorkFormat
   browsers: string[]
   sites: string[]
   chapters: HistoryChapter[]

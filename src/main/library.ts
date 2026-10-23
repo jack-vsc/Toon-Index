@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { LibraryEntry, SaveLibraryInput } from '../shared/types'
-import { findWork, normalizeName, parseChapterName, withName, type Work } from '../shared/works'
+import { findWork, formatOf, normalizeName, parseChapterName, withName, type Work, type WorkFormat } from '../shared/works'
 import { moveReading } from './reading'
 import { getSettings } from './settings'
 import { currentModelLabel } from './translate'
@@ -33,15 +33,15 @@ function saveWorks(works: Work[]): void {
 }
 
 /** The work a chapter named `name` belongs to, created when no known name matches; learns the name. */
-export function indexWork(name: string): string {
+export function indexWork(name: string, format: WorkFormat = 'comic'): string {
   const works = listWorks()
   const clean = name.trim() || 'Sem nome'
-  const found = findWork(works, clean)
+  const found = findWork(works, clean, format)
   if (found) {
     saveWorks(works.map((w) => (w.id === found.id ? withName(w, clean) : w)))
     return found.id
   }
-  const work: Work = { id: randomUUID(), names: [clean], createdAt: Date.now() }
+  const work: Work = { id: randomUUID(), names: [clean], createdAt: Date.now(), ...(format === 'novel' && { format }) }
   saveWorks([...works, work])
   return work.id
 }
@@ -113,8 +113,15 @@ export function setWorkNames(workId: string, names: string[]): Work[] {
   const clean = [...new Map(names.map((n) => n.trim()).filter(Boolean).map((n) => [normalizeName(n), n])).values()]
   if (!clean.length) throw new Error('A obra precisa de pelo menos um nome.')
   const keys = new Set(clean.map(normalizeName))
-  const works = listWorks().map((w) =>
-    w.id === workId ? { ...w, names: clean } : { ...w, names: w.names.filter((n) => !keys.has(normalizeName(n))) }
+  const all = listWorks()
+  const format = formatOf(all.find((w) => w.id === workId)!)
+  // The novel keeps the names it shares with its manga.
+  const works = all.map((w) =>
+    w.id === workId
+      ? { ...w, names: clean }
+      : formatOf(w) === format
+        ? { ...w, names: w.names.filter((n) => !keys.has(normalizeName(n))) }
+        : w
   )
   saveWorks(works)
   return works
@@ -150,9 +157,16 @@ export function moveToWork(entryId: string, target: { workId: string } | { newNa
     works = [...works, work]
     workId = work.id
   }
-  // The name now points at the work it was moved to, not the one it was wrongly put in.
+  // The name now points at the work it was moved to, not the one it was wrongly put in (a novel of
+  // the same name keeps it: library chapters are comics).
   const key = normalizeName(found)
-  works = works.map((w) => (w.id === workId ? withName(w, found) : { ...w, names: w.names.filter((n) => normalizeName(n) !== key || w.names.length === 1) }))
+  works = works.map((w) =>
+    w.id === workId
+      ? withName(w, found)
+      : formatOf(w) === 'novel'
+        ? w
+        : { ...w, names: w.names.filter((n) => normalizeName(n) !== key || w.names.length === 1) }
+  )
   saveWorks(works)
   writeMeta({ ...meta, workId })
   return works

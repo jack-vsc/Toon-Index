@@ -9,6 +9,10 @@ const END = 0.92
 const SECONDS_PER_PAGE = 2
 const MIN_SECONDS = 20
 const MAX_SECONDS = 90
+/** Web novels: their chapters are text, read by scrolling the whole page. Same list as the app's. */
+const NOVEL = /novel|wuxia|ranobe|royalroad|scribblehub|comrademao|webnovel|mtlnation|novelupdates/i
+/** How many "pages" a novel chapter counts as, for the reading time it needs. */
+const NOVEL_PAGES = 15
 /** A page opened only this long is not reported at all. */
 const FIRST_REPORT_SECONDS = 5
 
@@ -35,7 +39,17 @@ function start() {
   state = { href: location.href, seconds: 0, progress: 0, pages: 0, sent: null, lastSent: 0 }
 }
 
+function isNovel() {
+  return NOVEL.test(location.hostname) || NOVEL.test(location.pathname)
+}
+
 function measure() {
+  if (isNovel()) {
+    state.pages = NOVEL_PAGES
+    const seen = (window.scrollY + window.innerHeight) / Math.max(1, document.documentElement.scrollHeight)
+    state.progress = Math.max(state.progress ?? 0, Math.min(1, seen))
+    return
+  }
   const images = pageImages()
   if (!images.length) return
   state.pages = Math.max(state.pages, images.length)

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { HistoryChapter, HistoryWork, ReadingRecord, ReadingReport } from '../shared/reading'
-import { chapterInUrl, findWork, parseChapterName, sameName } from '../shared/works'
+import { chapterInUrl, findWork, isNovelUrl, parseChapterName, sameName } from '../shared/works'
 import { indexWork, listWorks, readMeta } from './library'
 
 const readingPath = (): string => join(app.getPath('userData'), 'library', 'reading.json')
@@ -62,7 +62,7 @@ function upsert(records: ReadingRecord[], next: ReadingRecord): ReadingRecord[] 
 export function reportReading(report: ReadingReport): (ReadingRecord & { work: string }) | null {
   const parsed = parseChapterName(report.title, report.url)
   if (parsed.chapter === null || !parsed.work) return null
-  const workId = indexWork(parsed.work)
+  const workId = indexWork(parsed.work, isNovelUrl(report.url) ? 'novel' : 'comic')
   const records = upsert(listReading(), {
     workId,
     chapter: parsed.chapter,
@@ -225,10 +225,14 @@ export function scanHistory(): { works: HistoryWork[]; problems: string[] } {
   const works = listWorks()
   const groups: HistoryWork[] = []
   for (const item of found.sort((a, b) => b.at - a.at)) {
-    const known = findWork(works, item.work)
-    let group = known ? groups.find((g) => g.workId === known.id) : groups.find((g) => !g.workId && sameName(g.name, item.work))
+    // The novel and the manga of the same name are two works.
+    const format = isNovelUrl(item.url) ? 'novel' : 'comic'
+    const known = findWork(works, item.work, format)
+    let group = known
+      ? groups.find((g) => g.workId === known.id)
+      : groups.find((g) => !g.workId && g.format === format && sameName(g.name, item.work))
     if (!group) {
-      group = { name: known ? known.names[0] : item.work, workId: known?.id ?? null, browsers: [], sites: [], chapters: [] }
+      group = { name: known ? known.names[0] : item.work, workId: known?.id ?? null, format, browsers: [], sites: [], chapters: [] }
       groups.push(group)
     }
     const site = new URL(item.url).hostname.replace(/^www\./, '')
@@ -251,7 +255,7 @@ export function importHistory(chosen: HistoryWork[]): number {
   let records = listReading()
   let count = 0
   for (const group of chosen) {
-    const workId = group.workId ?? indexWork(group.name)
+    const workId = group.workId ?? indexWork(group.name, group.format)
     const last = Math.max(...group.chapters.map((c) => c.chapter))
     for (const c of group.chapters) {
       records = upsert(records, {

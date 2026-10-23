@@ -138,7 +138,10 @@ function WorkSection({
           {latest?.cover ? <img src={latest.cover} alt="" /> : <span>📚</span>}
         </button>
         <div className="work-info">
-          <h3>{displayName(work.names[0])}</h3>
+          <h3>
+            {displayName(work.names[0])}
+            {work.format === 'novel' && <span className="format-tag">novel</span>}
+          </h3>
           {aliases.length > 0 && (
             <div className="work-aliases" title="Outros nomes desta obra">
               também: {aliases.map(displayName).join(' · ')}

@@ -10,6 +10,25 @@ export interface Work {
   /** Every name the work is known by; the first one is shown. */
   names: string[]
   createdAt: number
+  /** A novel shares its name with the manga made from it, but is read apart from it. Absent for comics. */
+  format?: 'novel'
+}
+
+export type WorkFormat = 'comic' | 'novel'
+
+export const formatOf = (work: Work): WorkFormat => work.format ?? 'comic'
+
+/** Sites and paths of web novels: chapters there are text, not the manga of the same name. */
+const NOVEL = /novel|wuxia|ranobe|royalroad|scribblehub|comrademao|webnovel|mtlnation|novelupdates/i
+
+/** Whether a chapter's link is a web novel's. */
+export function isNovelUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return NOVEL.test(u.hostname) || NOVEL.test(u.pathname)
+  } catch {
+    return false
+  }
 }
 
 export interface ChapterName {
@@ -127,11 +146,15 @@ function rest(name: string, count: number): string {
   return ''
 }
 
-/** The work one of whose names matches; the longest matching name wins when several works match. */
-export function findWork(works: Work[], name: string): Work | null {
+/**
+ * The work of that format one of whose names matches; the longest matching name wins when several
+ * works match.
+ */
+export function findWork(works: Work[], name: string, format: WorkFormat = 'comic'): Work | null {
   let best: Work | null = null
   let bestLength = 0
   for (const work of works) {
+    if (formatOf(work) !== format) continue
     for (const known of work.names) {
       if (!sameName(known, name)) continue
       const length = Math.min(normalizeName(known).length, normalizeName(name).length)
