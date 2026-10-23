@@ -1861,3 +1861,8 @@ details pre {
 .library-toolbar {
   flex-wrap: wrap;
 }
+
+.batch-mode {
+  margin-top: 12px;
+  display: inline-flex;
+}

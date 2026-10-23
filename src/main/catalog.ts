@@ -1,6 +1,6 @@
 import { nativeImage, session, type BrowserWindow } from 'electron'
 import { isSameWork, readableNames, type CatalogMatch, type CatalogResult, type CatalogSite } from '../shared/catalog'
-import { chapterLinks, type ChapterLink, type PageLink } from '../shared/updates'
+import { chapterLinks, fillChapterGaps, type ChapterLink, type PageLink } from '../shared/updates'
 import { formatOf, normalizeName, type Work } from '../shared/works'
 import { applyCatalog, listWorks } from './library'
 import { hiddenWindow, isChallenged, open, PARTITION, sleep } from './webChapter'
@@ -16,6 +16,8 @@ const AUTO_SEARCHES = 3
 /** A work none of the sites had is looked up again after this long (it may be added there later). */
 const AUTO_RETRY_MS = 7 * 24 * 60 * 60_000
 const COVER_WIDTH = 300
+/** Lists drawn by the page's scripts get this long after it loads. */
+const SETTLE_MS = 3_000
 const MANGADEX_PAGE = 500
 const MANGADEX_MAX_CHAPTERS = 5_000
 const CHOICES_PER_SITE = 5
@@ -127,8 +129,9 @@ async function findSameWork(work: Work, win: BrowserWindow): Promise<{ picks: Ca
  * Every chapter of the work on its site, in order, for translating a range of them. MangaDex's are the
  * English ones it hosts (not links to official sites); mgeko lists them all on one page.
  */
-export async function chapterList(match: Pick<CatalogMatch, 'site' | 'url'>): Promise<ChapterLink[]> {
+export async function chapterList(match: { site: CatalogSite | 'link'; url: string }): Promise<ChapterLink[]> {
   if (match.site === 'mangadex') return mangadexChapters(match.url)
+  if (match.site === 'link') return pageChapters(match.url)
   return withWindow(undefined, async (w) => {
     await load(w, new URL('all-chapters/', match.url.endsWith('/') ? match.url : `${match.url}/`).href)
     // The page's list holds this work's chapters only, older ones under another name in their links.
@@ -136,6 +139,30 @@ export async function chapterList(match: Pick<CatalogMatch, 'site' | 'url'>): Pr
       `[...document.querySelectorAll('.chapter-list a[href]')].map((a) => ({ href: a.href, text: (a.innerText || '').trim().slice(0, 120) }))`
     )) as PageLink[]
     return chapterLinks(match.url, links, true)
+  })
+}
+
+/** Any site: the chapters linked from the work's page, scrolled to the end for lists that load as they show. */
+async function pageChapters(url: string): Promise<ChapterLink[]> {
+  if (!/^https?:\/\//i.test(url)) throw new Error('Cole o link da página da obra (o que começa com https://).')
+  return withWindow(undefined, async (w) => {
+    await load(w, url)
+    // After the wait: some sites only send to their sign-in page once the page's script has run.
+    await sleep(SETTLE_MS)
+    if (/\/(entrar|login|signin|sign-in|auth)\b/i.test(new URL(w.webContents.getURL()).pathname)) {
+      throw new Error('O site pediu login: clique em "Entrar no site", entre com a sua conta e tente de novo.')
+    }
+    for (let i = 0; i < 30; i++) {
+      const bottom = (await w.webContents.executeJavaScript(
+        `(() => { window.scrollBy(0, window.innerHeight); return window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4 })()`
+      )) as boolean
+      if (bottom) break
+      await sleep(250)
+    }
+    const links = (await w.webContents.executeJavaScript(
+      `[...document.querySelectorAll('a[href]')].map((a) => ({ href: a.href, text: (a.innerText || '').trim().slice(0, 120) }))`
+    )) as PageLink[]
+    return fillChapterGaps(chapterLinks(url, links))
   })
 }
 

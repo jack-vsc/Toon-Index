@@ -52,6 +52,14 @@ class _WorkScreenState extends State<WorkScreen> {
     }
   }
 
+  /// Every chapter not on the phone yet, one after another, to read without internet (on a plane, say).
+  Future<void> _downloadAll() async {
+    for (final c in widget.view.translated.where((c) => !_downloaded.contains(c.id)).toList()) {
+      if (!mounted) return;
+      await _download(c);
+    }
+  }
+
   Future<void> _removeDownload(LibraryChapter c) async {
     await Downloads.remove(c.id);
     await _refreshDownloads();
@@ -86,6 +94,7 @@ class _WorkScreenState extends State<WorkScreen> {
   Widget build(BuildContext context) {
     final view = widget.view;
     final aliases = view.work.names.skip(1).map(displayName).toList();
+    final missing = view.translated.where((c) => !_downloaded.contains(c.id)).toList();
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(backgroundColor: Colors.transparent),
@@ -126,7 +135,15 @@ class _WorkScreenState extends State<WorkScreen> {
           ],
           if (view.translated.isNotEmpty) ...[
             const SizedBox(height: 18),
-            Text('Traduzidos no PC', style: Theme.of(context).textTheme.titleMedium),
+            Row(children: [
+              Expanded(child: Text('No PC', style: Theme.of(context).textTheme.titleMedium)),
+              if (missing.isNotEmpty)
+                TextButton.icon(
+                  onPressed: _downloading.isEmpty ? _downloadAll : null,
+                  icon: const Icon(Icons.download_for_offline),
+                  label: Text('Baixar todos (${missing.length})'),
+                ),
+            ]),
             for (final c in view.translated)
               ListTile(
                 contentPadding: EdgeInsets.zero,

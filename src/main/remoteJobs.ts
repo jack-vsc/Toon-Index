@@ -46,7 +46,7 @@ export function pauseRemoteJobs(paused: boolean): RemoteQueue {
 }
 
 /** A range of a work's chapters, translated in order, after whatever is queued already. */
-export function addBatch(work: string, site: string, chapters: { chapter: number; url: string }[]): RemoteQueue {
+export function addBatch(work: string, site: string, chapters: { chapter: number; url: string }[], download = false): RemoteQueue {
   const clean = work.trim()
   if (!clean) throw new Error('Informe o nome da obra.')
   if (!chapters.length) throw new Error('Nenhum capítulo nessa faixa.')
@@ -61,7 +61,7 @@ export function addBatch(work: string, site: string, chapters: { chapter: number
     createdAt: now + i,
     updatedAt: now + i,
     status: 'queued',
-    batch: { work: clean, chapter: c.chapter, site }
+    batch: { work: clean, chapter: c.chapter, site, ...(download && { download }) }
   }))
   save([...listRemoteJobs(), ...added])
   return remoteQueue()

@@ -6,8 +6,9 @@ import type { AiStopTarget, ApiProfile, SaveLibraryInput, SaveSettingsInput, Tra
 import { aiStatus, gpuTotals, stopAi, stopMonitor } from './aiMonitor'
 import { registerEvalIpc } from './evaluate'
 import { snapshotRequested, takeSnapshot } from './snapshot'
-import { cancelWebChapter, fetchWebChapter } from './webChapter'
+import { cancelWebChapter, fetchWebChapter, openSiteLogin } from './webChapter'
 import {
+  addWorkSource,
   deleteFromLibrary,
   listLibrary,
   listWorks,
@@ -18,7 +19,7 @@ import {
   setWorkNames,
   workCovers
 } from './library'
-import type { CatalogMatch } from '../shared/catalog'
+import type { CatalogMatch, CatalogSite } from '../shared/catalog'
 import { chapterList, linkWork, searchCatalogToChoose } from './catalog'
 import type { ChapterLink } from '../shared/updates'
 import type { HistoryWork } from '../shared/reading'
@@ -99,6 +100,7 @@ function registerIpc(): void {
   ipcMain.handle('vision:inpaint', (_e, image: Uint8Array, mask: Uint8Array) => visionInpaint(image, mask))
   ipcMain.handle('web:chapter', (e, url: string) => fetchWebChapter(url, e.sender))
   ipcMain.handle('web:cancel', () => cancelWebChapter())
+  ipcMain.handle('web:login', (e, url: string) => openSiteLogin(url, BrowserWindow.fromWebContents(e.sender) ?? undefined))
   ipcMain.handle('ai:status', () => aiStatus())
   ipcMain.handle('ai:gpu', () => gpuTotals())
   ipcMain.handle('ai:stop', (_e, target: AiStopTarget) => stopAi(target))
@@ -148,7 +150,11 @@ function registerIpc(): void {
   ipcMain.handle('remote:list', () => listRemoteJobs())
   ipcMain.handle('remote:queue', () => remoteQueue())
   ipcMain.handle('remote:pause', (_e, paused: boolean) => pauseRemoteJobs(paused))
-  ipcMain.handle('remote:batch', (_e, work: string, site: string, chapters: ChapterLink[]) => addBatch(work, site, chapters))
+  ipcMain.handle('remote:batch', (_e, work: string, site: string, chapters: ChapterLink[], download: boolean, source?: string) => {
+    const queue = addBatch(work, site, chapters, download)
+    if (source) addWorkSource(work, source)
+    return queue
+  })
   ipcMain.handle('remote:clear-batch', () => clearBatch())
   ipcMain.handle('remote:take', () => takeRemoteJob())
   ipcMain.handle('remote:update', (_e, id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>) =>
@@ -159,7 +165,7 @@ function registerIpc(): void {
   ipcMain.handle('updates:sources', (_e, workId: string, sources: string[]) => setWorkSources(workId, sources))
   ipcMain.handle('updates:ntfy', (_e, enabled: boolean) => setNtfy(enabled))
   ipcMain.handle('works:covers', () => workCovers())
-  ipcMain.handle('works:chapters', (_e, match: Pick<CatalogMatch, 'site' | 'url'>) => chapterList(match))
+  ipcMain.handle('works:chapters', (_e, match: { site: CatalogSite | 'link'; url: string }) => chapterList(match))
   ipcMain.handle('works:search', (_e, query: string) => searchCatalogToChoose(query))
   ipcMain.handle('works:link', (_e, workId: string, matches: CatalogMatch[]) => linkWork(workId, matches))
   ipcMain.handle('works:move', (_e, entryId: string, target: { workId: string } | { newName: string }) => moveToWork(entryId, target))

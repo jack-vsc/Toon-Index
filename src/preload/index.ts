@@ -15,6 +15,7 @@ const api: MangaApi = {
   web: {
     chapter: (url) => ipcRenderer.invoke('web:chapter', url),
     cancel: () => ipcRenderer.invoke('web:cancel'),
+    login: (url) => ipcRenderer.invoke('web:login', url),
     onProgress: (callback) => {
       const listener = (_e: Electron.IpcRendererEvent, p: WebChapterProgress) => callback(p)
       ipcRenderer.on('web:progress', listener)
@@ -71,7 +72,7 @@ const api: MangaApi = {
     take: () => ipcRenderer.invoke('remote:take'),
     queue: () => ipcRenderer.invoke('remote:queue'),
     pause: (paused) => ipcRenderer.invoke('remote:pause', paused),
-    batch: (work, site, chapters) => ipcRenderer.invoke('remote:batch', work, site, chapters),
+    batch: (work, site, chapters, download, source) => ipcRenderer.invoke('remote:batch', work, site, chapters, download, source),
     clearBatch: () => ipcRenderer.invoke('remote:clear-batch'),
     update: (id, patch) => ipcRenderer.invoke('remote:update', id, patch),
     onChanged: (callback) => {

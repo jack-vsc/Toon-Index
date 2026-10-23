@@ -21,8 +21,11 @@ export interface RemoteJob {
   /** The library chapter made from it, once done. */
   entryId?: string
   updatedAt: number
-  /** One chapter of a range asked for on the PC; `name` is then "Work Chapter 31", what it is saved as. */
-  batch?: { work: string; chapter: number; site: string }
+  /**
+   * One chapter of a range asked for on the PC; `name` is then "Work Chapter 31", what it is saved as.
+   * `download`: only saved as it is (already in the language read, to read offline), not translated.
+   */
+  batch?: { work: string; chapter: number; site: string; download?: boolean }
 }
 
 export interface RemoteQueue {

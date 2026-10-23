@@ -58,8 +58,20 @@ export function latestChapter(source: string, links: PageLink[]): ChapterLink | 
  * The chapters among a work page's links, in order, one link each. Only links to the same site that
  * carry the work's name in their path count, so "popular this week" lists of other works around it
  * are left out; `onlyThisWork` says the links are all the work's (a list of its chapters alone).
+ * Sites whose links are bare ids ("/obra/186" listing "/capitulo/580922") have none of that: there the
+ * links to chapter pages that say "Capítulo 293" count.
  */
 export function chapterLinks(source: string, links: PageLink[], onlyThisWork = false): ChapterLink[] {
+  const named = chapterLinksOf(source, links, onlyThisWork)
+  if (named.length || onlyThisWork) return named
+  const toChapterPages = links.filter((l) => CHAPTER_PAGE.test(l.href) && CHAPTER_TEXT.test(l.text))
+  return chapterLinksOf(source, toChapterPages, true)
+}
+
+/** "/capitulo/580922", "/chapter/123": a chapter's page named by the site's id for it. */
+const CHAPTER_PAGE = /\/(capitulo|chapter|cap|ch|episode|episodio)\/\d+/i
+
+function chapterLinksOf(source: string, links: PageLink[], onlyThisWork: boolean): ChapterLink[] {
   let page: URL
   try {
     page = new URL(source)
@@ -78,14 +90,40 @@ export function chapterLinks(source: string, links: PageLink[], onlyThisWork = f
     if (stripWww(url.hostname) !== stripWww(page.hostname)) continue
     const path = decodeURIComponent(url.pathname).toLowerCase()
     if (!onlyThisWork && (slug ? !path.includes(slug) : !path.startsWith(page.pathname.toLowerCase()))) continue
+    // What the link says first: in "/capitulo/580922" the number is the site's id, not the chapter.
     const fromText = CHAPTER_TEXT.exec(link.text)
-    const chapter = chapterInUrl(url.href) ?? (fromText ? parseFloat(fromText[1].replace(',', '.')) : null)
+    const chapter = fromText ? parseFloat(fromText[1].replace(',', '.')) : chapterInUrl(url.href)
     // Years and ids that look like chapter numbers.
     if (chapter === null || chapter > 5000 || found.has(chapter)) continue
     // Sites list a chapter once per group that translated it; the first is the newest upload.
     found.set(chapter, url.href.replace(/#.*$/, ''))
   }
   return [...found].map(([chapter, url]) => ({ chapter, url })).sort((a, b) => a.chapter - b.chapter)
+}
+
+/**
+ * Sites often list only the latest chapters on the work's page (and the first). When the links follow
+ * one pattern ("/name/chapter-77/"), the whole chapters missing between the first and the last are
+ * filled in with it; one the site does not have fails on its own when opened.
+ */
+export function fillChapterGaps(chapters: ChapterLink[]): ChapterLink[] {
+  const pattern = (c: ChapterLink): string | null => {
+    // The number on its own ("chapter-77"), not inside an id.
+    const match = [...c.url.matchAll(new RegExp(`(?<!\\d)${c.chapter}(?!\\d)`, 'g'))].at(-1)
+    return Number.isInteger(c.chapter) && match?.index !== undefined
+      ? `${c.url.slice(0, match.index)}{n}${c.url.slice(match.index + match[0].length)}`
+      : null
+  }
+  const patterns = chapters.map(pattern)
+  const template = patterns.find((p) => p !== null)
+  if (!template || patterns.filter((p) => p === template).length < 2) return chapters
+  const have = new Set(chapters.map((c) => c.chapter))
+  const whole = chapters.filter((c) => Number.isInteger(c.chapter)).map((c) => c.chapter)
+  const filled = [...chapters]
+  for (let n = Math.min(...whole); n <= Math.max(...whole); n++) {
+    if (!have.has(n)) filled.push({ chapter: n, url: template.replace('{n}', String(n)) })
+  }
+  return filled.sort((a, b) => a.chapter - b.chapter)
 }
 
 /**

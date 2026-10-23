@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CatalogSite } from '../shared/catalog'
-import type { LibraryEntry, SaveLibraryInput } from '../shared/types'
+import { DOWNLOADED_MODEL, type LibraryEntry, type SaveLibraryInput } from '../shared/types'
 import { MAX_SOURCES } from '../shared/updates'
 import { findWork, formatOf, normalizeName, parseChapterName, withName, type Work, type WorkFormat } from '../shared/works'
 import { moveReading } from './reading'
@@ -98,9 +98,9 @@ export function saveToLibrary(input: SaveLibraryInput): LibraryEntry {
     createdAt: Date.now(),
     pageCount: input.pageCount,
     translatedPages: input.translatedPages,
-    sourceLanguage: settings.sourceLanguage,
+    sourceLanguage: input.downloaded ? settings.targetLanguage : settings.sourceLanguage,
     targetLanguage: settings.targetLanguage,
-    model: currentModelLabel(),
+    model: input.downloaded ? DOWNLOADED_MODEL : currentModelLabel(),
     workId: indexWork(parsed.work),
     chapter: parsed.chapter,
     ...(input.source ? { source: input.source } : {})
@@ -179,6 +179,20 @@ export function applyCatalog(
   const works = all.map((w) => (w.id === workId ? updated : w))
   saveWorks(works)
   return works
+}
+
+/**
+ * The work named `name` (made when new) gets `source`, its page on a site, among the ones checked for
+ * new chapters: the page a range of its chapters was taken from. It goes first, so it stays when the
+ * work already has as many as it can.
+ */
+export function addWorkSource(name: string, source: string): void {
+  const workId = indexWork(name)
+  saveWorks(
+    listWorks().map((w) =>
+      w.id === workId && !w.sources?.includes(source) ? { ...w, sources: [source, ...(w.sources ?? [])].slice(0, MAX_SOURCES) } : w
+    )
+  )
 }
 
 /** The work's pages on sites, checked for new chapters (shared/updates.ts). */

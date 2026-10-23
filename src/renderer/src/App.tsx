@@ -72,6 +72,8 @@ export default function App() {
   const fileRef = useRef<LoadedFile | null>(null)
   /** A phone's request is being worked on (the state above only shows it). */
   const remoteBusy = useRef(false)
+  /** Counts the requests finished, so the next one is taken (a download leaves the home screen as it was). */
+  const [remoteFinished, setRemoteFinished] = useState(0)
   /** The library chapter the last finished translation was saved as. */
   const savedEntry = useRef<string | null>(null)
 
@@ -125,7 +127,7 @@ export default function App() {
       left = true
       stop()
     }
-  }, [view, configured, settings])
+  }, [view, configured, settings, remoteFinished])
   const readerMode: ReaderMode = settings?.readerMode ?? 'scroll'
 
   // Pausing the queue stops the chapter it is on (runRemote puts it back in the queue). The local AIs
@@ -186,6 +188,10 @@ export default function App() {
     const update = (patch: Parameters<typeof window.api.remote.update>[1]) => window.api.remote.update(remote.id, patch)
     savedEntry.current = null
     try {
+      if (remote.batch?.download) {
+        await downloadOnly(remote)
+        return
+      }
       let selected: File
       if (remote.kind === 'link') {
         await update({ message: 'Abrindo o site' })
@@ -217,7 +223,35 @@ export default function App() {
     } finally {
       remoteBusy.current = false
       setRemoteJob(null)
+      setRemoteFinished((n) => n + 1)
     }
+  }
+
+  /** A chapter of a range asked only to be downloaded: saved to the library as it is, to read offline. */
+  async function downloadOnly(remote: RemoteJob) {
+    await window.api.remote.update(remote.id, { message: 'Baixando' })
+    const chapter = await window.api.web.chapter(remote.url!)
+    if ((await window.api.remote.queue()).paused) throw new Paused()
+    // The cover first: making the PDF hands the images over.
+    const first = await createImageBitmap(new Blob([chapter.images[0] as BlobPart]))
+    const canvas = document.createElement('canvas')
+    canvas.width = first.width
+    canvas.height = Math.min(first.height, Math.round(first.width * 1.5))
+    canvas.getContext('2d')!.drawImage(first, 0, 0)
+    const cover = new Uint8Array(await (await canvasToBlob(thumbnailCanvas(canvas, 480), 'image/jpeg', 0.85)).arrayBuffer())
+    const pdf = await webChapterToPdf(chapter)
+    const entry = await window.api.library.save({
+      fileName: `${remote.name}.pdf`,
+      source: remote.url,
+      pageCount: chapter.images.length,
+      translatedPages: chapter.images.length,
+      original: pdf,
+      translated: pdf,
+      coverJpeg: cover,
+      downloaded: true
+    })
+    await window.api.remote.update(remote.id, { status: 'done', message: undefined, entryId: entry.id })
+    await refreshLibrary()
   }
 
   async function startTranslation(choice: SetupChoice) {
@@ -642,9 +676,9 @@ function BatchBar({ queue, running }: { queue: RemoteQueue; running: RemoteJob |
     <div className={`banner batch-bar ${queue.paused ? 'paused' : ''}`}>
       <span>
         {queue.paused
-          ? `⏸ Tradução em lote pausada: ${waiting.length} ${waiting.length === 1 ? 'capítulo' : 'capítulos'} na fila`
+          ? `⏸ Lote pausado: ${waiting.length} ${waiting.length === 1 ? 'capítulo' : 'capítulos'} na fila`
           : now
-            ? `📚 Traduzindo ${now.name} · mais ${waiting.length} na fila`
+            ? `📚 ${now.batch?.download ? 'Baixando' : 'Traduzindo'} ${now.name} · mais ${waiting.length} na fila`
             : `📚 ${waiting.length} na fila: começa assim que o app estiver livre na tela inicial`}
         {failed.length > 0 && ` · ${failed.length} falharam: ${failed.map((f) => f.batch!.chapter).join(', ')}`}
       </span>

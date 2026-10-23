@@ -248,6 +248,24 @@ export interface LibraryEntry {
   source?: string
 }
 
+/** The model named for a chapter saved as the site had it (a scan already in the language read). */
+export const DOWNLOADED_MODEL = 'baixado sem tradução'
+
+/** The chapter was downloaded as it is, not translated. */
+export const isDownloaded = (entry: Pick<LibraryEntry, 'model'>): boolean => entry.model === DOWNLOADED_MODEL
+
+/** "5 TRADUZIDOS · 3 BAIXADOS": a work's chapters on this PC, by how they got here. */
+export function chapterCount(entries: Pick<LibraryEntry, 'model'>[], short = false): string {
+  const downloaded = entries.filter(isDownloaded).length
+  const translated = entries.length - downloaded
+  return [
+    translated && `${translated} ${short ? 'TRAD.' : 'TRADUZIDOS'}`,
+    downloaded && `${downloaded} ${short ? 'BAIX.' : 'BAIXADOS'}`
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
 export interface SaveLibraryInput {
   fileName: string
   source?: string
@@ -256,6 +274,8 @@ export interface SaveLibraryInput {
   original: Uint8Array
   translated: Uint8Array
   coverJpeg: Uint8Array
+  /** Downloaded as it is, already in the language read (the translated PDF is the original). */
+  downloaded?: boolean
 }
 
 export interface Language {

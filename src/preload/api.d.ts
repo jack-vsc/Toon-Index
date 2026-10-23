@@ -19,7 +19,7 @@ import type { DevicesStatus, PairingCode } from '../shared/devices'
 import type { HistoryWork, ReadingRecord } from '../shared/reading'
 import type { RemoteJob, RemoteQueue } from '../shared/remoteJobs'
 import type { ChapterLink, UpdatesStatus } from '../shared/updates'
-import type { CatalogMatch, CatalogResult } from '../shared/catalog'
+import type { CatalogMatch, CatalogResult, CatalogSite } from '../shared/catalog'
 import type { Work } from '../shared/works'
 
 export interface MangaApi {
@@ -41,6 +41,8 @@ export interface MangaApi {
   web: {
     chapter(url: string): Promise<WebChapter>
     cancel(): Promise<void>
+    /** A window of the site for the person to sign in; resolves when they close it. */
+    login(url: string): Promise<void>
     /** Returns a function that stops listening. */
     onProgress(callback: (p: WebChapterProgress) => void): () => void
   }
@@ -70,8 +72,8 @@ export interface MangaApi {
     move(entryId: string, target: { workId: string } | { newName: string }): Promise<Work[]>
     /** By work id, the covers found on the catalog sites (data URLs). */
     covers(): Promise<Record<string, string>>
-    /** Every chapter of a work on MangaDex or mgeko, in order. */
-    chapters(match: Pick<CatalogMatch, 'site' | 'url'>): Promise<ChapterLink[]>
+    /** Every chapter of a work on MangaDex or mgeko, or on any site from its page's link ('link'), in order. */
+    chapters(match: { site: CatalogSite | 'link'; url: string }): Promise<ChapterLink[]>
     /** Looks a name up on MangaDex, mgeko and comix. */
     search(query: string): Promise<CatalogResult[]>
     /** Takes the chosen matches' names, pages and cover into the work. */
@@ -108,8 +110,9 @@ export interface MangaApi {
     queue(): Promise<RemoteQueue>
     /** Pauses (nothing new starts) or resumes the queue. */
     pause(paused: boolean): Promise<RemoteQueue>
-    /** Queues a range of a work's chapters, to translate in order. */
-    batch(work: string, site: string, chapters: ChapterLink[]): Promise<RemoteQueue>
+    /** Queues a range of a work's chapters, to translate (or only download) in order. */
+    /** `source`: the work's page the chapters came from, added to the work's sites. */
+    batch(work: string, site: string, chapters: ChapterLink[], download: boolean, source?: string): Promise<RemoteQueue>
     /** Takes the queued chapters of those ranges off the queue. */
     clearBatch(): Promise<RemoteQueue>
     /** Returns a function that stops listening. */

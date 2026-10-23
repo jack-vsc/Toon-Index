@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { CATALOG_SITES, isSameWork, type CatalogMatch, type CatalogResult } from '../../../shared/catalog'
 import type { ReadingRecord } from '../../../shared/reading'
-import { languageLabel, type LibraryEntry } from '../../../shared/types'
+import { chapterCount, isDownloaded, languageLabel, type LibraryEntry } from '../../../shared/types'
 import { MAX_SOURCES, sourceFromChapter, unreadUpdates, type UpdatesStatus, type WorkUpdate } from '../../../shared/updates'
 import { displayName, normalizeName, type Work } from '../../../shared/works'
 import { HistoryImport } from './HistoryImport'
@@ -55,12 +55,12 @@ function coverOf(group: WorkGroup, covers: Record<string, string>): string | nul
   return covers[group.work.id] ?? [...group.chapters].sort((a, b) => b.createdAt - a.createdAt)[0]?.cover ?? null
 }
 
-/** "CAP. 90 · NOVEL · 5 TRADUZIDOS", in the sites' small capitals. */
+/** "CAP. 90 · NOVEL · 5 TRAD.", in the sites' small capitals. */
 function metaLine(group: WorkGroup): string {
   const read = group.records.filter((r) => r.status === 'read').map((r) => r.chapter)
   const parts = [read.length ? `CAP. ${Math.max(...read)}` : group.records.length ? 'LENDO' : 'NÃO LIDO']
   if (group.work.format === 'novel') parts.push('NOVEL')
-  if (group.chapters.length) parts.push(`${group.chapters.length} TRAD.`)
+  if (group.chapters.length) parts.push(chapterCount(group.chapters, true))
   return parts.join(' · ')
 }
 
@@ -222,7 +222,7 @@ function Hero({ group, cover, update, onPick }: { group: WorkGroup; cover: strin
         <div className="tags">
           <span className="tag">{group.work.format === 'novel' ? 'NOVEL' : 'MANGÁ'}</span>
           {status && siteOf(status.continueUrl) && <span className="tag">{siteOf(status.continueUrl).toUpperCase()}</span>}
-          {group.chapters.length > 0 && <span className="tag">{group.chapters.length} TRADUZIDOS</span>}
+          {group.chapters.length > 0 && <span className="tag">{chapterCount(group.chapters)}</span>}
         </div>
         {status && <p className="hero-status">{status.text}</p>}
         <div className="row">
@@ -323,7 +323,7 @@ export function WorkPage({
                 <span className="chapter-actions">
                   {entry && (
                     <button className="small" onClick={() => onOpen(entry)}>
-                      Ler traduzido
+                      {isDownloaded(entry) ? 'Ler baixado' : 'Ler traduzido'}
                     </button>
                   )}
                   {record?.url && (
@@ -341,7 +341,7 @@ export function WorkPage({
       {chapters.length > 0 && (
         <section className="home-section">
           <div className="section-head">
-            <h2>Traduzidos neste PC</h2>
+            <h2>{chapters.every(isDownloaded) ? 'Baixados neste PC' : chapters.some(isDownloaded) ? 'Neste PC' : 'Traduzidos neste PC'}</h2>
             <span className="mono muted">{chapterRange(chapters).replace(/^ · /, '').toUpperCase()}</span>
           </div>
           <TranslatedGrid chapters={chapters} records={records} others={others} onOpen={onOpen} onDownload={onDownload} onDelete={onDelete} onWorksChanged={onWorksChanged} />
@@ -377,7 +377,9 @@ function TranslatedGrid({ chapters, records, others, onOpen, onDownload, onDelet
               {entry.chapter !== null && readChapters.has(entry.chapter) && <span className="read-mark"> ✓ lido</span>}
             </strong>
             <span>
-              {languageLabel(entry.sourceLanguage)} → {languageLabel(entry.targetLanguage)}
+              {isDownloaded(entry)
+                ? `${languageLabel(entry.targetLanguage)} · baixado do site`
+                : `${languageLabel(entry.sourceLanguage)} → ${languageLabel(entry.targetLanguage)}`}
             </span>
             <span>
               {entry.translatedPages === entry.pageCount ? `${entry.pageCount} páginas` : `${entry.translatedPages} de ${entry.pageCount} páginas traduzidas`} ·{' '}

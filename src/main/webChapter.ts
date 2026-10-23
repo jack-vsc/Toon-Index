@@ -131,6 +131,21 @@ export function plainUserAgent(ses: Electron.Session): void {
   ses.setUserAgent(ses.getUserAgent().replace(/\s(Electron|manga-index)\/\S+/gi, ''))
 }
 
+/**
+ * A window of the site for the person to sign in themselves (the app never sees the password). The
+ * session stays in the app's browser partition, so later downloads from the site go in signed in.
+ */
+export function openSiteLogin(url: string, parent?: BrowserWindow): Promise<void> {
+  if (!/^https?:\/\//i.test(url)) throw new Error('Informe um link que comece com http:// ou https://.')
+  plainUserAgent(session.fromPartition(PARTITION))
+  const webPreferences = { partition: PARTITION, sandbox: true, contextIsolation: true }
+  const win = new BrowserWindow({ width: 1000, height: 820, title: 'Entre na sua conta e feche esta janela', autoHideMenuBar: true, parent, webPreferences })
+  // Signing in with Google or Discord opens their page in a pop-up.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, webPreferences } }))
+  void win.loadURL(url)
+  return new Promise((resolve) => win.on('closed', () => resolve()))
+}
+
 /** A window never shown, for reading sites' pages unattended (new chapters, looking works up). */
 export function hiddenWindow(): BrowserWindow {
   plainUserAgent(session.fromPartition(PARTITION))
