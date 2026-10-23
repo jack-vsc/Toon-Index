@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
 import 'models.dart';
+import 'translate_screen.dart';
 import 'work_screen.dart';
 
 /// Every work read or translated, where it was left, the most recent first. Shows the last library
@@ -77,10 +78,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () async {
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => TranslateScreen(api: widget.api)));
+          _refresh();
+        },
+        icon: const Icon(Icons.translate),
+        label: const Text('Traduzir no PC'),
+      ),
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+          // Room under the last work for the button.
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
           children: [
             TextField(
               decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Buscar obra por qualquer nome…'),

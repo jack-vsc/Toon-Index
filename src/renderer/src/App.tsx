@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AppError } from '../../shared/errors'
 import { activeProfile, profileReady, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
 import type { ReadingRecord } from '../../shared/reading'
+import type { RemoteJob } from '../../shared/remoteJobs'
 import type { Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
 import { LibraryView } from './components/LibraryView'
@@ -17,6 +18,7 @@ import { WebLinkInput } from './components/WebLinkInput'
 import { canvasToBlob, renderPage, thumbnailCanvas } from './lib/pdf'
 import { cleanIpcError, TranslationJob, type PageState } from './lib/pipeline'
 import { usePdfPages } from './lib/usePdfPages'
+import { webChapterToPdf } from './lib/webChapter'
 
 type View = 'home' | 'setup' | 'processing' | 'result'
 
@@ -59,8 +61,13 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false)
   const [aiMonitorOpen, setAiMonitorOpen] = useState(false)
   const [phoneOpen, setPhoneOpen] = useState(false)
+  const [remoteJob, setRemoteJob] = useState<RemoteJob | null>(null)
   const job = useRef<TranslationJob | null>(null)
   const fileRef = useRef<LoadedFile | null>(null)
+  /** A phone's request is being worked on (the state above only shows it). */
+  const remoteBusy = useRef(false)
+  /** The library chapter the last finished translation was saved as. */
+  const savedEntry = useRef<string | null>(null)
 
   useEffect(() => {
     window.api.getSettings().then(setSettings)
@@ -78,6 +85,32 @@ export default function App() {
 
   const profile = settings ? activeProfile(settings) : undefined
   const configured = !!settings && profileReady(profile, settings.hasKey)
+
+  // Chapters the phone asked for are translated one at a time, whenever this window is free (on the
+  // home screen, nothing else open).
+  useEffect(() => {
+    if (view !== 'home' || !configured || !settings) return
+    let left = false
+    const check = async () => {
+      if (left || remoteBusy.current) return
+      remoteBusy.current = true
+      const next = await window.api.remote.take()
+      if (!next) {
+        remoteBusy.current = false
+      } else if (left) {
+        remoteBusy.current = false
+        await window.api.remote.update(next.job.id, { status: 'queued', message: undefined })
+      } else {
+        void runRemote(next.job, next.pdf, settings)
+      }
+    }
+    void check()
+    const stop = window.api.remote.onChanged(check)
+    return () => {
+      left = true
+      stop()
+    }
+  }, [view, configured, settings])
   const readerMode: ReaderMode = settings?.readerMode ?? 'scroll'
 
   const inResult = view === 'result' && !!reader
@@ -93,10 +126,11 @@ export default function App() {
   }))
   const readerPages = view === 'processing' ? jobPages : showOriginal ? originalPages : reader?.fromJob ? jobPages : pdfPages
 
-  async function openFile(selected: File, source?: string) {
+  /** Opens the chapter for setup; false (with the reason shown) when it could not be opened. */
+  async function openFile(selected: File, source?: string): Promise<boolean> {
     if (!settings || !configured) {
       setSettingsOpen(true)
-      return
+      return false
     }
     setMessage(null)
     const bytes = new Uint8Array(await selected.arrayBuffer())
@@ -111,9 +145,45 @@ export default function App() {
       const first = await renderPage(job.current.doc, 1, 480)
       const cover = URL.createObjectURL(await canvasToBlob(thumbnailCanvas(first.canvas, 480), 'image/jpeg', 0.85))
       setSetupInfo({ numPages: job.current.numPages, cover })
+      return true
     } catch (err) {
       setMessage(`Não foi possível abrir o PDF: ${cleanIpcError(err)}`)
       setView('home')
+      return false
+    }
+  }
+
+  /**
+   * Translates a chapter the phone asked for, the way it would be done by hand: open, translate
+   * every page with the saved settings, save to the library. Pages that failed are left as they are.
+   */
+  async function runRemote(remote: RemoteJob, pdf: Uint8Array | null, current: PublicSettings) {
+    setRemoteJob(remote)
+    const update = (patch: Parameters<typeof window.api.remote.update>[1]) => window.api.remote.update(remote.id, patch)
+    savedEntry.current = null
+    try {
+      let selected: File
+      if (remote.kind === 'link') {
+        await update({ message: 'Abrindo o site' })
+        const chapter = await window.api.web.chapter(remote.url!)
+        selected = new File([(await webChapterToPdf(chapter)) as BlobPart], `${chapter.title}.pdf`, { type: 'application/pdf' })
+      } else {
+        selected = new File([pdf as BlobPart], remote.name, { type: 'application/pdf' })
+      }
+      await update({ message: 'Traduzindo' })
+      if (!(await openFile(selected, remote.url))) throw new Error('Não foi possível abrir o PDF.')
+      await startTranslation(defaultChoice(job.current!.numPages, current))
+      if (!savedEntry.current && job.current && job.current.translatedCount > 0) await finish()
+      if (!savedEntry.current) throw new Error(job.current?.stopReason?.message ?? 'Nenhuma página foi traduzida.')
+      await update({ status: 'done', message: undefined, entryId: savedEntry.current })
+      goHome()
+      setMessage(`Pedido do celular traduzido e salvo na biblioteca: ${selected.name.replace(/\.pdf$/i, '')}`)
+    } catch (err) {
+      await update({ status: 'failed', message: cleanIpcError(err) })
+      goHome()
+    } finally {
+      remoteBusy.current = false
+      setRemoteJob(null)
     }
   }
 
@@ -167,6 +237,7 @@ export default function App() {
       translated: pdf,
       coverJpeg: cover
     })
+    savedEntry.current = entry.id
     await refreshLibrary()
     setReader({ title: current.name, translated: pdf, original: current.bytes, libraryId: entry.id, fromJob: true })
     setShowOriginal(false)
@@ -390,6 +461,11 @@ export default function App() {
           <main className={`content ${showReader && readerMode === 'paged' ? 'no-scroll' : ''}`}>
             {view === 'home' && (
               <div className="home">
+                {remoteJob && (
+                  <div className="banner remote-banner">
+                    📱 Pedido do celular: {remoteJob.kind === 'link' ? remoteJob.url : remoteJob.name} — abrindo…
+                  </div>
+                )}
                 <h1>Traduza capítulos de mangá com IA</h1>
                 <p className="subtitle">
                   Envie o PDF do capítulo ou o link dele num site. Cada página é lida pela IA, o texto é traduzido e escrito por cima do original.
@@ -474,4 +550,25 @@ function mostCommonError(pages: PageState[]): { error: AppError; kinds: number }
 
 function translatedName(name: string): string {
   return `${name.replace(/\.pdf$/i, '').replace(/_traduzido$/, '')}_traduzido.pdf`
+}
+
+/** Every page, the first and last ones as the settings say (credit pages) left untranslated. */
+function defaultChoice(numPages: number, s: AppSettings): SetupChoice {
+  const skipStart = Math.min(s.skipStart, numPages - 1)
+  const skipEnd = Math.min(s.skipEnd, numPages - 1 - skipStart)
+  const pages = Array.from({ length: numPages }, (_, i) => i + 1)
+  return {
+    pages,
+    untranslated: pages.filter((n) => n <= skipStart || n > numPages - skipEnd),
+    options: {
+      sourceLanguage: s.sourceLanguage,
+      targetLanguage: s.targetLanguage,
+      concurrency: s.concurrency,
+      speed: s.speed,
+      translateSfx: s.translateSfx,
+      skipStart,
+      skipEnd,
+      gpuSharing: s.gpuSharing
+    }
+  }
 }

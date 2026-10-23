@@ -11,6 +11,7 @@ import 'package:manga_index/api.dart';
 import 'package:manga_index/downloads.dart';
 import 'package:manga_index/models.dart';
 import 'package:manga_index/reader_screen.dart';
+import 'package:manga_index/translate_screen.dart';
 import 'package:manga_index/work_screen.dart';
 
 final out = Platform.environment['SCREENSHOTS'];
@@ -55,6 +56,24 @@ Future<void> shoot(WidgetTester tester, Widget screen, String name) async {
     final png = await image.toByteData(format: ui.ImageByteFormat.png);
     await File('$out/$name.png').writeAsBytes(png!.buffer.asUint8List());
   });
+}
+
+/// Answers with requests in every state instead of asking a PC.
+class FakeJobsApi extends Api {
+  FakeJobsApi() : super(Connection(hosts: ['127.0.0.1'], port: 1, token: 'test'));
+
+  @override
+  Future<List<RemoteJob>> jobs() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    RemoteJob job(String id, bool link, String name, String status, {String? message}) => RemoteJob(
+        id: id, isLink: link, name: name, url: link ? name : null, status: status, message: message, entryId: status == 'done' ? 'e' : null, updatedAt: now);
+    return [
+      job('1', true, 'https://mgread.io/manga/the-mythical-weapon-creation/chapter-91/', 'queued'),
+      job('2', true, 'https://asuracomic.net/series/solo-leveling-ragnarok/chapter/42', 'running', message: 'Traduzindo'),
+      job('3', false, 'Mythical Weapon Chapter 52.pdf', 'done'),
+      job('4', true, 'https://site-fora-do-ar.com/chapter-10', 'failed', message: 'O site não respondeu.'),
+    ];
+  }
 }
 
 void main() {
@@ -107,4 +126,13 @@ void main() {
     );
     await shoot(tester, screen, 'p2-reader');
   }, skip: out == null || pagesDir == null);
+
+  testWidgets('translate on the PC', (tester) async {
+    tester.view.physicalSize = phone * ratio;
+    tester.view.devicePixelRatio = ratio;
+    final api = FakeJobsApi();
+    await shoot(tester, TranslateScreen(api: api), 'p3-translate');
+    // The screen asks the PC again every few seconds.
+    await tester.pumpWidget(const SizedBox());
+  }, skip: out == null);
 }

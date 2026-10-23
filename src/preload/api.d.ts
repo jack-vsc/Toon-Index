@@ -17,6 +17,7 @@ import type {
 } from '../shared/types'
 import type { DevicesStatus, PairingCode } from '../shared/devices'
 import type { HistoryWork, ReadingRecord } from '../shared/reading'
+import type { RemoteJob } from '../shared/remoteJobs'
 import type { Work } from '../shared/works'
 
 export interface MangaApi {
@@ -74,6 +75,15 @@ export interface MangaApi {
     /** A new pairing code (and its QR code), good for ten minutes. */
     pairing(): Promise<PairingCode>
     revoke(id: string): Promise<DevicesStatus>
+  }
+  /** Chapters the phone asked this PC to translate. */
+  remote: {
+    list(): Promise<RemoteJob[]>
+    /** The next queued job, now marked running, with the PDF the phone sent (null for a link). */
+    take(): Promise<{ job: RemoteJob; pdf: Uint8Array | null } | null>
+    update(id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>): Promise<void>
+    /** Returns a function that stops listening. */
+    onChanged(callback: () => void): () => void
   }
   /** Where each work was left: chapters read in the browser (extension), the history, or the app. */
   reading: {

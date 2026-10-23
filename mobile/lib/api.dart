@@ -109,6 +109,37 @@ class Api {
   Future<void> forget(String workId, double? chapter) =>
       _post('/api/reading/forget', {'workId': workId, 'chapter': chapter});
 
+  /// The chapters asked of the PC, newest first.
+  Future<List<RemoteJob>> jobs() async {
+    final response = await _send((url) => http.get(url('/api/translate'), headers: authHeaders));
+    final list = (jsonDecode(utf8.decode(response.bodyBytes)) as List).map((j) => RemoteJob.fromJson(j as Map<String, dynamic>)).toList();
+    return list..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  }
+
+  /// Asks the PC to translate the chapter at a site's link.
+  Future<void> translateLink(String link) => _post('/api/translate', {'url': link});
+
+  /// Sends a PDF for the PC to translate, streamed (a chapter's scans can be large).
+  Future<void> translatePdf(String name, Stream<List<int>> bytes, int? length) async {
+    // Streams can be read once, so this goes only to the address that answered last.
+    final request = http.StreamedRequest('POST', Uri.parse('$base/api/translate/pdf?name=${Uri.encodeQueryComponent(name)}'))
+      ..headers.addAll(authHeaders)
+      ..headers['Content-Type'] = 'application/pdf';
+    if (length != null) request.contentLength = length;
+    bytes.listen(request.sink.add, onDone: request.sink.close, onError: request.sink.addError);
+    final http.StreamedResponse streamed;
+    try {
+      streamed = await request.send();
+    } catch (_) {
+      throw ApiException('Não foi possível enviar o PDF: o PC não respondeu.');
+    }
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode == 401) throw UnpairedException(_error(response));
+    if (response.statusCode != 200) throw ApiException(_error(response));
+  }
+
+  Future<void> cancelJob(String id) => _post('/api/translate/cancel', {'id': id});
+
   /// How far into a library chapter the phone's reader got (1: to the end). Kept on the phone when
   /// the PC cannot be reached, and sent with the next request that gets through.
   Future<void> reportAppReading(String entryId, double progress) async {

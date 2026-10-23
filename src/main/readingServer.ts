@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
 import { listLibrary, listWorks, readCover, readLibraryPdf } from './library'
+import { addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs } from './remoteJobs'
 import { finishedInApp, forgetReading, listReading, markRead, readInApp, reportReading } from './reading'
 
 /** The browser extension (extension/background.js) and the phone app reach the app here. */
@@ -60,6 +61,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
 /** The phone app's API. Everything but pairing needs the token the phone got when it paired. */
 async function phone(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://app')
   if (req.method === 'POST' && path === '/api/pair') {
     const body = (await readBody(req)) as { code?: unknown; name?: unknown }
     const paired = typeof body.code === 'string' ? pair(body.code, typeof body.name === 'string' ? body.name : '') : null
@@ -85,6 +87,29 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   if (req.method === 'GET' && pdf) {
     const bytes = await readLibraryPdf(pdf[1], pdf[2] as 'original' | 'translated').catch(() => null)
     return bytes ? sendBytes(res, 'application/pdf', Buffer.from(bytes)) : send(res, 404, { error: 'Capítulo não encontrado no PC.' })
+  }
+  // Chapters to translate on the PC: a site's link, or a PDF sent as the request's body.
+  if (req.method === 'GET' && path === '/api/translate') return send(res, 200, listRemoteJobs())
+  if (req.method === 'POST' && path === '/api/translate') {
+    const { url: link } = (await readBody(req)) as { url?: unknown }
+    if (typeof link !== 'string') return send(res, 400, { error: 'Falta o link.' })
+    try {
+      return send(res, 200, addLinkJob(link.trim(), device.name))
+    } catch (err) {
+      return send(res, 400, { error: err instanceof TypeError ? 'Link inválido.' : (err as Error).message })
+    }
+  }
+  if (req.method === 'POST' && path === '/api/translate/pdf') {
+    try {
+      return send(res, 200, addPdfJob(url.searchParams.get('name') ?? '', await readRaw(req, MAX_PDF), device.name))
+    } catch (err) {
+      return send(res, 400, { error: (err as Error).message })
+    }
+  }
+  if (req.method === 'POST' && path === '/api/translate/cancel') {
+    const { id } = (await readBody(req)) as { id?: unknown }
+    if (typeof id === 'string') cancelRemoteJob(id)
+    return send(res, 200, { ok: true })
   }
   if (req.method === 'POST' && path === '/api/reading') return send(res, 200, report(await readBody(req)))
   if (req.method === 'POST' && path === '/api/reading/finished') {
@@ -129,6 +154,23 @@ function report(body: unknown): unknown {
 function valid(r: unknown): r is ReadingReport {
   const x = r as ReadingReport
   return !!x && typeof x.url === 'string' && typeof x.title === 'string' && (x.progress === null || typeof x.progress === 'number')
+}
+
+/** A chapter's PDF from the phone; scans of a long chapter run to tens of megabytes. */
+const MAX_PDF = 300 * 1024 * 1024
+
+function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > limit) req.destroy(new Error('Arquivo grande demais.'))
+      else chunks.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
 }
 
 function readBody(req: IncomingMessage): Promise<unknown> {

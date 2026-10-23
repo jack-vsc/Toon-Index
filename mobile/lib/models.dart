@@ -182,3 +182,41 @@ String displayName(String name) {
   if (name != name.toLowerCase()) return name;
   return name.replaceAllMapped(RegExp(r'(^|\s)(\p{L})', unicode: true), (m) => '${m[1]}${m[2]!.toUpperCase()}');
 }
+
+/// A chapter this phone (or another) asked the PC to translate (src/shared/remoteJobs.ts).
+class RemoteJob {
+  RemoteJob({
+    required this.id,
+    required this.isLink,
+    required this.name,
+    required this.url,
+    required this.status,
+    required this.message,
+    required this.entryId,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final bool isLink;
+  final String name;
+  final String? url;
+
+  /// queued, running, done or failed.
+  final String status;
+  final String? message;
+
+  /// The library chapter it became, once done.
+  final String? entryId;
+  final int updatedAt;
+
+  factory RemoteJob.fromJson(Map<String, dynamic> j) => RemoteJob(
+        id: j['id'] as String,
+        isLink: j['kind'] == 'link',
+        name: j['name'] as String,
+        url: j['url'] as String?,
+        status: j['status'] as String,
+        message: j['message'] as String?,
+        entryId: j['entryId'] as String?,
+        updatedAt: (j['updatedAt'] as num).toInt(),
+      );
+}
