@@ -17,13 +17,16 @@ import {
   readLibraryPdf,
   saveToLibrary,
   setWorkNames,
+  setWorkAuto,
+  setWorkShelf,
   workCovers
 } from './library'
 import type { CatalogMatch, CatalogSite } from '../shared/catalog'
+import type { Shelf } from '../shared/works'
 import { chapterList, linkWork, searchCatalogToChoose } from './catalog'
 import type { ChapterLink } from '../shared/updates'
 import type { HistoryWork } from '../shared/reading'
-import { finishedInApp, forgetReading, importHistory, listReading, markRead, onReadingChanged, scanHistory } from './reading'
+import { finishedInApp, forgetReading, importHistory, listReading, markRead, onReadingChanged, readInApp, scanHistory } from './reading'
 import { devicesStatus, newPairingCode, revokeDevice, setPhonesEnabled } from './devices'
 import type { RemoteJob } from '../shared/remoteJobs'
 import {
@@ -128,8 +131,11 @@ function registerIpc(): void {
   ipcMain.handle('works:list', () => listWorks())
   ipcMain.handle('works:names', (_e, workId: string, names: string[]) => setWorkNames(workId, names))
   ipcMain.handle('works:merge', (_e, intoId: string, fromId: string) => mergeWorks(intoId, fromId))
+  ipcMain.handle('works:shelf', (_e, workId: string, patch: { shelf?: Shelf | null; favorite?: boolean }) => setWorkShelf(workId, patch))
+  ipcMain.handle('works:auto', (_e, workId: string, auto: 'translate' | 'download' | null) => setWorkAuto(workId, auto))
   ipcMain.handle('reading:list', () => listReading())
   ipcMain.handle('reading:finished', (_e, entryId: string) => finishedInApp(entryId))
+  ipcMain.handle('reading:progress', (_e, entryId: string, progress: number) => readInApp(entryId, progress))
   ipcMain.handle('reading:mark', (_e, workId: string, chapter: number) => markRead(workId, chapter))
   ipcMain.handle('reading:forget', (_e, workId: string, chapter: number | null) => forgetReading(workId, chapter))
   ipcMain.handle('reading:scan-history', () => scanHistory())

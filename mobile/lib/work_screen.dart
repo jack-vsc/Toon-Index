@@ -26,6 +26,10 @@ class _WorkScreenState extends State<WorkScreen> {
   String? _message;
   Set<String> _downloaded = {};
 
+  /// The reading list and favorite as last set here (sent to the PC now, or once it can be reached).
+  late String? _shelf = widget.view.work.shelf;
+  late bool _favorite = widget.view.work.favorite;
+
   /// Chapters being downloaded, with how much arrived (null: size unknown).
   final _downloading = <String, double?>{};
 
@@ -79,6 +83,17 @@ class _WorkScreenState extends State<WorkScreen> {
     return IconButton(tooltip: 'Baixar para ler sem internet', icon: const Icon(Icons.download), onPressed: () => _download(c));
   }
 
+  Future<void> _setShelf({String? shelf, bool? favorite, bool clearShelf = false}) async {
+    setState(() {
+      if (shelf != null || clearShelf) _shelf = shelf;
+      if (favorite != null) _favorite = favorite;
+    });
+    await widget.api.setShelf(widget.view.work.id, shelf: _shelf, favorite: _favorite);
+  }
+
+  void _read(LibraryChapter c) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: c, chapters: widget.view.translated)));
+
   Future<void> _markRead() async {
     final chapter = double.tryParse(_chapter.text.trim().replaceAll(',', '.'));
     if (chapter == null) return;
@@ -102,11 +117,39 @@ class _WorkScreenState extends State<WorkScreen> {
         padding: const EdgeInsets.only(bottom: 16),
         children: [
           _Header(view: view, api: widget.api, aliases: aliases),
-          const SizedBox(height: 4),
+          Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: _shelf ?? '',
+                isDense: true,
+                decoration: const InputDecoration(labelText: 'Lista', contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+                items: [
+                  DropdownMenuItem(value: '', child: Text(view.records.isNotEmpty ? 'Lendo (automático)' : 'Em nenhuma lista')),
+                  for (final e in shelves.entries) DropdownMenuItem(value: e.key, child: Text(e.value)),
+                ],
+                onChanged: (v) => _setShelf(shelf: v == null || v.isEmpty ? null : v, clearShelf: v == null || v.isEmpty),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              tooltip: _favorite ? 'Tirar das favoritas' : 'Favoritar',
+              icon: Icon(_favorite ? Icons.star : Icons.star_border, color: _favorite ? const Color(0xFFFFC940) : null),
+              onPressed: () => _setShelf(favorite: !_favorite),
+            ),
+          ]),
+          const SizedBox(height: 10),
           Text(statusText(view), style: const TextStyle(color: readGreen)),
-          if (view.update != null) ...[
+          if (view.nextInLibrary != null) ...[
             const SizedBox(height: 12),
             FilledButton.icon(
+              onPressed: () => _read(view.nextInLibrary!),
+              icon: Icon(_downloaded.contains(view.nextInLibrary!.id) ? Icons.offline_pin : Icons.play_arrow),
+              label: Text('${view.current != null || view.readUpTo != null ? 'Continuar' : 'Começar'}: capítulo ${chapterLabel(view.nextInLibrary!.chapter!)}'),
+            ),
+          ],
+          if (view.update != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
               onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: view.update!.url))),
               icon: const Icon(Icons.fiber_new),
               label: Text('Ler o cap. ${chapterLabel(view.update!.latest)} em ${view.update!.site}'),
@@ -156,9 +199,13 @@ class _WorkScreenState extends State<WorkScreen> {
                       )
                     : null,
                 title: Text(c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title),
-                subtitle: Text(c.translatedPages == c.pageCount ? '${c.pageCount} páginas' : '${c.translatedPages} de ${c.pageCount} páginas traduzidas'),
+                subtitle: Text(c.downloaded
+                    ? '${c.pageCount} páginas · baixado do site'
+                    : c.translatedPages == c.pageCount
+                        ? '${c.pageCount} páginas · traduzido'
+                        : '${c.translatedPages} de ${c.pageCount} páginas traduzidas'),
                 trailing: _downloadButton(c),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: c))),
+                onTap: () => _read(c),
               ),
           ],
           const SizedBox(height: 24),
@@ -229,7 +276,7 @@ class _Header extends StatelessWidget {
               const SizedBox(height: 8),
               Wrap(spacing: 6, runSpacing: 6, children: [
                 Tag(view.work.isNovel ? 'NOVEL' : 'MANGÁ'),
-                if (view.translated.isNotEmpty) Tag('${view.translated.length} TRADUZIDOS'),
+                if (view.translated.isNotEmpty) Tag(view.chapterCount),
                 if (view.update != null) Tag('NOVO · ${chapterLabel(view.update!.latest)}', color: accent),
               ]),
             ]),

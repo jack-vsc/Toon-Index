@@ -42,6 +42,8 @@ const api: MangaApi = {
     list: () => ipcRenderer.invoke('works:list'),
     setNames: (workId, names) => ipcRenderer.invoke('works:names', workId, names),
     merge: (intoId, fromId) => ipcRenderer.invoke('works:merge', intoId, fromId),
+    setShelf: (workId, patch) => ipcRenderer.invoke('works:shelf', workId, patch),
+    setAuto: (workId, auto) => ipcRenderer.invoke('works:auto', workId, auto),
     move: (entryId, target) => ipcRenderer.invoke('works:move', entryId, target),
     covers: () => ipcRenderer.invoke('works:covers'),
     chapters: (match) => ipcRenderer.invoke('works:chapters', match),
@@ -86,6 +88,7 @@ const api: MangaApi = {
   reading: {
     list: () => ipcRenderer.invoke('reading:list'),
     finished: (entryId) => ipcRenderer.invoke('reading:finished', entryId),
+    progress: (entryId, progress) => ipcRenderer.invoke('reading:progress', entryId, progress),
     mark: (workId, chapter) => ipcRenderer.invoke('reading:mark', workId, chapter),
     forget: (workId, chapter) => ipcRenderer.invoke('reading:forget', workId, chapter),
     scanHistory: () => ipcRenderer.invoke('reading:scan-history'),

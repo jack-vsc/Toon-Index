@@ -1,18 +1,38 @@
 {
   "manifest_version": 3,
   "name": "Manga Index – marcador de leitura",
-  "version": "0.2.0",
-  "description": "Avisa o Manga Index dos capítulos de mangá e webtoon que você lê, para ele lembrar onde você parou, e avisa dos capítulos novos.",
-  "permissions": ["storage", "alarms", "notifications"],
-  "host_permissions": ["http://127.0.0.1:47321/*"],
-  "background": { "service_worker": "background.js" },
+  "version": "0.3.0",
+  "description": "Lembra onde você parou em cada mangá e webtoon, guarda suas listas de leitura e avisa dos capítulos novos.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:47321/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
-  "icons": { "128": "icon.png" },
-  "action": { "default_title": "Manga Index", "default_icon": "icon.png" }
+  "icons": {
+    "128": "icon.png"
+  },
+  "action": {
+    "default_title": "Manga Index",
+    "default_icon": "icon.png",
+    "default_popup": "popup.html"
+  }
 }

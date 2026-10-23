@@ -1,40 +1,68 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdfx/pdfx.dart';
 
 import 'api.dart';
 import 'downloads.dart';
 import 'models.dart';
 
-/// Reads a translated chapter, its pages one under the other. Opens where it was left, and tells
-/// the PC how far it got (to the end: read), now or once the PC can be reached.
+/// A band of a page, the unit the reader draws: a normal page is one, a webtoon strip many, so no
+/// picture is ever too big for the phone's memory. `top` and `height` are in widths of the page.
+class _Band {
+  const _Band(this.page, this.top, this.height);
+
+  final int page;
+  final double top;
+  final double height;
+}
+
+/// Bands this many page widths tall at most (a screenful and a half).
+const _bandHeight = 1.5;
+
+/// Reads a chapter of the library, its pages one under the other. Opens where it was left, tells the
+/// PC how far it got (to the end: read), now or once the PC can be reached, and at the end goes on to
+/// the next chapter of the work. A tap hides everything but the pages.
 class ReaderScreen extends StatefulWidget {
-  const ReaderScreen({super.key, required this.api, required this.chapter});
+  const ReaderScreen({super.key, required this.api, required this.chapter, this.chapters = const []});
 
   final Api api;
   final LibraryChapter chapter;
+
+  /// The work's chapters in the library, for the one after this.
+  final List<LibraryChapter> chapters;
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
 class _ReaderScreenState extends State<ReaderScreen> {
+  static const _tiles = MethodChannel('manga_index/pdf');
+
   final _scroll = ScrollController();
   PdfDocument? _document;
-
-  /// Height / width of each page, known before the pages are drawn so the list does not jump.
-  List<double> _aspects = [];
+  String? _path;
+  List<_Band> _bands = [];
   final _images = <int, Uint8List>{};
   final _rendering = <int>{};
   Future<void> _renderQueue = Future.value();
   double? _downloadProgress;
   String? _error;
-  int _page = 0;
+  int _band = 0;
   double _reached = 0;
   double _reported = 0;
   Timer? _reportTimer;
+  bool _bars = true;
+
+  LibraryChapter? get _next {
+    final current = widget.chapter.chapter;
+    if (current == null) return null;
+    final after = widget.chapters.where((c) => c.chapter != null && c.chapter! > current).toList()
+      ..sort((a, b) => a.chapter!.compareTo(b.chapter!));
+    return after.firstOrNull;
+  }
 
   @override
   void initState() {
@@ -48,19 +76,23 @@ class _ReaderScreenState extends State<ReaderScreen> {
       final file = await Downloads.open(widget.api, widget.chapter.id,
           onProgress: (p) => mounted ? setState(() => _downloadProgress = p ?? 0) : null);
       final document = await PdfDocument.openFile(file.path);
-      final aspects = <double>[];
+      final bands = <_Band>[];
       for (var i = 1; i <= document.pagesCount; i++) {
         final page = await document.getPage(i);
-        aspects.add(page.height / page.width);
+        final aspect = page.height / page.width;
         await page.close();
+        for (var top = 0.0; top < aspect - 0.01; top += _bandHeight) {
+          bands.add(_Band(i - 1, top, math.min(_bandHeight, aspect - top)));
+        }
       }
-      final start = await Store.loadPage(widget.chapter.id);
+      final start = await Store.loadBand(widget.chapter.id);
       if (!mounted) return;
-      setState(() => (_document = document, _aspects = aspects, _page = start.clamp(0, aspects.length - 1)));
+      setState(() => (_document = document, _path = file.path, _bands = bands, _band = start.clamp(0, bands.length - 1)));
       // Back to where it was left, once the list has its size.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scroll.hasClients && start > 0) _scroll.jumpTo(_offsetOf(start));
       });
+      _prefetchNext();
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (e) {
@@ -68,27 +100,38 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
+  /// The next chapter comes from the PC while it can be reached, so it opens without internet too.
+  Future<void> _prefetchNext() async {
+    final next = _next;
+    if (next == null) return;
+    try {
+      await Downloads.open(widget.api, next.id);
+    } catch (_) {
+      // Away from the PC: it is fetched when opened, if it can be.
+    }
+  }
+
   double get _width => MediaQuery.of(context).size.width;
 
-  double _offsetOf(int page) => _aspects.take(page).fold(0.0, (sum, a) => sum + a * _width);
+  double _offsetOf(int band) => _bands.take(band).fold(0.0, (sum, b) => sum + b.height * _width);
 
   void _onScroll() {
-    if (_aspects.isEmpty) return;
+    if (_bands.isEmpty) return;
     final position = _scroll.position;
-    final total = _aspects.fold(0.0, (sum, a) => sum + a * _width);
+    final total = _bands.fold(0.0, (sum, b) => sum + b.height * _width);
     final bottom = position.pixels + position.viewportDimension;
-    // The page at the middle of the screen.
-    var page = 0;
+    // The band at the middle of the screen.
+    var band = 0;
     var y = 0.0;
     final middle = position.pixels + position.viewportDimension / 2;
-    while (page < _aspects.length - 1 && y + _aspects[page] * _width < middle) {
-      y += _aspects[page] * _width;
-      page++;
+    while (band < _bands.length - 1 && y + _bands[band].height * _width < middle) {
+      y += _bands[band].height * _width;
+      band++;
     }
-    final reached = position.pixels >= position.maxScrollExtent - 4 ? 1.0 : (bottom / total).clamp(0.0, 1.0);
-    if (page != _page) {
-      setState(() => _page = page);
-      Store.savePage(widget.chapter.id, page);
+    final reached = bottom >= total - 4 ? 1.0 : (bottom / total).clamp(0.0, 1.0);
+    if (band != _band) {
+      setState(() => _band = band);
+      Store.saveBand(widget.chapter.id, band);
     }
     if (reached > _reached) {
       _reached = reached;
@@ -109,30 +152,70 @@ class _ReaderScreenState extends State<ReaderScreen> {
     widget.api.reportAppReading(widget.chapter.id, _reached);
   }
 
-  /// Draws pages one at a time (Android opens one page of a PDF at a time).
+  /// Draws bands one at a time (Android opens one page of a PDF at a time).
   Future<void> _render(int index) {
     if (_images.containsKey(index) || _rendering.contains(index)) return Future.value();
     _rendering.add(index);
-    final width = (_width * MediaQuery.of(context).devicePixelRatio).clamp(600.0, 1600.0);
+    final width = (_width * MediaQuery.of(context).devicePixelRatio).clamp(600.0, 1440.0).round();
     return _renderQueue = _renderQueue.then((_) async {
       final document = _document;
       if (document == null || !mounted) return;
-      final page = await document.getPage(index + 1);
       try {
-        final image = await page.render(width: width, height: width * page.height / page.width, format: PdfPageImageFormat.jpeg, quality: 90);
-        if (image != null && mounted) setState(() => _images[index] = image.bytes);
+        final bytes = await _drawBand(document, _bands[index], width);
+        if (bytes != null && mounted) setState(() => _images[index] = bytes);
+      } catch (_) {
+        // Drawn again when scrolled back to.
       } finally {
-        await page.close();
         _rendering.remove(index);
       }
-      // Pages far from the screen are let go, so a long chapter does not fill the memory.
-      _images.removeWhere((i, _) => (i - _page).abs() > 6);
+      // Bands far from the screen are let go, so a long chapter does not fill the memory.
+      _images.removeWhere((i, _) => (i - _band).abs() > 8);
     });
+  }
+
+  Future<Uint8List?> _drawBand(PdfDocument document, _Band band, int width) async {
+    try {
+      return await _tiles.invokeMethod<Uint8List>('tile', {
+        'path': _path,
+        'page': band.page,
+        'width': width,
+        'top': band.top,
+        'height': band.height,
+      });
+    } on MissingPluginException {
+      // Not on Android (tests): the whole page, cut to the band.
+      final page = await document.getPage(band.page + 1);
+      try {
+        final height = width * page.height / page.width;
+        final image = await page.render(
+          width: width.toDouble(),
+          height: height,
+          format: PdfPageImageFormat.jpeg,
+          quality: 90,
+          cropRect: Rect.fromLTWH(0, band.top * width, width.toDouble(), band.height * width),
+        );
+        return image?.bytes;
+      } finally {
+        await page.close();
+      }
+    }
+  }
+
+  void _toggleBars() {
+    setState(() => _bars = !_bars);
+    SystemChrome.setEnabledSystemUIMode(_bars ? SystemUiMode.edgeToEdge : SystemUiMode.immersiveSticky);
+  }
+
+  void _openNext(LibraryChapter next) {
+    _report();
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: next, chapters: widget.chapters)));
   }
 
   @override
   void dispose() {
     _report();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (_path != null) _tiles.invokeMethod('close', {'path': _path}).catchError((_) => null);
     _scroll.dispose();
     _document?.close();
     super.dispose();
@@ -142,9 +225,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Widget build(BuildContext context) {
     final c = widget.chapter;
     final title = c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title;
+    final next = _next;
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(title: Text(title), backgroundColor: Colors.black),
+      extendBodyBehindAppBar: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: AnimatedOpacity(
+          opacity: _bars ? 1 : 0,
+          duration: const Duration(milliseconds: 150),
+          child: IgnorePointer(ignoring: !_bars, child: AppBar(title: Text(title), backgroundColor: Colors.black87)),
+        ),
+      ),
       body: _error != null
           ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)))
           : _document == null
@@ -155,19 +247,54 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     Text(_downloadProgress != null ? 'Baixando do PC…' : 'Abrindo…'),
                   ]),
                 )
-              : ReaderPages(
-                  controller: _scroll,
-                  aspects: _aspects,
-                  images: _images,
-                  page: _page,
-                  onMissing: _render,
+              : GestureDetector(
+                  onTap: _toggleBars,
+                  child: ReaderPages(
+                    controller: _scroll,
+                    aspects: [for (final b in _bands) b.height],
+                    images: _images,
+                    page: _bands[_band].page,
+                    pageCount: _bands.last.page + 1,
+                    showPage: _bars,
+                    onMissing: _render,
+                    footer: _ChapterEnd(chapter: c, next: next, onNext: next == null ? null : () => _openNext(next)),
+                  ),
                 ),
     );
   }
 }
 
-/// The chapter's pages one under the other, with the page number in a corner. Pages not drawn yet
-/// show a spinner and are asked for through `onMissing`.
+/// After the last page: the next chapter of the work, when the library has it.
+class _ChapterEnd extends StatelessWidget {
+  const _ChapterEnd({required this.chapter, required this.next, required this.onNext});
+
+  final LibraryChapter chapter;
+  final LibraryChapter? next;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 32, 24, 48),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(chapter.chapter != null ? 'FIM DO CAPÍTULO ${chapterLabel(chapter.chapter!)}' : 'FIM DO CAPÍTULO',
+            style: const TextStyle(color: Color(0xFFFF6740), fontWeight: FontWeight.bold, letterSpacing: 1.2, fontSize: 12)),
+        const SizedBox(height: 14),
+        if (next != null)
+          FilledButton.icon(
+            onPressed: onNext,
+            icon: const Icon(Icons.skip_next),
+            label: Text('Próximo: Capítulo ${chapterLabel(next!.chapter!)}'),
+          )
+        else
+          const Text('Este é o último capítulo na biblioteca.', style: TextStyle(color: Colors.white70)),
+      ]),
+    );
+  }
+}
+
+/// The chapter's pages (or bands of them) one under the other, with the page number in a corner and
+/// `footer` after the last. Ones not drawn yet show a spinner and are asked for through `onMissing`.
 class ReaderPages extends StatelessWidget {
   const ReaderPages({
     super.key,
@@ -176,13 +303,25 @@ class ReaderPages extends StatelessWidget {
     required this.images,
     required this.page,
     required this.onMissing,
+    this.pageCount,
+    this.showPage = true,
+    this.footer,
   });
 
   final ScrollController controller;
+
+  /// Height / width of each item.
   final List<double> aspects;
   final Map<int, Uint8List> images;
+
+  /// The page shown (from 0), of [pageCount] (the number of items when not given).
   final int page;
+  final int? pageCount;
+  final bool showPage;
   final void Function(int index) onMissing;
+  final Widget? footer;
+
+  static const _footerHeight = 200.0;
 
   @override
   Widget build(BuildContext context) {
@@ -191,9 +330,10 @@ class ReaderPages extends StatelessWidget {
       children: [
         ListView.builder(
           controller: controller,
-          itemCount: aspects.length,
-          itemExtentBuilder: (index, _) => aspects[index] * width,
+          itemCount: aspects.length + (footer != null ? 1 : 0),
+          itemExtentBuilder: (index, _) => index < aspects.length ? aspects[index] * width : _footerHeight,
           itemBuilder: (context, index) {
+            if (index >= aspects.length) return footer;
             final bytes = images[index];
             if (bytes == null) {
               onMissing(index);
@@ -202,17 +342,18 @@ class ReaderPages extends StatelessWidget {
             return Image.memory(bytes, fit: BoxFit.fill, gaplessPlayback: true);
           },
         ),
-        Positioned(
-          right: 12,
-          bottom: 16,
-          child: DecoratedBox(
-            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              child: Text('${page + 1} / ${aspects.length}', style: const TextStyle(color: Colors.white)),
+        if (showPage)
+          Positioned(
+            right: 12,
+            bottom: 16,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: Text('${page + 1} / ${pageCount ?? aspects.length}', style: const TextStyle(color: Colors.white)),
+              ),
             ),
           ),
-        ),
       ],
     );
   }

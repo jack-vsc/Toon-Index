@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'browser_screen.dart';
 import 'models.dart';
+import 'reader_screen.dart';
 import 'theme.dart';
 import 'translate_screen.dart';
 import 'work_screen.dart';
@@ -25,11 +26,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _loading = false;
   String _query = '';
 
+  /// The list shown: 'all', 'favorite' or a key of [shelves].
+  String _filter = 'all';
+
   @override
   void initState() {
     super.initState();
-    Store.loadLibrary().then((cached) {
-      if (mounted && _library == null && cached != null) setState(() => _library = cached);
+    Store.loadLibrary().then((cached) async {
+      if (cached == null) return;
+      final shown = cached.withShelves(await Store.loadPending(Store.pendingShelves));
+      if (mounted && _library == null) setState(() => _library = shown);
     });
     _refresh();
   }
@@ -37,7 +43,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _refresh() async {
     setState(() => _loading = true);
     try {
-      final library = await widget.api.library();
+      final library = (await widget.api.library()).withShelves(await Store.loadPending(Store.pendingShelves));
       if (mounted) setState(() => (_library = library, _error = null));
     } on UnpairedException {
       await Store.forgetConnection();
@@ -93,7 +99,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget build(BuildContext context) {
     final views = (_library?.views ?? []).where((v) => v.matches(_query)).toList();
     final fresh = views.where((v) => v.update != null).toList();
-    final current = ([...views]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity))).where((v) => v.continueUrl != null).firstOrNull;
+    final current = ([...views]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity)))
+        .where((v) => v.continueUrl != null || v.nextInLibrary != null)
+        .firstOrNull;
+    bool inFilter(WorkView v, String f) => f == 'all' || (f == 'favorite' ? v.work.favorite : v.shelf == f);
+    final shown = views.where((v) => inFilter(v, _filter)).toList()
+      ..sort((a, b) => (b.work.favorite ? 1 : 0) - (a.work.favorite ? 1 : 0));
+    final filters = {'all': 'Todas', 'favorite': '★ Favoritas', ...shelves};
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manga Index'),
@@ -150,7 +162,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                 if (_query.isEmpty && current != null) ...[
                   const SizedBox(height: 16),
-                  _Hero(view: current, api: widget.api, onOpen: () => _openWork(current), onBrowse: _browse),
+                  _Hero(view: current, api: widget.api, onOpen: () => _openWork(current), onBrowse: _browse, onRead: (c) => _read(current, c)),
                 ],
                 if (_query.isEmpty && fresh.isNotEmpty) ...[
                   const SizedBox(height: 22),
@@ -165,7 +177,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     const SizedBox(width: 10),
                     Text('${views.length} OBRAS', style: monoLabel()),
                   ]),
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (final f in filters.entries)
+                        if (f.key == 'all' || f.key == _filter || views.any((v) => inFilter(v, f.key)))
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              label: Text('${f.value} ${views.where((v) => inFilter(v, f.key)).length}'),
+                              selected: _filter == f.key,
+                              onSelected: (_) => setState(() => _filter = f.key),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                    ]),
+                  ),
                   const SizedBox(height: 10),
+                  if (shown.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('Nenhuma obra nesta lista ainda: escolha a lista na página de cada obra.', textAlign: TextAlign.center),
+                    ),
                 ],
               ]),
             ),
@@ -179,14 +213,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   crossAxisSpacing: 12,
                   childAspectRatio: 0.48,
                 ),
-                itemCount: views.length,
-                itemBuilder: (_, i) => _Poster(view: views[i], api: widget.api, onOpen: () => _openWork(views[i])),
+                itemCount: shown.length,
+                itemBuilder: (_, i) => _Poster(view: shown[i], api: widget.api, onOpen: () => _openWork(shown[i])),
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// A chapter of the library, read in the app (offline once downloaded).
+  Future<void> _read(WorkView view, LibraryChapter chapter) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: chapter, chapters: view.translated)));
+    _refresh();
   }
 
   Future<void> _openWork(WorkView view) async {
@@ -197,16 +237,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
 /// The work read last, big: where it was left and what came out since.
 class _Hero extends StatelessWidget {
-  const _Hero({required this.view, required this.api, required this.onOpen, required this.onBrowse});
+  const _Hero({required this.view, required this.api, required this.onOpen, required this.onBrowse, required this.onRead});
 
   final WorkView view;
   final Api api;
   final VoidCallback onOpen;
   final Future<void> Function(String url) onBrowse;
+  final void Function(LibraryChapter chapter) onRead;
 
   @override
   Widget build(BuildContext context) {
     final url = view.continueUrl;
+    final inApp = view.nextInLibrary;
     return InkWell(
       onTap: onOpen,
       borderRadius: BorderRadius.circular(14),
@@ -225,13 +267,26 @@ class _Hero extends StatelessWidget {
               Text(statusText(view), style: const TextStyle(color: readGreen, fontSize: 12)),
               const SizedBox(height: 10),
               Wrap(spacing: 8, runSpacing: 6, children: [
-                if (url != null)
+                if (inApp != null)
                   FilledButton.icon(
-                    onPressed: () => onBrowse(url),
+                    onPressed: () => onRead(inApp),
                     icon: const Icon(Icons.play_arrow, size: 18),
-                    label: const Text('Continuar'),
+                    label: Text('Cap. ${chapterLabel(inApp.chapter!)}'),
                     style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
                   ),
+                if (url != null)
+                  (inApp == null
+                      ? FilledButton.icon(
+                          onPressed: () => onBrowse(url),
+                          icon: const Icon(Icons.play_arrow, size: 18),
+                          label: const Text('Continuar'),
+                          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                        )
+                      : OutlinedButton(
+                          onPressed: () => onBrowse(url),
+                          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                          child: const Text('No site'),
+                        )),
                 if (view.update != null)
                   OutlinedButton(
                     onPressed: () => onBrowse(view.update!.url),
@@ -301,8 +356,10 @@ class _Poster extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final upTo = view.readUpTo;
+    final shelf = view.work.shelf != null && view.work.shelf != 'reading' ? shelves[view.work.shelf]!.toUpperCase() : null;
     final meta = [
-      upTo != null ? 'CAP. ${chapterLabel(upTo)}' : (view.records.isEmpty ? 'NÃO LIDO' : 'LENDO'),
+      ?shelf,
+      if (upTo != null) 'CAP. ${chapterLabel(upTo)}' else if (shelf == null) view.records.isEmpty ? 'NÃO LIDO' : 'LENDO',
       if (view.work.isNovel) 'NOVEL',
     ].join(' · ');
     return InkWell(
@@ -312,6 +369,12 @@ class _Poster extends StatelessWidget {
         Stack(children: [
           CoverImage(url: coverUrlOf(view, api), api: api),
           if (view.update != null) Positioned(top: 6, left: 6, child: Tag('NOVO · ${chapterLabel(view.update!.latest)}', color: accent)),
+          if (view.work.favorite)
+            const Positioned(
+              top: 6,
+              right: 6,
+              child: CircleAvatar(radius: 12, backgroundColor: Colors.black87, child: Icon(Icons.star, size: 15, color: Color(0xFFFFC940))),
+            ),
         ]),
         const SizedBox(height: 6),
         Text(view.work.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { CatalogSite } from '../shared/catalog'
 import { DOWNLOADED_MODEL, type LibraryEntry, type SaveLibraryInput } from '../shared/types'
 import { MAX_SOURCES } from '../shared/updates'
-import { findWork, formatOf, normalizeName, parseChapterName, withName, type Work, type WorkFormat } from '../shared/works'
+import { findWork, formatOf, normalizeName, parseChapterName, withName, type Shelf, type Work, type WorkFormat } from '../shared/works'
 import { moveReading } from './reading'
 import { getSettings } from './settings'
 import { currentModelLabel } from './translate'
@@ -193,6 +193,36 @@ export function addWorkSource(name: string, source: string): void {
       w.id === workId && !w.sources?.includes(source) ? { ...w, sources: [source, ...(w.sources ?? [])].slice(0, MAX_SOURCES) } : w
     )
   )
+}
+
+/** Puts the work on a reading list (null: none) or among the favorites. */
+export function setWorkShelf(workId: string, patch: { shelf?: Shelf | null; favorite?: boolean }): Work[] {
+  const works = listWorks().map((w) => {
+    if (w.id !== workId) return w
+    const { shelf: _shelf, favorite: _favorite, ...rest } = w
+    const shelf = patch.shelf === undefined ? w.shelf : patch.shelf
+    const favorite = patch.favorite === undefined ? w.favorite : patch.favorite
+    return { ...rest, ...(shelf && { shelf }), ...(favorite && { favorite }) }
+  })
+  saveWorks(works)
+  return works
+}
+
+/** What happens to the work's new chapters besides the notice (null: only the notice). */
+export function setWorkAuto(workId: string, auto: 'translate' | 'download' | null): Work[] {
+  const works = listWorks().map((w) => {
+    if (w.id !== workId) return w
+    const { auto: _auto, ...rest } = w
+    return { ...rest, ...(auto && { auto }) }
+  })
+  saveWorks(works)
+  return works
+}
+
+/** A work waiting to be read ("Quero ler", "Pausado") that is being read again goes back to "Lendo". */
+export function startedReading(workId: string): void {
+  const work = listWorks().find((w) => w.id === workId)
+  if (work?.shelf === 'plan' || work?.shelf === 'paused') setWorkShelf(workId, { shelf: 'reading' })
 }
 
 /** The work's pages on sites, checked for new chapters (shared/updates.ts). */

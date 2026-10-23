@@ -16,6 +16,28 @@ export interface Work {
   sources?: string[]
   /** When the work was looked up on the catalog sites (shared/catalog.ts), and the ones it was found on. */
   catalog?: { checkedAt: number; sites: CatalogSite[] }
+  /** The reading list it was put on; absent, a work being read counts as "Lendo". */
+  shelf?: Shelf
+  /** Kept at the top, and in the favorites. */
+  favorite?: boolean
+  /** What happens to a new chapter found on its sites, besides the notice: translated, or downloaded as it is. */
+  auto?: 'translate' | 'download'
+}
+
+/** The reading lists, as MangaDex has them. */
+export type Shelf = 'reading' | 'plan' | 'paused' | 'done' | 'dropped'
+
+export const SHELVES: Record<Shelf, string> = {
+  reading: 'Lendo',
+  plan: 'Quero ler',
+  paused: 'Pausado',
+  done: 'Concluído',
+  dropped: 'Abandonado'
+}
+
+/** The list a work is on: the one picked, or "Lendo" once something of it was read; null for neither. */
+export function shelfOf(work: Work, hasReading: boolean): Shelf | null {
+  return work.shelf ?? (hasReading ? 'reading' : null)
 }
 
 import type { CatalogSite } from './catalog'

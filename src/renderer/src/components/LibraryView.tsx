@@ -3,7 +3,7 @@ import { CATALOG_SITES, isSameWork, type CatalogMatch, type CatalogResult } from
 import type { ReadingRecord } from '../../../shared/reading'
 import { chapterCount, isDownloaded, languageLabel, type LibraryEntry } from '../../../shared/types'
 import { MAX_SOURCES, sourceFromChapter, unreadUpdates, type UpdatesStatus, type WorkUpdate } from '../../../shared/updates'
-import { displayName, normalizeName, type Work } from '../../../shared/works'
+import { displayName, normalizeName, SHELVES, shelfOf, type Shelf, type Work } from '../../../shared/works'
 import { HistoryImport } from './HistoryImport'
 
 /** A work with its translated chapters (in reading order) and readings. */
@@ -45,7 +45,7 @@ export function useLibrary(entries: LibraryEntry[], works: Work[], reading: Read
       chapters: entries.filter((e) => e.workId === work.id).sort(byChapter),
       records: reading.filter((r) => r.workId === work.id).sort((a, b) => a.chapter - b.chapter)
     }))
-    .filter((g) => g.chapters.length > 0 || g.records.length > 0)
+    .filter((g) => g.chapters.length > 0 || g.records.length > 0 || g.work.shelf || g.work.favorite)
     .sort((a, b) => Number(fresh.has(b.work.id)) - Number(fresh.has(a.work.id)) || lastActivity(b) - lastActivity(a))
   return { groups, fresh, covers }
 }
@@ -55,10 +55,22 @@ function coverOf(group: WorkGroup, covers: Record<string, string>): string | nul
   return covers[group.work.id] ?? [...group.chapters].sort((a, b) => b.createdAt - a.createdAt)[0]?.cover ?? null
 }
 
+/** The library chapter to go on with: the one left halfway, or the first after the last one read. */
+export function nextInLibrary(group: WorkGroup): LibraryEntry | null {
+  const read = group.records.filter((r) => r.status === 'read').map((r) => r.chapter)
+  const upTo = read.length ? Math.max(...read) : -Infinity
+  const latest = (chapter: number) => group.chapters.filter((e) => e.chapter === chapter).sort((a, b) => b.createdAt - a.createdAt)[0]
+  const halfway = group.records.filter((r) => r.status === 'reading' && r.chapter > upTo).sort((a, b) => b.updatedAt - a.updatedAt)[0]
+  if (halfway && latest(halfway.chapter)) return latest(halfway.chapter)
+  return group.chapters.filter((e) => e.chapter !== null && e.chapter > upTo).sort((a, b) => a.chapter! - b.chapter!)[0] ?? null
+}
+
 /** "CAP. 90 · NOVEL · 5 TRAD.", in the sites' small capitals. */
 function metaLine(group: WorkGroup): string {
   const read = group.records.filter((r) => r.status === 'read').map((r) => r.chapter)
-  const parts = [read.length ? `CAP. ${Math.max(...read)}` : group.records.length ? 'LENDO' : 'NÃO LIDO']
+  const shelf = group.work.shelf && group.work.shelf !== 'reading' ? SHELVES[group.work.shelf].toUpperCase() : null
+  const parts = [read.length ? `CAP. ${Math.max(...read)}` : shelf ?? (group.records.length ? 'LENDO' : 'NÃO LIDO')]
+  if (shelf && read.length) parts.unshift(shelf)
   if (group.work.format === 'novel') parts.push('NOVEL')
   if (group.chapters.length) parts.push(chapterCount(group.chapters, true))
   return parts.join(' · ')
@@ -73,8 +85,22 @@ export function LibraryView({ data, updates, onPick, onWorksChanged }: { data: L
   const [search, setSearch] = useState('')
   const [importing, setImporting] = useState(false)
   const [help, setHelp] = useState(false)
+  const [filter, setFilter] = useState<LibraryFilter>(savedFilter)
   const query = normalizeName(search)
-  const groups = data.groups.filter((g) => !query || g.work.names.some((n) => normalizeName(n).includes(query)))
+  const inFilter = (g: WorkGroup, f: LibraryFilter) =>
+    f === 'all' ? true : f === 'favorite' ? !!g.work.favorite : shelfOf(g.work, g.records.length > 0) === f
+  const groups = data.groups
+    .filter((g) => inFilter(g, filter) && (!query || g.work.names.some((n) => normalizeName(n).includes(query))))
+    .sort((a, b) => Number(!!b.work.favorite) - Number(!!a.work.favorite))
+  const pick = (f: LibraryFilter) => {
+    setFilter(f)
+    try {
+      localStorage.setItem('library-filter', f)
+    } catch {
+      // Not kept: the library opens on every work next time.
+    }
+  }
+  const filters: [LibraryFilter, string][] = [['all', 'Todas'], ['favorite', '★ Favoritas'], ...(Object.entries(SHELVES) as [Shelf, string][])]
 
   return (
     <div className="page">
@@ -92,13 +118,26 @@ export function LibraryView({ data, updates, onPick, onWorksChanged }: { data: L
         </button>
         <CheckButton updates={updates} />
       </div>
+      <div className="shelf-chips">
+        {filters.map(([f, label]) => {
+          const count = data.groups.filter((g) => inFilter(g, f)).length
+          if (!count && f !== 'all' && f !== filter) return null
+          return (
+            <button key={f} className={`chip ${filter === f ? 'active' : ''}`} onClick={() => pick(f)}>
+              {label} <span className="mono">{count}</span>
+            </button>
+          )
+        })}
+      </div>
       {help && <ExtensionHelp onClose={() => setHelp(false)} />}
       {importing && <HistoryImport onClose={() => setImporting(false)} onImported={onWorksChanged} />}
 
       {data.groups.length === 0 && (
         <p className="hint center">Os capítulos que você traduzir ficam aqui, junto com onde você parou em cada obra lida no navegador.</p>
       )}
-      {data.groups.length > 0 && groups.length === 0 && <p className="hint center">Nenhuma obra com esse nome.</p>}
+      {data.groups.length > 0 && groups.length === 0 && (
+        <p className="hint center">{query ? 'Nenhuma obra com esse nome.' : 'Nenhuma obra nesta lista ainda: escolha a lista na página de cada obra.'}</p>
+      )}
 
       <div className="poster-grid">
         {groups.map((g) => (
@@ -107,6 +146,17 @@ export function LibraryView({ data, updates, onPick, onWorksChanged }: { data: L
       </div>
     </div>
   )
+}
+
+type LibraryFilter = 'all' | 'favorite' | Shelf
+
+function savedFilter(): LibraryFilter {
+  try {
+    const saved = localStorage.getItem('library-filter')
+    return saved === 'favorite' || (saved && saved in SHELVES) ? (saved as LibraryFilter) : 'all'
+  } catch {
+    return 'all'
+  }
 }
 
 function CheckButton({ updates }: { updates: UpdatesStatus | null }) {
@@ -128,6 +178,7 @@ function PosterCard({ group, cover, update, onPick }: { group: WorkGroup; cover:
       <div className="poster">
         {cover ? <img src={cover} alt="" /> : <span>📚</span>}
         {update && <span className="poster-badge mono">NOVO · {update.latest}</span>}
+        {group.work.favorite && <span className="poster-fav" title="Favorita">★</span>}
       </div>
       <div className="poster-title">{displayName(group.work.names[0])}</div>
       <div className="poster-meta mono">{metaLine(group)}</div>
@@ -138,7 +189,19 @@ function PosterCard({ group, cover, update, onPick }: { group: WorkGroup; cover:
 /**
  * The first page: the work being read now, new chapters out, translating, and the works read lately.
  */
-export function HomeFeed({ data, updates, onPick, children }: { data: LibraryData; updates: UpdatesStatus | null; onPick: (workId: string) => void; children: ReactNode }) {
+export function HomeFeed({
+  data,
+  updates,
+  onPick,
+  onOpen,
+  children
+}: {
+  data: LibraryData
+  updates: UpdatesStatus | null
+  onPick: (workId: string) => void
+  onOpen: (entry: LibraryEntry) => void
+  children: ReactNode
+}) {
   const recent = [...data.groups].sort((a, b) => lastActivity(b) - lastActivity(a))
   const current = recent.find((g) => readingStatus(g.records)?.continueUrl) ?? recent[0]
   const fresh = [...data.fresh.values()]
@@ -147,7 +210,9 @@ export function HomeFeed({ data, updates, onPick, children }: { data: LibraryDat
 
   return (
     <div className="page">
-      {current && <Hero group={current} cover={coverOf(current, data.covers)} update={data.fresh.get(current.work.id) ?? null} onPick={() => onPick(current.work.id)} />}
+      {current && (
+        <Hero group={current} cover={coverOf(current, data.covers)} update={data.fresh.get(current.work.id) ?? null} onPick={() => onPick(current.work.id)} onOpen={onOpen} />
+      )}
 
       <section className="home-section">
         <div className="section-head">
@@ -208,8 +273,21 @@ export function HomeFeed({ data, updates, onPick, children }: { data: LibraryDat
 }
 
 /** The work being read, big, with where it was left and what came out since. */
-function Hero({ group, cover, update, onPick }: { group: WorkGroup; cover: string | null; update: WorkUpdate | null; onPick: () => void }) {
+function Hero({
+  group,
+  cover,
+  update,
+  onPick,
+  onOpen
+}: {
+  group: WorkGroup
+  cover: string | null
+  update: WorkUpdate | null
+  onPick: () => void
+  onOpen: (entry: LibraryEntry) => void
+}) {
   const status = readingStatus(group.records)
+  const inApp = nextInLibrary(group)
   return (
     <section className="hero">
       {cover && <div className="hero-bg" style={{ backgroundImage: `url(${cover})` }} />}
@@ -226,7 +304,7 @@ function Hero({ group, cover, update, onPick }: { group: WorkGroup; cover: strin
         </div>
         {status && <p className="hero-status">{status.text}</p>}
         <div className="row">
-          {status?.continueUrl && <button onClick={() => window.open(status.continueUrl)}>Continuar</button>}
+          <ContinueButtons inApp={inApp} continueUrl={status?.continueUrl} onOpen={onOpen} />
           {update && (
             <button className="secondary" onClick={() => window.open(update.url)}>
               Ler o cap. {update.latest} ({update.site})
@@ -260,6 +338,11 @@ export function WorkPage({
   const status = readingStatus(records)
   const aliases = work.names.slice(1)
   const rows = chapterRows(records, chapters)
+  const inApp = nextInLibrary(group)
+  const setShelf = async (patch: { shelf?: Shelf | null; favorite?: boolean }) => {
+    await window.api.works.setShelf(work.id, patch)
+    onWorksChanged()
+  }
 
   return (
     <div className="page work-page">
@@ -286,8 +369,41 @@ export function WorkPage({
             ))}
           </div>
           {status && <p className="hero-status">{status.text}</p>}
+          <div className="shelf-row">
+            <select
+              value={work.shelf ?? ''}
+              title="A lista de leitura da obra"
+              onChange={(e) => setShelf({ shelf: (e.target.value || null) as Shelf | null })}
+            >
+              <option value="">{records.length ? 'Lendo (automático)' : 'Em nenhuma lista'}</option>
+              {(Object.entries(SHELVES) as [Shelf, string][]).map(([shelf, label]) => (
+                <option key={shelf} value={shelf}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button className={`secondary small fav-button ${work.favorite ? 'on' : ''}`} onClick={() => setShelf({ favorite: !work.favorite })}>
+              {work.favorite ? '★ Favorita' : '☆ Favoritar'}
+            </button>
+            <select
+              value={work.auto ?? ''}
+              title={
+                work.sources?.length
+                  ? 'O que fazer quando sair um capítulo novo num dos sites da obra (checados a cada 2 horas)'
+                  : 'Adicione um site da obra em "Editar obra" para os capítulos novos serem achados'
+              }
+              onChange={async (e) => {
+                await window.api.works.setAuto(work.id, (e.target.value || null) as 'translate' | 'download' | null)
+                onWorksChanged()
+              }}
+            >
+              <option value="">Capítulo novo: só avisar</option>
+              <option value="translate">Capítulo novo: traduzir sozinho</option>
+              <option value="download">Capítulo novo: baixar sozinho (já em PT)</option>
+            </select>
+          </div>
           <div className="row">
-            {status?.continueUrl && <button onClick={() => window.open(status.continueUrl)}>Continuar</button>}
+            <ContinueButtons inApp={inApp} continueUrl={status?.continueUrl} onOpen={onOpen} />
             {update && (
               <button className="secondary" onClick={() => window.open(update.url)}>
                 🆕 Ler o cap. {update.latest} ({update.site})
@@ -454,6 +570,24 @@ export function ExtensionHelp({ onClose }: { onClose: () => void }) {
         </button>
       </div>
     </div>
+  )
+}
+
+/** Goes on reading: in the app when the chapter is in the library (offline too), else on the site. */
+function ContinueButtons({ inApp, continueUrl, onOpen }: { inApp: LibraryEntry | null; continueUrl?: string; onOpen: (entry: LibraryEntry) => void }) {
+  return (
+    <>
+      {inApp && (
+        <button onClick={() => onOpen(inApp)} title="Abre o capítulo da biblioteca, de onde você parou">
+          {continueUrl ? 'Continuar' : 'Começar'}: cap. {inApp.chapter}
+        </button>
+      )}
+      {continueUrl && (
+        <button className={inApp ? 'secondary' : ''} onClick={() => window.open(continueUrl)}>
+          {inApp ? 'No site ↗' : 'Continuar'}
+        </button>
+      )}
+    </>
   )
 }
 

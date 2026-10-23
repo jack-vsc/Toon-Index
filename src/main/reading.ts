@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { HistoryChapter, HistoryWork, ReadingRecord, ReadingReport } from '../shared/reading'
 import { chapterInUrl, findWork, isNovelUrl, parseChapterName, sameName } from '../shared/works'
-import { indexWork, listWorks, readMeta } from './library'
+import { indexWork, listWorks, readMeta, startedReading } from './library'
 
 const readingPath = (): string => join(app.getPath('userData'), 'library', 'reading.json')
 
@@ -74,6 +74,7 @@ export function reportReading(report: ReadingReport): (ReadingRecord & { work: s
     updatedAt: report.at ?? Date.now()
   })
   saveReading(records)
+  startedReading(workId)
   const saved = records.find((r) => r.workId === workId && r.chapter === parsed.chapter)!
   const work = listWorks().find((w) => w.id === workId)?.names[0] ?? parsed.work
   return { ...saved, work }
@@ -104,6 +105,7 @@ export function readInApp(entryId: string, progress: number, at = Date.now()): v
       updatedAt: at
     })
   )
+  startedReading(meta.workId)
 }
 
 /** "Read up to chapter N" set by hand (read somewhere the app could not see, like the phone). */

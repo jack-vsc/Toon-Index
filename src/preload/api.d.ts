@@ -20,7 +20,7 @@ import type { HistoryWork, ReadingRecord } from '../shared/reading'
 import type { RemoteJob, RemoteQueue } from '../shared/remoteJobs'
 import type { ChapterLink, UpdatesStatus } from '../shared/updates'
 import type { CatalogMatch, CatalogResult, CatalogSite } from '../shared/catalog'
-import type { Work } from '../shared/works'
+import type { Shelf, Work } from '../shared/works'
 
 export interface MangaApi {
   getSettings(): Promise<PublicSettings>
@@ -69,6 +69,10 @@ export interface MangaApi {
     setNames(workId: string, names: string[]): Promise<Work[]>
     /** Moves every chapter of `fromId` into `intoId`, which also takes its names. */
     merge(intoId: string, fromId: string): Promise<Work[]>
+    /** Puts the work on a reading list (null: none) or among the favorites. */
+    setShelf(workId: string, patch: { shelf?: Shelf | null; favorite?: boolean }): Promise<Work[]>
+    /** What happens to the work's new chapters besides the notice: translated, downloaded, or nothing (null). */
+    setAuto(workId: string, auto: 'translate' | 'download' | null): Promise<Work[]>
     move(entryId: string, target: { workId: string } | { newName: string }): Promise<Work[]>
     /** By work id, the covers found on the catalog sites (data URLs). */
     covers(): Promise<Record<string, string>>
@@ -123,6 +127,8 @@ export interface MangaApi {
     list(): Promise<ReadingRecord[]>
     /** A library chapter read to its last page. */
     finished(entryId: string): Promise<void>
+    /** How far into a library chapter the reader is (0 to 1). */
+    progress(entryId: string, progress: number): Promise<void>
     /** Marks a chapter read by hand (read on the phone, say). */
     mark(workId: string, chapter: number): Promise<void>
     /** Forgets one chapter, or the whole work's reading when `chapter` is null. */

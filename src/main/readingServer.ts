@@ -1,10 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
-import { listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover } from './library'
+import { listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover, setWorkShelf } from './library'
+import { displayName, SHELVES, type Shelf } from '../shared/works'
 import { unreadUpdates } from '../shared/updates'
-import { displayName } from '../shared/works'
 import { updatesStatus } from './updates'
+import { bookmarkPage, continueList, pageInfo } from './extensionApi'
 import { addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs } from './remoteJobs'
 import { finishedInApp, forgetReading, listReading, markRead, readInApp, reportReading } from './reading'
 
@@ -60,6 +61,17 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === 'GET' && path === '/status') return send(res, 200, { app: 'Manga Index' })
   if (req.method === 'GET' && path === '/updates') return send(res, 200, newChapters())
   if (req.method === 'POST' && path === '/reading') return send(res, 200, report(await readBody(req)))
+  // The popup: the page's work, putting it on a list, and the works to go back to.
+  if (req.method === 'GET' && path === '/continue') return send(res, 200, continueList())
+  if (req.method === 'POST' && (path === '/page' || path === '/bookmark')) {
+    const body = (await readBody(req)) as { url?: unknown; title?: unknown; shelf?: unknown; favorite?: unknown }
+    if (typeof body?.url !== 'string' || typeof body.title !== 'string') return send(res, 400, { error: 'url e title.' })
+    try {
+      return send(res, 200, path === '/page' ? pageInfo(body.url, body.title) : bookmarkPage(body.url, body.title, body))
+    } catch (err) {
+      return send(res, 400, { error: (err as Error).message })
+    }
+  }
   send(res, 404, { error: 'Não encontrado.' })
 }
 
@@ -144,6 +156,14 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     const { workId, chapter } = (await readBody(req)) as { workId: string; chapter: number }
     if (typeof workId !== 'string' || typeof chapter !== 'number') return send(res, 400, { error: 'workId e chapter.' })
     markRead(workId, chapter)
+    return send(res, 200, { ok: true })
+  }
+  if (req.method === 'POST' && path === '/api/works/shelf') {
+    const { workId, shelf, favorite } = (await readBody(req)) as { workId?: unknown; shelf?: unknown; favorite?: unknown }
+    if (typeof workId !== 'string' || (shelf !== null && !(typeof shelf === 'string' && shelf in SHELVES))) {
+      return send(res, 400, { error: 'workId e shelf.' })
+    }
+    setWorkShelf(workId, { shelf: shelf as Shelf | null, favorite: favorite === true })
     return send(res, 200, { ok: true })
   }
   if (req.method === 'POST' && path === '/api/reading/forget') {

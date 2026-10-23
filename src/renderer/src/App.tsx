@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppError } from '../../shared/errors'
-import { activeProfile, profileReady, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
+import { activeProfile, isDownloaded, profileReady, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
 import type { ReadingRecord } from '../../shared/reading'
 import type { RemoteJob, RemoteQueue } from '../../shared/remoteJobs'
-import type { UpdatesStatus } from '../../shared/updates'
-import type { Work } from '../../shared/works'
+import type { UpdatesStatus, WorkUpdate } from '../../shared/updates'
+import { displayName, type Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
 import { HomeFeed, LibraryView, useLibrary, WorkPage } from './components/LibraryView'
 import { Sidebar, type Page } from './components/Sidebar'
@@ -66,6 +66,8 @@ export default function App() {
   const [remoteJob, setRemoteJob] = useState<RemoteJob | null>(null)
   const [queue, setQueue] = useState<RemoteQueue | null>(null)
   const [batchOpen, setBatchOpen] = useState(false)
+  /** Reading with nothing around the pages (the window full screen too). */
+  const [immersive, setImmersive] = useState(false)
   /** Where the home view is: the first page, the library, or a work's page. */
   const [page, setPage] = useState<Page>({ kind: 'home' })
   const job = useRef<TranslationJob | null>(null)
@@ -140,8 +142,15 @@ export default function App() {
   }, [queue?.paused])
 
   const inResult = view === 'result' && !!reader
-  const pdfPages = usePdfPages(inResult && !showOriginal && !reader.fromJob ? reader.translated : null)
-  const originalPages = usePdfPages(inResult && showOriginal ? reader.original : null)
+  // A library chapter opens where it was left, or at its start once it was read to the end.
+  const resumeAt = (() => {
+    const entry = view === 'result' ? library.find((e) => e.id === reader?.libraryId) : undefined
+    if (!entry) return 0
+    const record = reading.find((r) => r.workId === entry.workId && r.chapter === entry.chapter)
+    return record?.status === 'read' ? 0 : savedPage(entry.id)
+  })()
+  const pdfPages = usePdfPages(inResult && !showOriginal && !reader.fromJob ? reader.translated : null, resumeAt)
+  const originalPages = usePdfPages(inResult && showOriginal ? reader.original : null, resumeAt)
   const jobPages: ReaderPage[] = pages.map((p) => ({
     key: `job-${p.number}`,
     number: p.number,
@@ -316,7 +325,13 @@ export default function App() {
     setMessage(null)
     disposeJob()
     setPages([])
-    const translated = await window.api.library.pdf(entry.id, 'translated')
+    let translated: Uint8Array
+    try {
+      translated = await window.api.library.pdf(entry.id, 'translated')
+    } catch (err) {
+      setMessage(`Não foi possível abrir "${entry.title}": ${cleanIpcError(err)}`)
+      return
+    }
     setReader({ title: entry.fileName, translated, original: null, libraryId: entry.id, fromJob: false })
     setShowOriginal(false)
     setView('result')
@@ -392,8 +407,65 @@ export default function App() {
     document.querySelector('main.content')?.scrollTo(0, 0)
   }
 
+  // The library chapter open, and the ones before and after it in its work.
+  const openEntry = view === 'result' && reader?.libraryId ? library.find((e) => e.id === reader.libraryId) : undefined
+  const { prev: prevEntry, next: nextEntry } = neighbours(library, openEntry)
+  const openWork = openEntry ? works.find((w) => w.id === openEntry.workId) : undefined
+  const workUpdate = openEntry ? updates?.updates[openEntry.workId] : undefined
+
+  // Where each library chapter was left, to open it there again; how far it got goes to the reading list.
+  const progressTimer = useRef<number | null>(null)
+  const onReaderPage = useCallback(
+    (index: number, progress: number) => {
+      const id = reader?.libraryId
+      if (!id || view !== 'result') return
+      try {
+        localStorage.setItem(`reader-page:${id}`, String(index))
+      } catch {
+        // Storage full or blocked: the chapter opens at its start next time.
+      }
+      if (progressTimer.current) window.clearTimeout(progressTimer.current)
+      progressTimer.current = window.setTimeout(() => void window.api.reading.progress(id, progress), 1_500)
+    },
+    [reader?.libraryId, view]
+  )
+
+  function openWorkPage() {
+    if (!openEntry) return
+    goHome()
+    goTo({ kind: 'work', id: openEntry.workId })
+  }
+
+  // Shortcuts while reading: N and P for the next and previous chapters, F for full screen.
+  useEffect(() => {
+    if (view !== 'result') return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.ctrlKey || e.altKey || e.metaKey) return
+      const key = e.key.toLowerCase()
+      if (key === 'n' && nextEntry) void openFromLibrary(nextEntry)
+      else if (key === 'p' && prevEntry) void openFromLibrary(prevEntry)
+      else if (key === 'f') setImmersive((on) => !on)
+      else if (key === 'escape' && immersive) setImmersive(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [view, nextEntry, prevEntry, immersive])
+
+  useEffect(() => {
+    if (view !== 'result' && immersive) setImmersive(false)
+  }, [view])
+  useEffect(() => {
+    if (immersive && !document.fullscreenElement) void document.documentElement.requestFullscreen().catch(() => undefined)
+    if (!immersive && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+  }, [immersive])
+  useEffect(() => {
+    const onChange = () => !document.fullscreenElement && setImmersive(false)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
   return (
-    <div className={`app ${view === 'home' ? 'with-sidebar' : ''}`}>
+    <div className={`app ${view === 'home' ? 'with-sidebar' : ''} ${immersive ? 'immersive' : ''}`}>
       {view === 'home' && (
         <Sidebar
           page={page}
@@ -410,8 +482,26 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <span className="logo">漫</span>
-          <span>Manga Index</span>
-          {title && <span className="file-name">· {title}</span>}
+          {openEntry ? (
+            // A library chapter: its work, and the chapters around it.
+            <div className="chapter-nav">
+              <button className="secondary small" onClick={openWorkPage} title="A página da obra">
+                {openWork ? displayName(openWork.names[0]) : 'Obra'}
+              </button>
+              <button className="secondary small" disabled={!prevEntry} onClick={() => prevEntry && openFromLibrary(prevEntry)} title="Capítulo anterior (P)">
+                ‹ {prevEntry ? `Cap. ${prevEntry.chapter}` : 'Anterior'}
+              </button>
+              <span className="chapter-nav-now">Cap. {openEntry.chapter ?? '?'}</span>
+              <button className="secondary small" disabled={!nextEntry} onClick={() => nextEntry && openFromLibrary(nextEntry)} title="Próximo capítulo (N)">
+                {nextEntry ? `Cap. ${nextEntry.chapter}` : 'Próximo'} ›
+              </button>
+            </div>
+          ) : (
+            <>
+              <span>Manga Index</span>
+              {title && <span className="file-name">· {title}</span>}
+            </>
+          )}
         </div>
         <div className="topbar-actions">
           {view === 'processing' && (
@@ -424,7 +514,7 @@ export default function App() {
               </button>
             </div>
           )}
-          {view === 'result' && reader && (
+          {view === 'result' && reader && !(openEntry && isDownloaded(openEntry)) && (
             <div className="segmented small">
               <button className={!showOriginal ? 'active' : ''} onClick={() => toggleOriginal(false)}>
                 Traduzido
@@ -448,6 +538,11 @@ export default function App() {
                 Zoom
                 <input type="range" min={30} max={100} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
               </label>
+              {view === 'result' && (
+                <button className="icon" title="Tela cheia (F; Esc para sair)" onClick={() => setImmersive(true)}>
+                  ⛶
+                </button>
+              )}
             </>
           )}
           {view === 'processing' && running && (
@@ -470,7 +565,7 @@ export default function App() {
                   Páginas
                 </button>
               )}
-              {reader.translated && <button onClick={() => download(reader.translated!, reader.title)}>⬇ Baixar PDF</button>}
+              {reader.translated && <button className="secondary" title="Salvar o PDF do capítulo" onClick={() => download(reader.translated!, reader.title)}>⬇ PDF</button>}
             </>
           )}
           <button className="secondary" onClick={goHome} disabled={running}>
@@ -538,7 +633,7 @@ export default function App() {
               </div>
             )}
             {view === 'home' && page.kind === 'home' && (
-              <HomeFeed data={libraryData} updates={updates} onPick={(id) => goTo({ kind: 'work', id })}>
+              <HomeFeed data={libraryData} updates={updates} onPick={(id) => goTo({ kind: 'work', id })} onOpen={openFromLibrary}>
               <div className="translate-box">
                 <p className="subtitle">
                   Envie o PDF do capítulo ou o link dele num site. Cada página é lida pela IA, o texto é traduzido e escrito por cima do original.
@@ -602,12 +697,40 @@ export default function App() {
 
             {showReader && readerPages.length > 0 && (
               <Reader
+                key={`${reader?.libraryId ?? 'job'}-${showOriginal}`}
                 pages={readerPages}
                 mode={readerMode}
                 zoom={zoom}
+                startPage={resumeAt}
+                onPage={onReaderPage}
                 // A library chapter read to its last page counts as read.
-                onEnd={view === 'result' && reader?.libraryId ? () => window.api.reading.finished(reader.libraryId!) : undefined}
+                onEnd={
+                  view === 'result' && reader?.libraryId
+                    ? () => {
+                        if (progressTimer.current) window.clearTimeout(progressTimer.current)
+                        void window.api.reading.finished(reader.libraryId!)
+                      }
+                    : undefined
+                }
+                footer={
+                  openEntry && (
+                    <ChapterEnd
+                      entry={openEntry}
+                      next={nextEntry}
+                      update={workUpdate}
+                      immersive={immersive}
+                      onNext={() => nextEntry && openFromLibrary(nextEntry)}
+                      onWork={openWorkPage}
+                      onLeaveFullScreen={() => setImmersive(false)}
+                    />
+                  )
+                }
               />
+            )}
+            {showReader && immersive && (
+              <button className="immersive-exit" onClick={() => setImmersive(false)} title="Sair da tela cheia (Esc)">
+                ✕
+              </button>
             )}
             {showReader && readerPages.length === 0 && <div className="reader-loading center">Carregando…</div>}
           </main>
@@ -619,6 +742,72 @@ export default function App() {
       {aiMonitorOpen && <AiMonitor onClose={() => setAiMonitorOpen(false)} />}
       {batchOpen && <BatchDialog works={works} reading={reading} onClose={() => setBatchOpen(false)} />}
       {phoneOpen && <PhoneDialog onClose={() => setPhoneOpen(false)} />}
+    </div>
+  )
+}
+
+/** The page (an index) a library chapter was left at; 0 when it was not opened yet. */
+function savedPage(entryId: string | undefined): number {
+  if (!entryId) return 0
+  try {
+    return Number(localStorage.getItem(`reader-page:${entryId}`)) || 0
+  } catch {
+    return 0
+  }
+}
+
+/** The chapters before and after `entry` in its work, by number (a chapter translated twice counts once). */
+function neighbours(library: LibraryEntry[], entry: LibraryEntry | undefined): { prev?: LibraryEntry; next?: LibraryEntry } {
+  if (!entry || entry.chapter === null) return {}
+  const chapter = entry.chapter
+  const same = library.filter((e) => e.workId === entry.workId && e.chapter !== null && e.id !== entry.id)
+  const newest = (a: LibraryEntry, b: LibraryEntry) => b.createdAt - a.createdAt
+  const after = same.filter((e) => e.chapter! > chapter).sort((a, b) => a.chapter! - b.chapter! || newest(a, b))
+  const before = same.filter((e) => e.chapter! < chapter).sort((a, b) => b.chapter! - a.chapter! || newest(a, b))
+  return { prev: before[0], next: after[0] }
+}
+
+/** After the last page: the next chapter, or where to find it. */
+function ChapterEnd({
+  entry,
+  next,
+  update,
+  immersive,
+  onNext,
+  onWork,
+  onLeaveFullScreen
+}: {
+  entry: LibraryEntry
+  next?: LibraryEntry
+  update?: WorkUpdate
+  immersive: boolean
+  onNext: () => void
+  onWork: () => void
+  onLeaveFullScreen: () => void
+}) {
+  const onSite = !next && update && entry.chapter !== null && update.latest > entry.chapter ? update : null
+  return (
+    <div className="chapter-end">
+      <span className="mono accent-label">FIM DO CAPÍTULO {entry.chapter}</span>
+      {next ? (
+        <button className="chapter-end-next" onClick={onNext}>
+          Próximo: Capítulo {next.chapter} ›
+        </button>
+      ) : onSite ? (
+        <>
+          <p className="hint">
+            Este é o último capítulo na biblioteca. O site já tem até o {onSite.latest} ({onSite.site}).
+          </p>
+          <button className="chapter-end-next" onClick={() => (immersive && onLeaveFullScreen(), window.open(onSite.url))}>
+            Ler o capítulo {onSite.latest} no site ↗
+          </button>
+        </>
+      ) : (
+        <p className="hint">Este é o último capítulo na biblioteca.</p>
+      )}
+      <button className="secondary" onClick={onWork}>
+        Ver a obra
+      </button>
     </div>
   )
 }

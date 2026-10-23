@@ -2,9 +2,10 @@ import { app, BrowserWindow, Notification, shell } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { latestChapter, MAX_SOURCES, type PageLink, type SourceCheck, type UpdatesStatus, type WorkUpdate } from '../shared/updates'
+import { chaptersUpTo, latestChapter, MAX_SOURCES, type PageLink, type SourceCheck, type UpdatesStatus, type WorkUpdate } from '../shared/updates'
 import { displayName, type Work } from '../shared/works'
-import { listWorks, saveWorkSources } from './library'
+import { listLibrary, listWorks, saveWorkSources } from './library'
+import { addBatch, listRemoteJobs } from './remoteJobs'
 import { listReading } from './reading'
 import { autoLink, mangadexLatest } from './catalog'
 import { hiddenWindow, isChallenged, open, sleep } from './webChapter'
@@ -184,7 +185,8 @@ async function announce(stored: Stored): Promise<Record<string, number>> {
     if (read.length && update.latest <= Math.max(...read)) continue
     const work = works.find((w) => w.id === update.workId)
     const name = work ? displayName(work.names[0]) : 'Obra'
-    const body = `Capítulo ${update.latest} em ${update.site}`
+    const queued = work?.auto ? queueNew(work, update, Math.max(before, ...read)) : 0
+    const body = `Capítulo ${update.latest} em ${update.site}${queued ? (work!.auto === 'translate' ? ' · traduzindo no PC' : ' · baixando no PC') : ''}`
     if (Notification.isSupported()) {
       const notification = new Notification({ title: `Capítulo novo: ${name}`, body })
       notification.on('click', () => void shell.openExternal(update.url))
@@ -193,6 +195,19 @@ async function announce(stored: Stored): Promise<Record<string, number>> {
     if (stored.ntfyTopic) await sendNtfy(stored.ntfyTopic, `Capítulo novo: ${name}`, body, update.url)
   }
   return announced
+}
+
+/**
+ * The new chapters of a work set to be translated (or downloaded) by itself join the queue, the ones
+ * since `from` that are neither in the library nor asked for already. Returns how many joined.
+ */
+function queueNew(work: Work, update: WorkUpdate, from: number): number {
+  const have = new Set(listLibrary().filter((e) => e.workId === work.id).map((e) => e.chapter))
+  const asked = new Set(listRemoteJobs().map((j) => j.url))
+  const chapters = chaptersUpTo(update.url, update.latest, from).filter((c) => !have.has(c.chapter) && !asked.has(c.url))
+  if (!chapters.length) return 0
+  addBatch(displayName(work.names[0]), update.site, chapters, work.auto === 'download')
+  return chapters.length
 }
 
 /** A push to the phone through ntfy.sh; the notification opens the chapter. */

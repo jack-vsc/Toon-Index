@@ -1,8 +1,25 @@
 // The same shapes the PC app keeps (src/shared/works.ts, src/shared/reading.ts, LibraryEntry):
 // the phone only shows them and sends readings back; matching names to works happens on the PC.
 
+/// The reading lists, as on the PC (src/shared/works.ts).
+const shelves = {
+  'reading': 'Lendo',
+  'plan': 'Quero ler',
+  'paused': 'Pausado',
+  'done': 'Concluído',
+  'dropped': 'Abandonado',
+};
+
 class Work {
-  Work({required this.id, required this.names, required this.createdAt, required this.isNovel, this.hasCover = false});
+  Work({
+    required this.id,
+    required this.names,
+    required this.createdAt,
+    required this.isNovel,
+    this.hasCover = false,
+    this.shelf,
+    this.favorite = false,
+  });
 
   final String id;
 
@@ -14,7 +31,14 @@ class Work {
   /// A cover the PC found on MangaDex, mgeko or comix (/api/work-cover/…).
   final bool hasCover;
 
+  /// The reading list it was put on (a key of [shelves]), or null.
+  final String? shelf;
+  final bool favorite;
+
   String get name => displayName(names.first);
+
+  Work withShelf({required String? shelf, required bool favorite}) =>
+      Work(id: id, names: names, createdAt: createdAt, isNovel: isNovel, hasCover: hasCover, shelf: shelf, favorite: favorite);
 
   factory Work.fromJson(Map<String, dynamic> j) => Work(
         id: j['id'] as String,
@@ -22,6 +46,8 @@ class Work {
         createdAt: (j['createdAt'] as num).toInt(),
         isNovel: j['format'] == 'novel',
         hasCover: j['hasCover'] == true,
+        shelf: shelves.containsKey(j['shelf']) ? j['shelf'] as String : null,
+        favorite: j['favorite'] == true,
       );
 }
 
@@ -70,6 +96,7 @@ class LibraryChapter {
     required this.translatedPages,
     required this.createdAt,
     required this.hasCover,
+    this.downloaded = false,
   });
 
   final String id;
@@ -81,6 +108,9 @@ class LibraryChapter {
   final int createdAt;
   final bool hasCover;
 
+  /// Saved as the site had it (a scan already in Portuguese), not translated.
+  final bool downloaded;
+
   factory LibraryChapter.fromJson(Map<String, dynamic> j) => LibraryChapter(
         id: j['id'] as String,
         title: j['title'] as String,
@@ -90,6 +120,7 @@ class LibraryChapter {
         translatedPages: (j['translatedPages'] as num).toInt(),
         createdAt: (j['createdAt'] as num).toInt(),
         hasCover: j['hasCover'] == true,
+        downloaded: j['model'] == 'baixado sem tradução',
       );
 }
 
@@ -130,6 +161,22 @@ class Library {
         ntfyTopic: j['ntfyTopic'] as String?,
       );
 
+  /// With the reading lists and favorites set on this phone and not yet sent to the PC.
+  Library withShelves(List<Map<String, dynamic>> pending) {
+    if (pending.isEmpty) return this;
+    final latest = {for (final p in pending) p['workId']: p};
+    return Library(
+      works: [
+        for (final w in works)
+          latest[w.id] == null ? w : w.withShelf(shelf: latest[w.id]!['shelf'] as String?, favorite: latest[w.id]!['favorite'] == true),
+      ],
+      reading: reading,
+      chapters: chapters,
+      updates: updates,
+      ntfyTopic: ntfyTopic,
+    );
+  }
+
   /// Works with something to show: those with a new chapter out first, then the one read most recently.
   List<WorkView> get views {
     final list = <WorkView>[];
@@ -137,7 +184,7 @@ class Library {
       final records = reading.where((r) => r.workId == work.id).toList()..sort((a, b) => a.chapter.compareTo(b.chapter));
       final translated = chapters.where((c) => c.workId == work.id).toList()
         ..sort((a, b) => (a.chapter ?? double.infinity).compareTo(b.chapter ?? double.infinity));
-      if (records.isEmpty && translated.isEmpty) continue;
+      if (records.isEmpty && translated.isEmpty && work.shelf == null && !work.favorite) continue;
       list.add(WorkView(work, records, translated, update: updates.where((u) => u.workId == work.id).firstOrNull));
     }
     int fresh(WorkView v) => v.update != null ? 1 : 0;
@@ -183,6 +230,27 @@ class WorkView {
     if (now != null && now.url.isNotEmpty) return now.url;
     final withUrl = records.where((r) => r.url.isNotEmpty).toList()..sort((a, b) => b.chapter.compareTo(a.chapter));
     return withUrl.isEmpty ? null : withUrl.first.url;
+  }
+
+  /// The reading list it is on: the one picked, or "reading" once something of it was read.
+  String? get shelf => work.shelf ?? (records.isNotEmpty ? 'reading' : null);
+
+  /// The library chapter to go on with: the one left midway, or the first after the last one read.
+  LibraryChapter? get nextInLibrary {
+    final upTo = readUpTo ?? double.negativeInfinity;
+    final now = current;
+    if (now != null) {
+      final same = translated.where((c) => c.chapter == now.chapter).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      if (same.isNotEmpty) return same.first;
+    }
+    return translated.where((c) => c.chapter != null && c.chapter! > upTo).firstOrNull;
+  }
+
+  /// "5 TRADUZIDOS · 3 BAIXADOS".
+  String get chapterCount {
+    final downloaded = translated.where((c) => c.downloaded).length;
+    final done = translated.length - downloaded;
+    return [if (done > 0) '$done TRADUZIDOS', if (downloaded > 0) '$downloaded BAIXADOS'].join(' · ');
   }
 
   bool matches(String query) {

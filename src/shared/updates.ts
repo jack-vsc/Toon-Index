@@ -102,6 +102,20 @@ function chapterLinksOf(source: string, links: PageLink[], onlyThisWork: boolean
 }
 
 /**
+ * The links of the chapters after `from` up to `latest`, from the latest one's link when its number
+ * stands alone in it ("/name/chapter-100/" gives "/name/chapter-99/"); only the latest otherwise.
+ */
+export function chaptersUpTo(latestUrl: string, latest: number, from: number): ChapterLink[] {
+  const match = [...latestUrl.matchAll(new RegExp(`(?<!\\d)${latest}(?!\\d)`, 'g'))].at(-1)
+  if (!Number.isInteger(latest) || match?.index === undefined) return [{ chapter: latest, url: latestUrl }]
+  const first = Math.max(Math.floor(from) + 1, latest - 20)
+  return Array.from({ length: latest - first + 1 }, (_, i) => first + i).map((n) => ({
+    chapter: n,
+    url: `${latestUrl.slice(0, match.index)}${n}${latestUrl.slice(match.index! + match[0].length)}`
+  }))
+}
+
+/**
  * Sites often list only the latest chapters on the work's page (and the first). When the links follow
  * one pattern ("/name/chapter-77/"), the whole chapters missing between the first and the last are
  * filled in with it; one the site does not have fails on its own when opened.

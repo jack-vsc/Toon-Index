@@ -151,7 +151,24 @@ class Api {
     }
   }
 
+  /// Puts a work on a reading list (null: none) and among the favorites or not, now or once the PC
+  /// can be reached.
+  Future<void> setShelf(String workId, {required String? shelf, required bool favorite}) async {
+    await Store.addPending({'workId': workId, 'shelf': shelf, 'favorite': favorite, 'at': DateTime.now().millisecondsSinceEpoch},
+        Store.pendingShelves, 'workId');
+    try {
+      await flushPending();
+    } on ApiException {
+      // Stays queued.
+    }
+  }
+
   Future<void> flushPending() async {
+    final shelves = await Store.loadPending(Store.pendingShelves);
+    for (final s in shelves) {
+      await _post('/api/works/shelf', s);
+    }
+    if (shelves.isNotEmpty) await Store.removePending(shelves, Store.pendingShelves);
     final pending = await Store.loadPending();
     if (pending.isNotEmpty) {
       await _post('/api/reading/app', pending);
@@ -273,9 +290,11 @@ class Store {
     await (await SharedPreferences.getInstance()).setString(list, jsonEncode(pending));
   }
 
-  /// The page a chapter was left at in the phone's reader (0-based).
-  static Future<int> loadPage(String entryId) async => (await SharedPreferences.getInstance()).getInt('page:$entryId') ?? 0;
+  /// Where a chapter was left in the phone's reader: the band of a page on screen (0-based).
+  static Future<int> loadBand(String entryId) async => (await SharedPreferences.getInstance()).getInt('band:$entryId') ?? 0;
 
-  static Future<void> savePage(String entryId, int page) async =>
-      (await SharedPreferences.getInstance()).setInt('page:$entryId', page);
+  static Future<void> saveBand(String entryId, int band) async =>
+      (await SharedPreferences.getInstance()).setInt('band:$entryId', band);
+
+  static const pendingShelves = 'pendingShelves';
 }

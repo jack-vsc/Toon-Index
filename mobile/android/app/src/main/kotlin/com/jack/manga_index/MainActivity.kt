@@ -32,6 +32,8 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        val tiles = PdfTiles()
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "manga_index/pdf").setMethodCallHandler(tiles::handle)
     }
 
     // Shared while the app was already open.
