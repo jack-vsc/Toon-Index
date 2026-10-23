@@ -1,0 +1,184 @@
+// The same shapes the PC app keeps (src/shared/works.ts, src/shared/reading.ts, LibraryEntry):
+// the phone only shows them and sends readings back; matching names to works happens on the PC.
+
+class Work {
+  Work({required this.id, required this.names, required this.createdAt, required this.isNovel});
+
+  final String id;
+
+  /// Every name the work is known by; the first one is shown.
+  final List<String> names;
+  final int createdAt;
+  final bool isNovel;
+
+  String get name => displayName(names.first);
+
+  factory Work.fromJson(Map<String, dynamic> j) => Work(
+        id: j['id'] as String,
+        names: (j['names'] as List).cast<String>(),
+        createdAt: (j['createdAt'] as num).toInt(),
+        isNovel: j['format'] == 'novel',
+      );
+}
+
+class ReadingRecord {
+  ReadingRecord({
+    required this.workId,
+    required this.chapter,
+    required this.read,
+    required this.progress,
+    required this.url,
+    required this.source,
+    required this.updatedAt,
+  });
+
+  final String workId;
+  final double chapter;
+
+  /// False: in progress, or not known to be finished.
+  final bool read;
+
+  /// 0 to 1, null when unknown.
+  final double? progress;
+  final String url;
+  final String source;
+  final int updatedAt;
+
+  factory ReadingRecord.fromJson(Map<String, dynamic> j) => ReadingRecord(
+        workId: j['workId'] as String,
+        chapter: (j['chapter'] as num).toDouble(),
+        read: j['status'] == 'read',
+        progress: (j['progress'] as num?)?.toDouble(),
+        url: j['url'] as String? ?? '',
+        source: j['source'] as String? ?? '',
+        updatedAt: (j['updatedAt'] as num).toInt(),
+      );
+}
+
+/// A chapter translated in the PC app, kept in its library.
+class LibraryChapter {
+  LibraryChapter({
+    required this.id,
+    required this.title,
+    required this.workId,
+    required this.chapter,
+    required this.pageCount,
+    required this.translatedPages,
+    required this.createdAt,
+    required this.hasCover,
+  });
+
+  final String id;
+  final String title;
+  final String workId;
+  final double? chapter;
+  final int pageCount;
+  final int translatedPages;
+  final int createdAt;
+  final bool hasCover;
+
+  factory LibraryChapter.fromJson(Map<String, dynamic> j) => LibraryChapter(
+        id: j['id'] as String,
+        title: j['title'] as String,
+        workId: j['workId'] as String,
+        chapter: (j['chapter'] as num?)?.toDouble(),
+        pageCount: (j['pageCount'] as num).toInt(),
+        translatedPages: (j['translatedPages'] as num).toInt(),
+        createdAt: (j['createdAt'] as num).toInt(),
+        hasCover: j['hasCover'] == true,
+      );
+}
+
+class Library {
+  Library({required this.works, required this.reading, required this.chapters});
+
+  final List<Work> works;
+  final List<ReadingRecord> reading;
+  final List<LibraryChapter> chapters;
+
+  factory Library.fromJson(Map<String, dynamic> j) => Library(
+        works: (j['works'] as List).map((w) => Work.fromJson(w as Map<String, dynamic>)).toList(),
+        reading: (j['reading'] as List).map((r) => ReadingRecord.fromJson(r as Map<String, dynamic>)).toList(),
+        chapters: (j['chapters'] as List).map((c) => LibraryChapter.fromJson(c as Map<String, dynamic>)).toList(),
+      );
+
+  /// Works with something to show, the one read most recently first.
+  List<WorkView> get views {
+    final list = <WorkView>[];
+    for (final work in works) {
+      final records = reading.where((r) => r.workId == work.id).toList()..sort((a, b) => a.chapter.compareTo(b.chapter));
+      final translated = chapters.where((c) => c.workId == work.id).toList()
+        ..sort((a, b) => (a.chapter ?? double.infinity).compareTo(b.chapter ?? double.infinity));
+      if (records.isEmpty && translated.isEmpty) continue;
+      list.add(WorkView(work, records, translated));
+    }
+    list.sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
+    return list;
+  }
+}
+
+/// A work with its readings and translated chapters.
+class WorkView {
+  WorkView(this.work, this.records, this.translated);
+
+  final Work work;
+  final List<ReadingRecord> records;
+  final List<LibraryChapter> translated;
+
+  int get lastActivity => [
+        0,
+        ...records.map((r) => r.updatedAt),
+        ...translated.map((c) => c.createdAt),
+      ].reduce((a, b) => a > b ? a : b);
+
+  /// The highest chapter read, or null.
+  double? get readUpTo {
+    final read = records.where((r) => r.read).map((r) => r.chapter);
+    return read.isEmpty ? null : read.reduce((a, b) => a > b ? a : b);
+  }
+
+  /// The chapter left midway after the last one read, the latest touched.
+  ReadingRecord? get current {
+    final upTo = readUpTo;
+    final open = records.where((r) => !r.read && (upTo == null || r.chapter > upTo)).toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return open.isEmpty ? null : open.first;
+  }
+
+  /// The page to go back to: the chapter left midway, or the last one read on a site.
+  String? get continueUrl {
+    final now = current;
+    if (now != null && now.url.isNotEmpty) return now.url;
+    final withUrl = records.where((r) => r.url.isNotEmpty).toList()..sort((a, b) => b.chapter.compareTo(a.chapter));
+    return withUrl.isEmpty ? null : withUrl.first.url;
+  }
+
+  bool matches(String query) {
+    final q = normalizeName(query);
+    return q.isEmpty || work.names.any((n) => normalizeName(n).contains(q));
+  }
+}
+
+/// "53" or "53.5".
+String chapterLabel(double chapter) => chapter == chapter.roundToDouble() ? chapter.toInt().toString() : chapter.toString();
+
+/// Lowercase letters and digits only, accents removed (as normalizeName in src/shared/works.ts).
+String normalizeName(String name) {
+  const from = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
+  const to = 'aaaaaeeeeiiiiooooouuuucn';
+  final lower = name.toLowerCase();
+  final out = StringBuffer();
+  for (final rune in lower.runes) {
+    var c = String.fromCharCode(rune);
+    final i = from.indexOf(c);
+    if (i >= 0) c = to[i];
+    if (RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(c)) out.write(c);
+  }
+  return out.toString();
+}
+
+/// Names taken from links are lowercase: "the mythical weapon" → "The Mythical Weapon".
+String displayName(String name) {
+  if (name != name.toLowerCase()) return name;
+  return name.replaceAllMapped(RegExp(r'(^|\s)(\p{L})', unicode: true), (m) => '${m[1]}${m[2]!.toUpperCase()}');
+}

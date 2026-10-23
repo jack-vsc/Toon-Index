@@ -176,6 +176,12 @@ export async function readLibraryPdf(id: string, which: 'original' | 'translated
   return new Uint8Array(await readFile(join(entryDir(id), `${which}.pdf`)))
 }
 
+/** The chapter's cover (JPEG), or null when it has none. */
+export function readCover(id: string): Buffer | null {
+  const path = join(entryDir(id), 'cover.jpg')
+  return existsSync(path) ? readFileSync(path) : null
+}
+
 export function deleteFromLibrary(id: string): void {
   rmSync(entryDir(id), { recursive: true, force: true })
 }

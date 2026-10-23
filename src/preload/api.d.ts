@@ -15,6 +15,7 @@ import type {
   WebChapter,
   WebChapterProgress
 } from '../shared/types'
+import type { DevicesStatus, PairingCode } from '../shared/devices'
 import type { HistoryWork, ReadingRecord } from '../shared/reading'
 import type { Work } from '../shared/works'
 
@@ -64,6 +65,15 @@ export interface MangaApi {
     /** Moves every chapter of `fromId` into `intoId`, which also takes its names. */
     merge(intoId: string, fromId: string): Promise<Work[]>
     move(entryId: string, target: { workId: string } | { newName: string }): Promise<Work[]>
+  }
+  /** Phones paired with the app (the Android app reaches it on the home network or Tailscale). */
+  devices: {
+    status(): Promise<DevicesStatus>
+    /** Turns answering phones on the network on or off. */
+    enable(enabled: boolean): Promise<DevicesStatus>
+    /** A new pairing code (and its QR code), good for ten minutes. */
+    pairing(): Promise<PairingCode>
+    revoke(id: string): Promise<DevicesStatus>
   }
   /** Where each work was left: chapters read in the browser (extension), the history, or the app. */
   reading: {

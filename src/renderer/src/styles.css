@@ -1324,3 +1324,54 @@ details pre {
   flex: none;
   margin-top: 3px;
 }
+
+/* Phone pairing */
+
+.phone-dialog {
+  max-width: 560px;
+}
+
+.phone-toggle {
+  gap: 10px;
+  margin: 12px 0;
+  cursor: pointer;
+}
+
+.phone-toggle input {
+  width: auto;
+}
+
+.pairing {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  margin: 12px 0;
+}
+
+.pairing img {
+  width: 200px;
+  height: 200px;
+  border-radius: 8px;
+  background: #fff;
+  flex: none;
+}
+
+.pairing-code {
+  font-size: 22px;
+  letter-spacing: 4px;
+}
+
+.device-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+}
+
+.device-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}

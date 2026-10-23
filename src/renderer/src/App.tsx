@@ -11,6 +11,7 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { SetupView, type SetupChoice } from './components/SetupView'
 import { AdminDashboard } from './components/AdminDashboard'
 import { AiMonitor } from './components/AiMonitor'
+import { PhoneDialog } from './components/PhoneDialog'
 import { runPhased } from './lib/gpuSharing'
 import { WebLinkInput } from './components/WebLinkInput'
 import { canvasToBlob, renderPage, thumbnailCanvas } from './lib/pdf'
@@ -57,6 +58,7 @@ export default function App() {
   const [reading, setReading] = useState<ReadingRecord[]>([])
   const [adminOpen, setAdminOpen] = useState(false)
   const [aiMonitorOpen, setAiMonitorOpen] = useState(false)
+  const [phoneOpen, setPhoneOpen] = useState(false)
   const job = useRef<TranslationJob | null>(null)
   const fileRef = useRef<LoadedFile | null>(null)
 
@@ -318,6 +320,9 @@ export default function App() {
               Início
             </button>
           )}
+          <button className="icon" title="Celular" onClick={() => setPhoneOpen(true)}>
+            📱
+          </button>
           <button className="icon" title="IAs e GPU" onClick={() => setAiMonitorOpen(true)}>
             📊
           </button>
@@ -450,6 +455,7 @@ export default function App() {
       )}
       {adminOpen && <AdminDashboard onClose={() => setAdminOpen(false)} />}
       {aiMonitorOpen && <AiMonitor onClose={() => setAiMonitorOpen(false)} />}
+      {phoneOpen && <PhoneDialog onClose={() => setPhoneOpen(false)} />}
     </div>
   )
 }

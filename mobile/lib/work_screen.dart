@@ -1,0 +1,105 @@
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'api.dart';
+import 'library_screen.dart';
+import 'models.dart';
+
+/// One work: its other names, every chapter read (and where), the ones translated on the PC, and
+/// marking chapters read somewhere the apps could not see.
+class WorkScreen extends StatefulWidget {
+  const WorkScreen({super.key, required this.view, required this.api});
+
+  final WorkView view;
+  final Api api;
+
+  @override
+  State<WorkScreen> createState() => _WorkScreenState();
+}
+
+class _WorkScreenState extends State<WorkScreen> {
+  final _chapter = TextEditingController();
+  String? _message;
+
+  Future<void> _markRead() async {
+    final chapter = double.tryParse(_chapter.text.trim().replaceAll(',', '.'));
+    if (chapter == null) return;
+    try {
+      await widget.api.markRead(widget.view.work.id, chapter);
+      if (mounted) Navigator.pop(context);
+    } on ApiException catch (e) {
+      setState(() => _message = e.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final view = widget.view;
+    final aliases = view.work.names.skip(1).map(displayName).toList();
+    return Scaffold(
+      appBar: AppBar(title: Text(view.work.name)),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (aliases.isNotEmpty) Text('Também: ${aliases.join(' · ')}', style: const TextStyle(color: Colors.grey)),
+          const SizedBox(height: 6),
+          Text(statusText(view), style: const TextStyle(color: Color(0xFF4CCF8A))),
+          if (view.records.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Text('Capítulos lidos', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final r in view.records)
+                  ActionChip(
+                    label: Text(r.read
+                        ? '${chapterLabel(r.chapter)} ✓'
+                        : '${chapterLabel(r.chapter)} · ${r.progress != null ? '${(r.progress! * 100).round()}%' : '…'}'),
+                    labelStyle: TextStyle(color: r.read ? const Color(0xFF4CCF8A) : const Color(0xFFFF8A5C)),
+                    onPressed: r.url.isEmpty ? null : () => launchUrl(Uri.parse(r.url), mode: LaunchMode.externalApplication),
+                  ),
+              ],
+            ),
+          ],
+          if (view.translated.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Text('Traduzidos no PC', style: Theme.of(context).textTheme.titleMedium),
+            for (final c in view.translated)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: c.hasCover
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.network('${widget.api.base}/api/cover/${c.id}',
+                            headers: widget.api.authHeaders, width: 40, height: 56, fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => const SizedBox(width: 40)),
+                      )
+                    : null,
+                title: Text(c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title),
+                subtitle: Text(c.translatedPages == c.pageCount ? '${c.pageCount} páginas' : '${c.translatedPages} de ${c.pageCount} páginas traduzidas'),
+              ),
+          ],
+          const SizedBox(height: 24),
+          Text('Leu em outro lugar?', style: Theme.of(context).textTheme.titleMedium),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _chapter,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Capítulo'),
+                  onSubmitted: (_) => _markRead(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.tonal(onPressed: _markRead, child: const Text('Marcar lido até ele')),
+            ],
+          ),
+          if (_message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!)),
+        ],
+      ),
+    );
+  }
+}

@@ -43,6 +43,12 @@ const api: MangaApi = {
     merge: (intoId, fromId) => ipcRenderer.invoke('works:merge', intoId, fromId),
     move: (entryId, target) => ipcRenderer.invoke('works:move', entryId, target)
   },
+  devices: {
+    status: () => ipcRenderer.invoke('devices:status'),
+    enable: (enabled) => ipcRenderer.invoke('devices:enable', enabled),
+    pairing: () => ipcRenderer.invoke('devices:pairing'),
+    revoke: (id) => ipcRenderer.invoke('devices:revoke', id)
+  },
   reading: {
     list: () => ipcRenderer.invoke('reading:list'),
     finished: (entryId) => ipcRenderer.invoke('reading:finished', entryId),
