@@ -39,9 +39,16 @@ export function parseChapterName(title: string, url?: string): ChapterName {
     // What follows the chapter number is the chapter's own title or the site's name.
     text = text.slice(0, found.index)
   }
-  // "Name - Site" / "Name | Site": the site part goes when the rest still names something.
-  const parts = text.split(/\s+[|–—-]\s+/).map((s) => s.trim()).filter(Boolean)
-  let work = (parts.length > 1 ? parts.slice(0, -1).join(' - ') : parts[0] ?? '').replace(/[\s\-–—:|,.]+$/, '').trim()
+  // "Read Name Chapter 5 Online", "Manga: Name Chapter 5" (the end went with the chapter number).
+  text = text.replace(/^\s*(?:(?:read|ler|leia)\s+|(?:manga|manhwa|manhua|webtoon)\s*:\s*)/i, '')
+  // "Name - Site" / "Name | Site": the site part goes when the rest still names something. When the
+  // link says which part is the site ("MangaSite - Name" on mangasite.com), that part goes instead.
+  let parts = text.split(/\s+[|–—-]\s+/).map((s) => s.trim()).filter(Boolean)
+  const site = url ? siteName(url) : ''
+  const named = site ? parts.filter((p) => !isSite(p, site)) : parts
+  if (named.length < parts.length && named.length) parts = named
+  else if (parts.length > 1) parts = parts.slice(0, -1)
+  let work = parts.join(' - ').replace(/[\s\-–—:|,.·•]+$/, '').trim()
   if (url) {
     const fromUrl = parseUrl(url)
     chapter ??= fromUrl.chapter
@@ -50,14 +57,38 @@ export function parseChapterName(title: string, url?: string): ChapterName {
   return { work: work.replace(/\s+/g, ' '), chapter }
 }
 
+/** "www.manga-site.com" → "mangasite". */
+function siteName(url: string): string {
+  try {
+    const labels = new URL(url).hostname.replace(/^www\./, '').split('.')
+    return normalizeName(labels.length > 1 ? labels.slice(0, -1).join('') : labels[0])
+  } catch {
+    return ''
+  }
+}
+
+function isSite(part: string, site: string): boolean {
+  const name = normalizeName(part)
+  return name.length >= 3 && (name.includes(site) || site.includes(name))
+}
+
+/** The chapter number in a link's path ("/chapter-53/"), or null. */
+export function chapterInUrl(url: string): number | null {
+  return parseUrl(url).chapter
+}
+
 /** "/manga/the-mythical-weapon/chapter-53/" → "the mythical weapon", 53. */
 function parseUrl(url: string): ChapterName {
   try {
     const segments = new URL(url).pathname.split('/').filter(Boolean)
     const i = segments.findIndex((s) => CHAPTER.test(s.replace(/[-_]/g, ' ')))
     const chapterSeg = i >= 0 ? CHAPTER.exec(segments[i].replace(/[-_]/g, ' ')) : null
-    const slug = i > 0 ? segments[i - 1] : segments.find((s) => /[a-z].*-.*[a-z]/i.test(s))
-    return { work: slug ? slug.replace(/[-_]+/g, ' ') : '', chapter: chapterSeg ? parseFloat(chapterSeg[1]) : null }
+    // The work's segment comes before the chapter's, perhaps with others between ("/novels/name/post/capitulo-5").
+    const named = (s: string) => /[a-z].*[-_].*[a-z]/i.test(s)
+    const slug = i > 0 ? (segments.slice(0, i).reverse().find(named) ?? segments[i - 1]) : segments.find(named)
+    // "solo-leveling-7f873ca6": the site's id for the work is not part of its name.
+    const name = slug ? slug.replace(/[-_](?=[a-z]*\d)[a-z0-9]{4,}$/i, '').replace(/[-_]+/g, ' ') : ''
+    return { work: name, chapter: chapterSeg ? parseFloat(chapterSeg[1]) : null }
   } catch {
     return { work: '', chapter: null }
   }
@@ -122,7 +153,11 @@ export function withName(work: Work, name: string): Work {
   const names = [...work.names, clean]
   const shown = normalizeName(names[0])
   const related = key.startsWith(shown) || shown.startsWith(key)
-  const better = cutShort(names[0]) ? !cutShort(clean) : !cutShort(clean) && key.length > shown.length
+  // A lowercase name taken from a link does not replace one written properly.
+  const lowercase = (n: string) => n === n.toLowerCase()
+  const better = cutShort(names[0])
+    ? !cutShort(clean)
+    : !cutShort(clean) && key.length > shown.length && (!lowercase(clean) || lowercase(names[0]))
   if (related && better) names.unshift(names.pop()!)
   return { ...work, names }
 }

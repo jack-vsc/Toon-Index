@@ -17,6 +17,9 @@ import {
   saveToLibrary,
   setWorkNames
 } from './library'
+import type { HistoryWork } from '../shared/reading'
+import { finishedInApp, forgetReading, importHistory, listReading, markRead, onReadingChanged, scanHistory } from './reading'
+import { startReadingServer, stopReadingServer } from './readingServer'
 import { getPublicSettings, saveSettings } from './settings'
 import { cancelTranslations, listModels, testApi, translate } from './translate'
 import { detect as visionDetect, inpaint as visionInpaint, stopVision } from './vision'
@@ -99,6 +102,10 @@ function createWindow(): void {
   }
 }
 
+function extensionDir(): string {
+  return app.isPackaged ? join(process.resourcesPath, 'extension') : join(app.getAppPath(), 'extension')
+}
+
 function registerIpc(): void {
   ipcMain.handle('settings:get', () => getPublicSettings())
 
@@ -139,6 +146,14 @@ function registerIpc(): void {
   ipcMain.handle('works:list', () => listWorks())
   ipcMain.handle('works:names', (_e, workId: string, names: string[]) => setWorkNames(workId, names))
   ipcMain.handle('works:merge', (_e, intoId: string, fromId: string) => mergeWorks(intoId, fromId))
+  ipcMain.handle('reading:list', () => listReading())
+  ipcMain.handle('reading:finished', (_e, entryId: string) => finishedInApp(entryId))
+  ipcMain.handle('reading:mark', (_e, workId: string, chapter: number) => markRead(workId, chapter))
+  ipcMain.handle('reading:forget', (_e, workId: string, chapter: number | null) => forgetReading(workId, chapter))
+  ipcMain.handle('reading:scan-history', () => scanHistory())
+  ipcMain.handle('reading:import-history', (_e, works: HistoryWork[]) => importHistory(works))
+  // The extension is loaded unpacked from this folder (chrome://extensions → "Carregar sem compactação").
+  ipcMain.handle('reading:extension', () => shell.openPath(extensionDir()))
   ipcMain.handle('works:move', (_e, entryId: string, target: { workId: string } | { newName: string }) => moveToWork(entryId, target))
   // Training management IPC
   ipcMain.handle('train:listRuns', () => listRuns())
@@ -170,6 +185,8 @@ app.whenReady().then(() => {
   rmSync(join(app.getPath('userData'), 'agent-runs'), { recursive: true, force: true })
   registerIpc()
   createWindow()
+  startReadingServer()
+  onReadingChanged(() => mainWindow?.webContents.send('reading:changed'))
   app.on('activate', () => {
     if (mainWindow) {
       mainWindow.show()
@@ -187,5 +204,6 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   stopVision()
   stopMonitor()
+  stopReadingServer()
   cancelWebChapter()
 })

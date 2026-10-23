@@ -17,26 +17,48 @@ interface Props {
   pages: ReaderPage[]
   mode: ReaderMode
   zoom: number
+  /** Called once when the last page is reached. */
+  onEnd?: () => void
 }
 
-export function Reader({ pages, mode, zoom }: Props) {
-  return mode === 'paged' ? <PagedReader pages={pages} zoom={zoom} /> : <ScrollReader pages={pages} zoom={zoom} />
+export function Reader({ pages, mode, zoom, onEnd }: Props) {
+  const ended = useRef(false)
+  const end = () => {
+    if (ended.current) return
+    ended.current = true
+    onEnd?.()
+  }
+  return mode === 'paged' ? <PagedReader pages={pages} zoom={zoom} onEnd={end} /> : <ScrollReader pages={pages} zoom={zoom} onEnd={end} />
 }
 
-function ScrollReader({ pages, zoom }: { pages: ReaderPage[]; zoom: number }) {
+function ScrollReader({ pages, zoom, onEnd }: { pages: ReaderPage[]; zoom: number; onEnd: () => void }) {
+  const bottom = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!bottom.current) return
+    const observer = new IntersectionObserver((seen) => seen.some((s) => s.isIntersecting) && onEnd())
+    observer.observe(bottom.current)
+    return () => observer.disconnect()
+  }, [onEnd])
+
   return (
     <div className="reader">
       {pages.map((page) => (
         <PageView key={page.key} page={page} width={`${zoom}%`} className={page.tall ? 'tall' : ''} />
       ))}
+      <div ref={bottom} />
     </div>
   )
 }
 
-function PagedReader({ pages, zoom }: { pages: ReaderPage[]; zoom: number }) {
+function PagedReader({ pages, zoom, onEnd }: { pages: ReaderPage[]; zoom: number; onEnd: () => void }) {
   const [index, setIndex] = useState(0)
   const scroller = useRef<HTMLDivElement>(null)
   const current = pages[Math.min(index, pages.length - 1)]
+
+  useEffect(() => {
+    if (pages.length > 1 && index >= pages.length - 1) onEnd()
+  }, [index, pages.length])
 
   const go = (delta: number) => setIndex((i) => Math.min(pages.length - 1, Math.max(0, i + delta)))
 

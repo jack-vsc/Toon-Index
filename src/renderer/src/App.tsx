@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppError } from '../../shared/errors'
 import { activeProfile, profileReady, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
+import type { ReadingRecord } from '../../shared/reading'
 import type { Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
 import { LibraryView } from './components/LibraryView'
@@ -53,6 +54,7 @@ export default function App() {
   const [message, setMessage] = useState<string | null>(null)
   const [library, setLibrary] = useState<LibraryEntry[]>([])
   const [works, setWorks] = useState<Work[]>([])
+  const [reading, setReading] = useState<ReadingRecord[]>([])
   const [adminOpen, setAdminOpen] = useState(false)
   const [aiMonitorOpen, setAiMonitorOpen] = useState(false)
   const job = useRef<TranslationJob | null>(null)
@@ -61,12 +63,15 @@ export default function App() {
   useEffect(() => {
     window.api.getSettings().then(setSettings)
     refreshLibrary()
+    // Chapters read in the browser arrive while the app is open (and may bring new works).
+    return window.api.reading.onChanged(refreshLibrary)
   }, [])
 
   // Listing the chapters indexes old ones into works, so works are read after it.
   const refreshLibrary = async () => {
     setLibrary(await window.api.library.list())
     setWorks(await window.api.works.list())
+    setReading(await window.api.reading.list())
   }
 
   const profile = settings ? activeProfile(settings) : undefined
@@ -399,6 +404,7 @@ export default function App() {
                 <LibraryView
                   entries={library}
                   works={works}
+                  reading={reading}
                   onOpen={openFromLibrary}
                   onDownload={downloadEntry}
                   onDelete={deleteEntry}
@@ -425,7 +431,15 @@ export default function App() {
               <ProgressView pages={pages} onRetry={stopping ? undefined : (page) => retryPages([page])} />
             )}
 
-            {showReader && readerPages.length > 0 && <Reader pages={readerPages} mode={readerMode} zoom={zoom} />}
+            {showReader && readerPages.length > 0 && (
+              <Reader
+                pages={readerPages}
+                mode={readerMode}
+                zoom={zoom}
+                // A library chapter read to its last page counts as read.
+                onEnd={view === 'result' && reader?.libraryId ? () => window.api.reading.finished(reader.libraryId!) : undefined}
+              />
+            )}
             {showReader && readerPages.length === 0 && <div className="reader-loading center">Carregando…</div>}
           </main>
         </>

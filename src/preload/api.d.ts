@@ -15,6 +15,7 @@ import type {
   WebChapter,
   WebChapterProgress
 } from '../shared/types'
+import type { HistoryWork, ReadingRecord } from '../shared/reading'
 import type { Work } from '../shared/works'
 
 export interface MangaApi {
@@ -63,6 +64,23 @@ export interface MangaApi {
     /** Moves every chapter of `fromId` into `intoId`, which also takes its names. */
     merge(intoId: string, fromId: string): Promise<Work[]>
     move(entryId: string, target: { workId: string } | { newName: string }): Promise<Work[]>
+  }
+  /** Where each work was left: chapters read in the browser (extension), the history, or the app. */
+  reading: {
+    list(): Promise<ReadingRecord[]>
+    /** A library chapter read to its last page. */
+    finished(entryId: string): Promise<void>
+    /** Marks a chapter read by hand (read on the phone, say). */
+    mark(workId: string, chapter: number): Promise<void>
+    /** Forgets one chapter, or the whole work's reading when `chapter` is null. */
+    forget(workId: string, chapter: number | null): Promise<void>
+    scanHistory(): Promise<{ works: HistoryWork[]; problems: string[] }>
+    /** Returns how many chapters were imported. */
+    importHistory(works: HistoryWork[]): Promise<number>
+    /** Opens the browser extension's folder. */
+    openExtension(): Promise<string>
+    /** Returns a function that stops listening. */
+    onChanged(callback: () => void): () => void
   }
   train: {
     listRuns(): Promise<string[]>

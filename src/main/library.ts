@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { LibraryEntry, SaveLibraryInput } from '../shared/types'
 import { findWork, normalizeName, parseChapterName, withName, type Work } from '../shared/works'
+import { moveReading } from './reading'
 import { getSettings } from './settings'
 import { currentModelLabel } from './translate'
 
@@ -32,7 +33,7 @@ function saveWorks(works: Work[]): void {
 }
 
 /** The work a chapter named `name` belongs to, created when no known name matches; learns the name. */
-function indexWork(name: string): string {
+export function indexWork(name: string): string {
   const works = listWorks()
   const clean = name.trim() || 'Sem nome'
   const found = findWork(works, clean)
@@ -45,7 +46,7 @@ function indexWork(name: string): string {
   return work.id
 }
 
-function readMeta(id: string): StoredEntry {
+export function readMeta(id: string): StoredEntry {
   return JSON.parse(readFileSync(join(entryDir(id), 'meta.json'), 'utf8')) as StoredEntry
 }
 
@@ -129,6 +130,7 @@ export function mergeWorks(intoId: string, fromId: string): Work[] {
     .filter((w) => w.id !== fromId)
     .map((w) => (w.id === intoId && from ? from.names.reduce(withName, w) : w))
   saveWorks(merged)
+  moveReading(fromId, intoId)
   return merged
 }
 

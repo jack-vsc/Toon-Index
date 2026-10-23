@@ -1228,3 +1228,88 @@ details pre {
   padding: 4px 8px;
   color: var(--muted);
 }
+
+/* Where each work was left */
+
+.library-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.library-toolbar input[type='search'] {
+  flex: 1;
+  min-width: 200px;
+}
+
+.work-reading {
+  color: var(--ok);
+  font-size: 13px;
+  margin: 2px 0;
+}
+
+.reading-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px 70px;
+}
+
+.reading-chip {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.reading-chip.read {
+  color: var(--ok);
+}
+
+.reading-chip.reading {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+.read-mark {
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.steps {
+  margin: 8px 0 12px;
+  padding-left: 20px;
+  line-height: 1.7;
+}
+
+.history-list {
+  max-height: 360px;
+  overflow-y: auto;
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.history-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-item input {
+  width: auto;
+  flex: none;
+  margin-top: 3px;
+}

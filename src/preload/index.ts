@@ -43,6 +43,22 @@ const api: MangaApi = {
     merge: (intoId, fromId) => ipcRenderer.invoke('works:merge', intoId, fromId),
     move: (entryId, target) => ipcRenderer.invoke('works:move', entryId, target)
   },
+  reading: {
+    list: () => ipcRenderer.invoke('reading:list'),
+    finished: (entryId) => ipcRenderer.invoke('reading:finished', entryId),
+    mark: (workId, chapter) => ipcRenderer.invoke('reading:mark', workId, chapter),
+    forget: (workId, chapter) => ipcRenderer.invoke('reading:forget', workId, chapter),
+    scanHistory: () => ipcRenderer.invoke('reading:scan-history'),
+    importHistory: (works) => ipcRenderer.invoke('reading:import-history', works),
+    openExtension: () => ipcRenderer.invoke('reading:extension'),
+    onChanged: (callback) => {
+      const listener = () => callback()
+      ipcRenderer.on('reading:changed', listener)
+      return () => {
+        ipcRenderer.removeListener('reading:changed', listener)
+      }
+    }
+  },
   train: {
     listRuns: () => ipcRenderer.invoke('train:listRuns'),
     listActive: () => ipcRenderer.invoke('train:listActive'),
