@@ -22,8 +22,9 @@ const PRESETS: Preset[] = [
       name: 'OpenRouter',
       kind: 'openai',
       baseUrl: 'https://openrouter.ai/api/v1',
-      models: ['google/gemini-2.5-flash-lite', 'google/gemini-2.5-flash', 'google/gemini-3.6-flash'],
-      model: 'google/gemini-2.5-flash'
+      // Chapters 52 and 53 against the scan: Haiku placed and translated best for the price of Flash-Lite.
+      models: ['anthropic/claude-haiku-5.5', 'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite'],
+      model: 'anthropic/claude-haiku-5.5'
     }
   },
   { label: 'Cursor', profile: { name: 'Cursor', kind: 'cursor', baseUrl: '', models: [], model: '' } },
@@ -337,7 +338,7 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
                 <div className="row">
                   <input
                     list={`models-${profile.id}`}
-                    placeholder={isOpenRouter ? 'ID do modelo, ex.: google/gemini-2.5-flash' : 'ID do modelo'}
+                    placeholder={isOpenRouter ? 'ID do modelo, ex.: anthropic/claude-haiku-5.5' : 'ID do modelo'}
                     value={newModel}
                     onFocus={() => {
                       if (!models[profile.id] && profile.baseUrl.trim()) void loadModels(true)
