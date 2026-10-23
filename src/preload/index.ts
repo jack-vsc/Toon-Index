@@ -49,6 +49,19 @@ const api: MangaApi = {
     pairing: () => ipcRenderer.invoke('devices:pairing'),
     revoke: (id) => ipcRenderer.invoke('devices:revoke', id)
   },
+  updates: {
+    status: () => ipcRenderer.invoke('updates:status'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    setSources: (workId, sources) => ipcRenderer.invoke('updates:sources', workId, sources),
+    setNtfy: (enabled) => ipcRenderer.invoke('updates:ntfy', enabled),
+    onChanged: (callback) => {
+      const listener = () => callback()
+      ipcRenderer.on('updates:changed', listener)
+      return () => {
+        ipcRenderer.removeListener('updates:changed', listener)
+      }
+    }
+  },
   remote: {
     list: () => ipcRenderer.invoke('remote:list'),
     take: () => ipcRenderer.invoke('remote:take'),

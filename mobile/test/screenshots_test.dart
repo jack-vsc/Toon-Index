@@ -7,9 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:manga_index/api.dart';
 import 'package:manga_index/browser_screen.dart';
 import 'package:manga_index/downloads.dart';
+import 'package:manga_index/library_screen.dart';
 import 'package:manga_index/models.dart';
 import 'package:manga_index/reader_screen.dart';
 import 'package:manga_index/translate_screen.dart';
@@ -77,6 +79,16 @@ class FakeJobsApi extends Api {
   }
 }
 
+/// A library with new chapters out, instead of asking a PC.
+class FakeLibraryApi extends Api {
+  FakeLibraryApi(this.fake) : super(Connection(hosts: ['127.0.0.1'], port: 1, token: 'test'));
+
+  final Library fake;
+
+  @override
+  Future<Library> library() async => fake;
+}
+
 void main() {
   final now = DateTime.now().millisecondsSinceEpoch;
   final api = Api(Connection(hosts: ['127.0.0.1'], port: 1, token: 'test'));
@@ -135,6 +147,35 @@ void main() {
     await shoot(tester, TranslateScreen(api: api), 'p3-translate');
     // The screen asks the PC again every few seconds.
     await tester.pumpWidget(const SizedBox());
+  }, skip: out == null);
+
+  testWidgets('library with new chapters', (tester) async {
+    tester.view.physicalSize = phone * ratio;
+    tester.view.devicePixelRatio = ratio;
+    SharedPreferences.setMockInitialValues({});
+    Map<String, dynamic> read(String id, num chapter, String url, int ago) =>
+        {'workId': id, 'chapter': chapter, 'status': 'read', 'progress': 1, 'url': url, 'source': 'browser', 'updatedAt': now - ago};
+    final library = Library.fromJson({
+      'works': [
+        {'id': 'a', 'names': ['The Mythical Weapon Creation of the Regressed Genius Player'], 'createdAt': 0},
+        {'id': 'b', 'names': ['Overgeared'], 'createdAt': 0},
+        {'id': 'c', 'names': ['Versatile Mage'], 'createdAt': 0, 'format': 'novel'},
+        {'id': 'd', 'names': ['Solo Leveling: Ragnarok'], 'createdAt': 0},
+      ],
+      'reading': [
+        read('a', 90, 'https://mgread.io/manga/the-mythical-weapon-creation-of-the-regressed-genius-player/chapter-90/', 7200000),
+        read('b', 343, 'https://asurascans.com/comics/overgeared-11fe7da3/chapter/343', 86400000 * 6),
+        read('c', 614, 'https://novel.site/versatile-mage/chapter-614', 3600000),
+        read('d', 41, 'https://asuracomic.net/series/solo-leveling-ragnarok-7f873ca6/chapter/41', 86400000 * 2),
+      ],
+      'chapters': [],
+      'updates': [
+        {'workId': 'a', 'latest': 100, 'url': 'https://mgread.io/manga/the-mythical-weapon-creation-of-the-regressed-genius-player/chapter-100/', 'site': 'mgread.io', 'checkedAt': now},
+        {'workId': 'b', 'latest': 344, 'url': 'https://asurascans.com/comics/overgeared-11fe7da3/chapter/344', 'site': 'asurascans.com', 'checkedAt': now},
+      ],
+      'ntfyTopic': 'manga-index-test',
+    });
+    await shoot(tester, LibraryScreen(api: FakeLibraryApi(library), onUnpaired: () {}), 'p5-library');
   }, skip: out == null);
 
   testWidgets('browser start page', (tester) async {

@@ -2,6 +2,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
 import { listLibrary, listWorks, readCover, readLibraryPdf } from './library'
+import { unreadUpdates } from '../shared/updates'
+import { displayName } from '../shared/works'
+import { updatesStatus } from './updates'
 import { addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs } from './remoteJobs'
 import { finishedInApp, forgetReading, listReading, markRead, readInApp, reportReading } from './reading'
 
@@ -55,6 +58,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST')
   if (req.method === 'OPTIONS') return send(res, 204)
   if (req.method === 'GET' && path === '/status') return send(res, 200, { app: 'Manga Index' })
+  if (req.method === 'GET' && path === '/updates') return send(res, 200, newChapters())
   if (req.method === 'POST' && path === '/reading') return send(res, 200, report(await readBody(req)))
   send(res, 404, { error: 'Não encontrado.' })
 }
@@ -76,7 +80,7 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   if (req.method === 'GET' && path === '/api/library') {
     // Covers go one by one (/api/cover/…), so the list stays small.
     const chapters = listLibrary().map(({ cover, ...entry }) => ({ ...entry, hasCover: !!cover }))
-    return send(res, 200, { works: listWorks(), reading: listReading(), chapters })
+    return send(res, 200, { works: listWorks(), reading: listReading(), chapters, updates: newChapters(), ntfyTopic: updatesStatus().ntfyTopic })
   }
   const cover = /^\/api\/cover\/([a-f0-9-]+)$/i.exec(path)
   if (req.method === 'GET' && cover) {
@@ -142,6 +146,15 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     return send(res, 200, { ok: true })
   }
   send(res, 404, { error: 'Não encontrado.' })
+}
+
+/** Chapters out on the works' sites past the last one read, with the work's name. */
+function newChapters(): (ReturnType<typeof unreadUpdates>[number] & { work: string })[] {
+  const works = listWorks()
+  return unreadUpdates(updatesStatus().updates, listReading()).map((u) => ({
+    ...u,
+    work: displayName(works.find((w) => w.id === u.workId)?.names[0] ?? '')
+  }))
 }
 
 /** A single report, or the ones kept while the app could not be reached; answers with the last one's result. */

@@ -1,5 +1,6 @@
 // Passes what content.js saw to the Manga Index app on this computer. While the app is closed the
-// reports wait here and go once it is open again, so nothing read in the meantime is lost.
+// reports wait here and go once it is open again, so nothing read in the meantime is lost. It also
+// shows the new chapters the app found on the works' sites.
 
 const APP = 'http://127.0.0.1:47321'
 const QUEUE_LIMIT = 1000
@@ -9,13 +10,56 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   deliver(message.report, sender.tab?.id)
 })
 
-chrome.runtime.onStartup.addListener(flush)
+chrome.runtime.onStartup.addListener(() => {
+  flush()
+  checkUpdates()
+})
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('flush', { periodInMinutes: 1 })
+  chrome.alarms.create('updates', { periodInMinutes: 30 })
   flush()
+  checkUpdates()
 })
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'flush') flush()
+  if (alarm.name === 'updates') checkUpdates()
+})
+
+/** Each new chapter once: the app also announces it in Windows, so this only covers what it has not shown here. */
+async function checkUpdates() {
+  let updates
+  try {
+    const response = await fetch(`${APP}/updates`)
+    if (!response.ok) return
+    updates = await response.json()
+  } catch {
+    return
+  }
+  const { shown = {} } = await chrome.storage.local.get('shown')
+  for (const update of updates) {
+    if ((shown[update.workId] ?? 0) >= update.latest) continue
+    shown[update.workId] = update.latest
+    chrome.notifications.create(`update:${update.workId}:${update.latest}`, {
+      type: 'basic',
+      iconUrl: 'icon.png',
+      title: `Capítulo novo: ${update.work}`,
+      message: `Capítulo ${update.latest} em ${update.site}`
+    })
+    links[`update:${update.workId}:${update.latest}`] = update.url
+  }
+  links = Object.fromEntries(Object.entries(links).slice(-50))
+  await chrome.storage.local.set({ shown, links })
+}
+
+// The page each notification opens; kept in storage, since the service worker sleeps between alarms.
+let links = {}
+chrome.storage.local.get('links').then(({ links: stored = {} }) => (links = { ...stored, ...links }))
+
+chrome.notifications.onClicked.addListener(async (id) => {
+  const { links: stored = {} } = await chrome.storage.local.get('links')
+  const url = links[id] ?? stored[id]
+  if (url) chrome.tabs.create({ url })
+  chrome.notifications.clear(id)
 })
 
 async function post(body) {

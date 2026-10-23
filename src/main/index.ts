@@ -22,6 +22,7 @@ import { finishedInApp, forgetReading, importHistory, listReading, markRead, onR
 import { devicesStatus, newPairingCode, revokeDevice, setPhonesEnabled } from './devices'
 import type { RemoteJob } from '../shared/remoteJobs'
 import { listRemoteJobs, onRemoteJobsChanged, requeueInterrupted, takeRemoteJob, updateRemoteJob } from './remoteJobs'
+import { checkNow, onUpdatesChanged, setNtfy, setWorkSources, startUpdates, stopUpdates, updatesStatus } from './updates'
 import { READING_PORT, restartReadingServer, startReadingServer, stopReadingServer } from './readingServer'
 import { getPublicSettings, saveSettings } from './settings'
 import { cancelTranslations, listModels, testApi, translate } from './translate'
@@ -173,6 +174,10 @@ function registerIpc(): void {
   ipcMain.handle('remote:update', (_e, id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>) =>
     updateRemoteJob(id, patch)
   )
+  ipcMain.handle('updates:status', () => updatesStatus())
+  ipcMain.handle('updates:check', () => checkNow())
+  ipcMain.handle('updates:sources', (_e, workId: string, sources: string[]) => setWorkSources(workId, sources))
+  ipcMain.handle('updates:ntfy', (_e, enabled: boolean) => setNtfy(enabled))
   ipcMain.handle('works:move', (_e, entryId: string, target: { workId: string } | { newName: string }) => moveToWork(entryId, target))
   // Training management IPC
   ipcMain.handle('train:listRuns', () => listRuns())
@@ -208,6 +213,8 @@ app.whenReady().then(() => {
   onReadingChanged(() => mainWindow?.webContents.send('reading:changed'))
   requeueInterrupted()
   onRemoteJobsChanged(() => mainWindow?.webContents.send('remote:changed'))
+  onUpdatesChanged(() => mainWindow?.webContents.send('updates:changed'))
+  startUpdates()
   app.on('activate', () => {
     if (mainWindow) {
       mainWindow.show()
@@ -226,5 +233,6 @@ app.on('will-quit', () => {
   stopVision()
   stopMonitor()
   stopReadingServer()
+  stopUpdates()
   cancelWebChapter()
 })

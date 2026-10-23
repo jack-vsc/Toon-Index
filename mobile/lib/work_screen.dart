@@ -91,6 +91,14 @@ class _WorkScreenState extends State<WorkScreen> {
           if (aliases.isNotEmpty) Text('Também: ${aliases.join(' · ')}', style: const TextStyle(color: Colors.grey)),
           const SizedBox(height: 6),
           Text(statusText(view), style: const TextStyle(color: Color(0xFF4CCF8A))),
+          if (view.update != null) ...[
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: view.update!.url))),
+              icon: const Icon(Icons.fiber_new),
+              label: Text('Ler o cap. ${chapterLabel(view.update!.latest)} em ${view.update!.site}'),
+            ),
+          ],
           if (view.records.isNotEmpty) ...[
             const SizedBox(height: 18),
             Text('Capítulos lidos', style: Theme.of(context).textTheme.titleMedium),

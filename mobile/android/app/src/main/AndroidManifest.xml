@@ -55,6 +55,11 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- 🔔 subscribes the ntfy app to the PC's new-chapter notifications. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="ntfy"/>
+        </intent>
         <!-- "Continuar" opens the chapter's site in the browser. -->
         <intent>
             <action android:name="android.intent.action.VIEW"/>

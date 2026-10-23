@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { LibraryEntry, SaveLibraryInput } from '../shared/types'
+import { MAX_SOURCES } from '../shared/updates'
 import { findWork, formatOf, normalizeName, parseChapterName, withName, type Work, type WorkFormat } from '../shared/works'
 import { moveReading } from './reading'
 import { getSettings } from './settings'
@@ -127,7 +128,12 @@ export function setWorkNames(workId: string, names: string[]): Work[] {
   return works
 }
 
-/** Moves every chapter of `fromId` into `intoId`, which also takes all its names. */
+/** The work's pages on sites, checked for new chapters (shared/updates.ts). */
+export function saveWorkSources(workId: string, sources: string[]): void {
+  saveWorks(listWorks().map((w) => (w.id === workId ? { ...w, sources } : w)))
+}
+
+/** Moves every chapter of `fromId` into `intoId`, which also takes all its names (and sites). */
 export function mergeWorks(intoId: string, fromId: string): Work[] {
   if (intoId === fromId) return listWorks()
   for (const entry of listLibrary()) if (entry.workId === fromId) writeMeta({ ...readMeta(entry.id), workId: intoId })
@@ -135,7 +141,11 @@ export function mergeWorks(intoId: string, fromId: string): Work[] {
   const from = works.find((w) => w.id === fromId)
   const merged = works
     .filter((w) => w.id !== fromId)
-    .map((w) => (w.id === intoId && from ? from.names.reduce(withName, w) : w))
+    .map((w) => {
+      if (w.id !== intoId || !from) return w
+      const sources = [...new Set([...(w.sources ?? []), ...(from.sources ?? [])])].slice(0, MAX_SOURCES)
+      return { ...from.names.reduce(withName, w), ...(sources.length && { sources }) }
+    })
   saveWorks(merged)
   moveReading(fromId, intoId)
   return merged

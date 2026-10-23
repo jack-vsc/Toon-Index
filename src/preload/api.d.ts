@@ -18,6 +18,7 @@ import type {
 import type { DevicesStatus, PairingCode } from '../shared/devices'
 import type { HistoryWork, ReadingRecord } from '../shared/reading'
 import type { RemoteJob } from '../shared/remoteJobs'
+import type { UpdatesStatus } from '../shared/updates'
 import type { Work } from '../shared/works'
 
 export interface MangaApi {
@@ -75,6 +76,18 @@ export interface MangaApi {
     /** A new pairing code (and its QR code), good for ten minutes. */
     pairing(): Promise<PairingCode>
     revoke(id: string): Promise<DevicesStatus>
+  }
+  /** New chapters on the works' sites, checked every couple of hours. */
+  updates: {
+    status(): Promise<UpdatesStatus>
+    /** Checks every work's sites now; resolves when done. */
+    check(): Promise<void>
+    /** The work's pages on sites (up to three) to check. */
+    setSources(workId: string, sources: string[]): Promise<void>
+    /** Phone notifications through ntfy: on (with a new private topic) or off. */
+    setNtfy(enabled: boolean): Promise<UpdatesStatus>
+    /** Returns a function that stops listening. */
+    onChanged(callback: () => void): () => void
   }
   /** Chapters the phone asked this PC to translate. */
   remote: {

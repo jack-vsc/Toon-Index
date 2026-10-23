@@ -34,6 +34,28 @@ void main() {
     expect(statusText(library.views[1]), 'Parou no cap. 614 · há 3 dias');
   });
 
+  test('a work with a new chapter out comes first', () {
+    final json = {
+      'works': [
+        {'id': 'a', 'names': ['Solo Leveling'], 'createdAt': 0},
+        {'id': 'b', 'names': ['versatile mage'], 'createdAt': 0, 'format': 'novel'},
+      ],
+      'reading': [record('a', 54, 'read', at: now), record('b', 614, 'read', at: now - 86400000)],
+      'chapters': [],
+      'updates': [
+        {'workId': 'b', 'latest': 615, 'url': 'https://novel.site/versatile-mage/615', 'site': 'novel.site', 'checkedAt': now, 'work': 'Versatile Mage'},
+      ],
+      'ntfyTopic': 'manga-index-abc',
+    };
+    final updated = Library.fromJson(json);
+    expect(updated.views.map((v) => v.work.id), ['b', 'a']);
+    expect(updateText(updated.views.first.update!), '🆕 Cap. 615 saiu · novel.site');
+    expect(updated.ntfyTopic, 'manga-index-abc');
+    // A PC from before the checks sends neither.
+    expect(library.views.every((v) => v.update == null), isTrue);
+    expect(library.ntfyTopic, isNull);
+  });
+
   test('search by any name, ignoring accents and case', () {
     expect(library.views.first.matches('nivel'), isTrue);
     expect(library.views.first.matches('mage'), isFalse);

@@ -12,6 +12,8 @@ export interface Work {
   createdAt: number
   /** A novel shares its name with the manga made from it, but is read apart from it. Absent for comics. */
   format?: 'novel'
+  /** Up to three pages of the work on sites (its chapter list), checked for new chapters. */
+  sources?: string[]
 }
 
 export type WorkFormat = 'comic' | 'novel'

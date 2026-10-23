@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'browser_screen.dart';
 import 'models.dart';
@@ -53,6 +54,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _refresh();
   }
 
+  /// Subscribes the ntfy app to the PC's topic, so new chapters arrive even with the PC out of reach.
+  Future<void> _subscribe(String topic) async {
+    final messenger = ScaffoldMessenger.of(context);
+    var opened = false;
+    try {
+      opened = await launchUrl(Uri.parse('ntfy://ntfy.sh/$topic'), mode: LaunchMode.externalApplication);
+    } catch (_) {}
+    if (opened) return;
+    messenger.showSnackBar(SnackBar(
+      content: const Text('Instale o app ntfy e toque em 🔔 de novo.'),
+      action: SnackBarAction(
+        label: 'Play Store',
+        onPressed: () => launchUrl(Uri.parse('https://play.google.com/store/apps/details?id=io.heckel.ntfy'), mode: LaunchMode.externalApplication),
+      ),
+    ));
+  }
+
   Future<void> _unpair() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -77,6 +95,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       appBar: AppBar(
         title: const Text('Manga Index'),
         actions: [
+          if (_library?.ntfyTopic != null)
+            IconButton(
+              tooltip: 'Receber avisos de capítulo novo (app ntfy)',
+              icon: const Icon(Icons.notifications_active_outlined),
+              onPressed: () => _subscribe(_library!.ntfyTopic!),
+            ),
           IconButton(
             tooltip: 'Ler nos sites',
             icon: const Icon(Icons.public),
@@ -176,6 +200,14 @@ class _WorkTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(statusText(view), style: const TextStyle(color: Color(0xFF4CCF8A), fontSize: 13)),
+                    if (view.update != null)
+                      InkWell(
+                        onTap: () => onBrowse(view.update!.url),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(updateText(view.update!), style: const TextStyle(color: Color(0xFFFF8A5C), fontSize: 13, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
                     if (view.translated.isNotEmpty)
                       Text('${view.translated.length} traduzidos no PC', style: const TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
@@ -220,6 +252,9 @@ String statusText(WorkView view) {
   parts.add(timeAgo(shown.updatedAt));
   return parts.join(' · ');
 }
+
+/// "🆕 Cap. 92 saiu · mgread.io"
+String updateText(ChapterUpdate update) => '🆕 Cap. ${chapterLabel(update.latest)} saiu · ${update.site}';
 
 String timeAgo(int at) {
   final minutes = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(at)).inMinutes;

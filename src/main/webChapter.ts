@@ -9,7 +9,7 @@ import type { WebChapter, WebChapterProgress } from '../shared/types'
  */
 
 /** Separate cookie store, kept between runs so a site's checks are passed once. */
-const PARTITION = 'persist:web-chapters'
+export const PARTITION = 'persist:web-chapters'
 const LOAD_TIMEOUT_MS = 60_000
 /** A page still showing a bot check after this long needs the person to pass it in a visible window. */
 const CHALLENGE_WAIT_MS = 8_000
@@ -33,9 +33,7 @@ export async function fetchWebChapter(url: string, sender: WebContents): Promise
     if (!Object.keys(headers).some((k) => k.toLowerCase() === 'referer')) headers.Referer = url
     callback({ requestHeaders: headers })
   })
-  // Sites turn away browsers that announce themselves as Electron.
-  const userAgent = ses.getUserAgent().replace(/\s(Electron|manga-index)\/\S+/gi, '')
-  ses.setUserAgent(userAgent)
+  plainUserAgent(ses)
   const win = new BrowserWindow({
     show: false,
     width: 1100,
@@ -86,6 +84,11 @@ export function cancelWebChapter(): void {
   running = null
 }
 
+/** Sites turn away browsers that announce themselves as Electron. */
+export function plainUserAgent(ses: Electron.Session): void {
+  ses.setUserAgent(ses.getUserAgent().replace(/\s(Electron|manga-index)\/\S+/gi, ''))
+}
+
 function check(job: { cancelled: boolean }): void {
   if (job.cancelled) throw new Error('Cancelado.')
 }
@@ -94,7 +97,7 @@ function check(job: { cancelled: boolean }): void {
  * Loads the page; pages full of ads may never finish loading, so the document being ready is enough
  * (after a few seconds more for the reader's scripts). Fails only when the page itself cannot load.
  */
-function open(win: BrowserWindow, url: string): Promise<void> {
+export function open(win: BrowserWindow, url: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('O site demorou demais para abrir.')), LOAD_TIMEOUT_MS)
     const done = (err?: Error): void => {
@@ -120,11 +123,7 @@ async function passChallenge(
   job: { cancelled: boolean },
   progress: (p: WebChapterProgress) => void
 ): Promise<void> {
-  const challenged = async (): Promise<boolean> =>
-    !win.isDestroyed() &&
-    ((await win.webContents.executeJavaScript(
-      `/just a moment|um momento|attention required|verify you are human|checking your browser/i.test(document.title + ' ' + (document.body?.innerText ?? '').slice(0, 400))`
-    )) as boolean)
+  const challenged = (): Promise<boolean> => isChallenged(win)
   const started = Date.now()
   let shown = false
   while (await challenged()) {
@@ -140,6 +139,16 @@ async function passChallenge(
   if (shown) win.hide()
   // The real page loads after the check.
   if (shown || Date.now() - started > 1_500) await sleep(2_000)
+}
+
+/** Whether the page is a bot check (Cloudflare's "Just a moment…") rather than the site. */
+export async function isChallenged(win: BrowserWindow): Promise<boolean> {
+  return (
+    !win.isDestroyed() &&
+    ((await win.webContents.executeJavaScript(
+      `/just a moment|um momento|attention required|verify you are human|checking your browser/i.test(document.title + ' ' + (document.body?.innerText ?? '').slice(0, 400))`
+    )) as boolean)
+  )
 }
 
 /** Scrolls down a screen at a time until the page stops growing, so lazy images get their address. */
@@ -208,4 +217,4 @@ function cleanTitle(title: string): string {
     .slice(0, 120)
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))

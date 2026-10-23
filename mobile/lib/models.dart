@@ -89,20 +89,44 @@ class LibraryChapter {
       );
 }
 
+/// A chapter the PC found on one of a work's sites, past the last one read.
+class ChapterUpdate {
+  ChapterUpdate({required this.workId, required this.latest, required this.url, required this.site});
+
+  final String workId;
+  final double latest;
+  final String url;
+  final String site;
+
+  factory ChapterUpdate.fromJson(Map<String, dynamic> j) => ChapterUpdate(
+        workId: j['workId'] as String,
+        latest: (j['latest'] as num).toDouble(),
+        url: j['url'] as String,
+        site: j['site'] as String,
+      );
+}
+
 class Library {
-  Library({required this.works, required this.reading, required this.chapters});
+  Library({required this.works, required this.reading, required this.chapters, this.updates = const [], this.ntfyTopic});
 
   final List<Work> works;
   final List<ReadingRecord> reading;
   final List<LibraryChapter> chapters;
+  final List<ChapterUpdate> updates;
+
+  /// The ntfy.sh topic the PC sends new chapters to, while that is on.
+  final String? ntfyTopic;
 
   factory Library.fromJson(Map<String, dynamic> j) => Library(
         works: (j['works'] as List).map((w) => Work.fromJson(w as Map<String, dynamic>)).toList(),
         reading: (j['reading'] as List).map((r) => ReadingRecord.fromJson(r as Map<String, dynamic>)).toList(),
         chapters: (j['chapters'] as List).map((c) => LibraryChapter.fromJson(c as Map<String, dynamic>)).toList(),
+        // PCs from before new-chapter checks send neither.
+        updates: ((j['updates'] as List?) ?? []).map((u) => ChapterUpdate.fromJson(u as Map<String, dynamic>)).toList(),
+        ntfyTopic: j['ntfyTopic'] as String?,
       );
 
-  /// Works with something to show, the one read most recently first.
+  /// Works with something to show: those with a new chapter out first, then the one read most recently.
   List<WorkView> get views {
     final list = <WorkView>[];
     for (final work in works) {
@@ -110,20 +134,24 @@ class Library {
       final translated = chapters.where((c) => c.workId == work.id).toList()
         ..sort((a, b) => (a.chapter ?? double.infinity).compareTo(b.chapter ?? double.infinity));
       if (records.isEmpty && translated.isEmpty) continue;
-      list.add(WorkView(work, records, translated));
+      list.add(WorkView(work, records, translated, update: updates.where((u) => u.workId == work.id).firstOrNull));
     }
-    list.sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
+    int fresh(WorkView v) => v.update != null ? 1 : 0;
+    list.sort((a, b) => fresh(b) != fresh(a) ? fresh(b) - fresh(a) : b.lastActivity.compareTo(a.lastActivity));
     return list;
   }
 }
 
 /// A work with its readings and translated chapters.
 class WorkView {
-  WorkView(this.work, this.records, this.translated);
+  WorkView(this.work, this.records, this.translated, {this.update});
 
   final Work work;
   final List<ReadingRecord> records;
   final List<LibraryChapter> translated;
+
+  /// A chapter out past the last one read, if the PC found one.
+  final ChapterUpdate? update;
 
   int get lastActivity => [
         0,

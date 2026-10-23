@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DevicesStatus, PairingCode } from '../../../shared/devices'
+import type { UpdatesStatus } from '../../../shared/updates'
 
 interface Props {
   onClose: () => void
@@ -10,9 +11,11 @@ export function PhoneDialog({ onClose }: Props) {
   const [status, setStatus] = useState<DevicesStatus | null>(null)
   const [pairing, setPairing] = useState<PairingCode | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [updates, setUpdates] = useState<UpdatesStatus | null>(null)
 
   useEffect(() => {
     window.api.devices.status().then(setStatus)
+    window.api.updates.status().then(setUpdates)
     // Shows the phone once it paired, and counts the code's minutes down.
     const timer = setInterval(() => {
       setNow(Date.now())
@@ -107,6 +110,23 @@ export function PhoneDialog({ onClose }: Props) {
                 </li>
               ))}
             </ul>
+          </>
+        )}
+
+        {updates && (
+          <>
+            <h3>Avisos de capítulo novo no celular</h3>
+            <label className="row phone-toggle">
+              <input type="checkbox" checked={!!updates.ntfyTopic} onChange={async (e) => setUpdates(await window.api.updates.setNtfy(e.target.checked))} />
+              <span>Avisar no celular pelo ntfy, mesmo com o PC fora de alcance</span>
+            </label>
+            {updates.ntfyTopic && (
+              <p className="hint">
+                Instale o app <strong>ntfy</strong> (Play Store) e, no app Manga Index, toque em 🔔 na biblioteca para assinar. Ou assine
+                à mão o tópico <code>{updates.ntfyTopic}</code> no servidor ntfy.sh. Quem souber o tópico também vê os avisos: não o
+                compartilhe.
+              </p>
+            )}
           </>
         )}
 

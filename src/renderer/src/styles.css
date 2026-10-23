@@ -1375,3 +1375,24 @@ details pre {
   padding: 8px 0;
   border-bottom: 1px solid var(--border);
 }
+
+/* New chapters */
+
+.work-new {
+  color: var(--accent-2);
+  font-size: 13px;
+  margin: 2px 0;
+}
+
+.source-row {
+  margin-bottom: 6px;
+}
+
+.source-row input {
+  flex: 1;
+}
+
+.source-check {
+  font-size: 12px;
+  white-space: nowrap;
+}

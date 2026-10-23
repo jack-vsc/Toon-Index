@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ReadingRecord } from '../../../shared/reading'
 import { languageLabel, type LibraryEntry } from '../../../shared/types'
+import { MAX_SOURCES, sourceFromChapter, unreadUpdates, type UpdatesStatus, type WorkUpdate } from '../../../shared/updates'
 import { displayName, normalizeName, type Work } from '../../../shared/works'
 import { HistoryImport } from './HistoryImport'
 
@@ -8,6 +9,7 @@ interface Props {
   entries: LibraryEntry[]
   works: Work[]
   reading: ReadingRecord[]
+  updates: UpdatesStatus | null
   onOpen: (entry: LibraryEntry) => void
   onDownload: (entry: LibraryEntry) => void
   onDelete: (entry: LibraryEntry) => void
@@ -19,12 +21,13 @@ interface Props {
  * The library grouped by work: chapters translated here, in reading order, and where each work was
  * left in the browser. Works can be renamed, merged and chapters moved.
  */
-export function LibraryView({ entries, works, reading, onOpen, onDownload, onDelete, onWorksChanged }: Props) {
+export function LibraryView({ entries, works, reading, updates, onOpen, onDownload, onDelete, onWorksChanged }: Props) {
   const [search, setSearch] = useState('')
   const [importing, setImporting] = useState(false)
   const [help, setHelp] = useState(false)
 
   const query = normalizeName(search)
+  const fresh = new Map(unreadUpdates(updates?.updates ?? {}, reading).map((u) => [u.workId, u]))
   const all = works
     .map((work) => ({
       work,
@@ -34,8 +37,8 @@ export function LibraryView({ entries, works, reading, onOpen, onDownload, onDel
     .filter((g) => g.chapters.length > 0 || g.records.length > 0)
   const groups = all
     .filter((g) => !query || g.work.names.some((n) => normalizeName(n).includes(query)))
-    // The work read most recently first.
-    .sort((a, b) => lastActivity(b) - lastActivity(a))
+    // Works with a new chapter out first, then the one read most recently.
+    .sort((a, b) => Number(fresh.has(b.work.id)) - Number(fresh.has(a.work.id)) || lastActivity(b) - lastActivity(a))
   const shown = all.map((g) => g.work)
 
   return (
@@ -47,6 +50,14 @@ export function LibraryView({ entries, works, reading, onOpen, onDownload, onDel
         </button>
         <button className="secondary small" onClick={() => setHelp(!help)}>
           Extensão do navegador
+        </button>
+        <button
+          className="secondary small"
+          disabled={updates?.running}
+          onClick={() => window.api.updates.check()}
+          title={updates?.lastRun ? `Última checagem: ${new Date(updates.lastRun).toLocaleString('pt-BR')} (a cada 2 horas)` : 'Checa os sites de cada obra a cada 2 horas'}
+        >
+          {updates?.running ? 'Checando sites…' : 'Checar capítulos novos'}
         </button>
       </div>
       {help && <ExtensionHelp onClose={() => setHelp(false)} />}
@@ -66,6 +77,8 @@ export function LibraryView({ entries, works, reading, onOpen, onDownload, onDel
             work={work}
             chapters={chapters}
             records={records}
+            update={fresh.get(work.id) ?? null}
+            checks={updates?.checks ?? {}}
             others={shown.filter((w) => w.id !== work.id)}
             onOpen={onOpen}
             onDownload={onDownload}
@@ -113,6 +126,8 @@ function WorkSection({
   work,
   chapters,
   records,
+  update,
+  checks,
   others,
   onOpen,
   onDownload,
@@ -122,8 +137,11 @@ function WorkSection({
   work: Work
   chapters: LibraryEntry[]
   records: ReadingRecord[]
+  /** A chapter out past the last one read. */
+  update: WorkUpdate | null
+  checks: UpdatesStatus['checks']
   others: Work[]
-} & Omit<Props, 'entries' | 'works' | 'reading'>) {
+} & Omit<Props, 'entries' | 'works' | 'reading' | 'updates'>) {
   const [editing, setEditing] = useState(false)
   const [open, setOpen] = useState(chapters.length > 0)
   const aliases = work.names.slice(1)
@@ -148,6 +166,14 @@ function WorkSection({
             </div>
           )}
           {status && <div className="work-reading">{status.text}</div>}
+          {update && (
+            <div className="work-new">
+              🆕 Capítulo {update.latest} saiu em {update.site}{' '}
+              <button className="link" onClick={() => window.open(update.url)}>
+                abrir
+              </button>
+            </div>
+          )}
           {chapters.length > 0 && (
             <div className="work-count">
               {chapters.length} {chapters.length === 1 ? 'capítulo traduzido' : 'capítulos traduzidos'}
@@ -170,7 +196,15 @@ function WorkSection({
         </div>
       </div>
 
-      {editing && <WorkEditor work={work} others={others} hasReading={records.length > 0} onDone={() => (setEditing(false), onWorksChanged())} />}
+      {editing && (
+        <WorkEditor
+          work={work}
+          others={others}
+          records={records}
+          checks={checks}
+          onDone={() => (setEditing(false), onWorksChanged())}
+        />
+      )}
 
       {open && records.length > 0 && (
         <div className="reading-chips">
@@ -302,8 +336,24 @@ function timeAgo(at: number): string {
  * Edits the names a work is recognized by, merges another work (same title in another language/site)
  * into it, and marks chapters read somewhere the app could not see.
  */
-function WorkEditor({ work, others, hasReading, onDone }: { work: Work; others: Work[]; hasReading: boolean; onDone: () => void }) {
+function WorkEditor({
+  work,
+  others,
+  records,
+  checks,
+  onDone
+}: {
+  work: Work
+  others: Work[]
+  records: ReadingRecord[]
+  checks: UpdatesStatus['checks']
+  onDone: () => void
+}) {
+  const hasReading = records.length > 0
   const [text, setText] = useState(work.names.join('\n'))
+  const [sources, setSources] = useState<string[]>(work.sources ?? [])
+  // The work's page on each site it was read on, from the chapters' links.
+  const suggested = [...new Set(records.map((r) => sourceFromChapter(r.url)).filter((s): s is string => !!s))].filter((s) => !sources.includes(s))
   const [mergeId, setMergeId] = useState('')
   const [readUpTo, setReadUpTo] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -326,6 +376,16 @@ function WorkEditor({ work, others, hasReading, onDone }: { work: Work; others: 
     if (!confirm(`Juntar "${displayName(other.names[0])}" com esta obra? Os capítulos e os nomes dela passam para esta.`)) return
     await window.api.works.merge(work.id, other.id)
     onDone()
+  }
+
+  async function saveSources(next: string[]) {
+    setError(null)
+    try {
+      await window.api.updates.setSources(work.id, next)
+      setSources(next)
+    } catch (err) {
+      setError(String((err as Error).message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    }
   }
 
   async function markRead() {
@@ -353,6 +413,43 @@ function WorkEditor({ work, others, hasReading, onDone }: { work: Work; others: 
       <div className="row">
         <button onClick={save}>Salvar nomes</button>
       </div>
+
+      <label className="field-label" style={{ marginTop: 14 }}>
+        Sites para avisar de capítulo novo (até {MAX_SOURCES}): a página da obra, a que lista os capítulos
+      </label>
+      {sources.map((source, i) => {
+        const check = checks[source]
+        return (
+          <div key={i} className="row source-row">
+            <input
+              type="url"
+              value={source}
+              onChange={(e) => setSources(sources.map((s, j) => (j === i ? e.target.value : s)))}
+              onBlur={() => saveSources(sources)}
+            />
+            <button className="secondary small" onClick={() => saveSources(sources.filter((_s, j) => j !== i))}>
+              Tirar
+            </button>
+            {check && (
+              <span className={check.error ? 'error source-check' : 'hint source-check'} title={check.error}>
+                {check.error ? 'falhou' : `cap. ${check.latest}`} · {new Date(check.checkedAt).toLocaleString('pt-BR')}
+              </span>
+            )}
+          </div>
+        )
+      })}
+      {sources.length < MAX_SOURCES && (
+        <div className="row">
+          <button className="secondary small" onClick={() => setSources([...sources, ''])}>
+            Adicionar site
+          </button>
+          {suggested.slice(0, MAX_SOURCES - sources.length).map((s) => (
+            <button key={s} className="secondary small" title={s} onClick={() => saveSources([...sources, s])}>
+              + {new URL(s).hostname.replace(/^www\./, '')}
+            </button>
+          ))}
+        </div>
+      )}
 
       <label className="field-label" style={{ marginTop: 14 }}>
         Leu em outro lugar (no celular, por exemplo)?

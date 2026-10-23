@@ -3,6 +3,7 @@ import type { AppError } from '../../shared/errors'
 import { activeProfile, profileReady, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
 import type { ReadingRecord } from '../../shared/reading'
 import type { RemoteJob } from '../../shared/remoteJobs'
+import type { UpdatesStatus } from '../../shared/updates'
 import type { Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
 import { LibraryView } from './components/LibraryView'
@@ -58,6 +59,7 @@ export default function App() {
   const [library, setLibrary] = useState<LibraryEntry[]>([])
   const [works, setWorks] = useState<Work[]>([])
   const [reading, setReading] = useState<ReadingRecord[]>([])
+  const [updates, setUpdates] = useState<UpdatesStatus | null>(null)
   const [adminOpen, setAdminOpen] = useState(false)
   const [aiMonitorOpen, setAiMonitorOpen] = useState(false)
   const [phoneOpen, setPhoneOpen] = useState(false)
@@ -72,8 +74,14 @@ export default function App() {
   useEffect(() => {
     window.api.getSettings().then(setSettings)
     refreshLibrary()
+    window.api.updates.status().then(setUpdates)
+    const stopUpdates = window.api.updates.onChanged(() => window.api.updates.status().then(setUpdates))
     // Chapters read in the browser arrive while the app is open (and may bring new works).
-    return window.api.reading.onChanged(refreshLibrary)
+    const stopReading = window.api.reading.onChanged(refreshLibrary)
+    return () => {
+      stopUpdates()
+      stopReading()
+    }
   }, [])
 
   // Listing the chapters indexes old ones into works, so works are read after it.
@@ -486,6 +494,7 @@ export default function App() {
                   entries={library}
                   works={works}
                   reading={reading}
+                  updates={updates}
                   onOpen={openFromLibrary}
                   onDownload={downloadEntry}
                   onDelete={deleteEntry}
