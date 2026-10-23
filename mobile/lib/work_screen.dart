@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import 'api.dart';
+import 'browser_screen.dart';
 import 'downloads.dart';
 import 'library_screen.dart';
 import 'models.dart';
@@ -106,7 +105,9 @@ class _WorkScreenState extends State<WorkScreen> {
                         ? '${chapterLabel(r.chapter)} ✓'
                         : '${chapterLabel(r.chapter)} · ${r.progress != null ? '${(r.progress! * 100).round()}%' : '…'}'),
                     labelStyle: TextStyle(color: r.read ? const Color(0xFF4CCF8A) : const Color(0xFFFF8A5C)),
-                    onPressed: r.url.isEmpty ? null : () => launchUrl(Uri.parse(r.url), mode: LaunchMode.externalApplication),
+                    onPressed: r.url.isEmpty
+                        ? null
+                        : () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: r.url))),
                   ),
               ],
             ),

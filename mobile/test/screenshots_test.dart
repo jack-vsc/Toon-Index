@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:manga_index/api.dart';
+import 'package:manga_index/browser_screen.dart';
 import 'package:manga_index/downloads.dart';
 import 'package:manga_index/models.dart';
 import 'package:manga_index/reader_screen.dart';
@@ -134,5 +135,40 @@ void main() {
     await shoot(tester, TranslateScreen(api: api), 'p3-translate');
     // The screen asks the PC again every few seconds.
     await tester.pumpWidget(const SizedBox());
+  }, skip: out == null);
+
+  testWidgets('browser start page', (tester) async {
+    tester.view.physicalSize = phone * ratio;
+    tester.view.devicePixelRatio = ratio;
+    WorkView view(String id, String name, String url, double chapter) => WorkView(
+        Work(id: id, names: [name], createdAt: 0, isNovel: false),
+        [ReadingRecord(workId: id, chapter: chapter, read: false, progress: 0.4, url: url, source: 'browser', updatedAt: now)],
+        []);
+    final recent = [
+      view('a', 'The Mythical Weapon Creation of the Regressed Genius Player', 'https://mgread.io/manga/the-mythical/chapter-90/', 90),
+      view('b', 'Solo Leveling: Ragnarok', 'https://asuracomic.net/series/solo-leveling-ragnarok/chapter/42', 42),
+      view('c', 'Overgeared', 'https://www.mgeko.cc/reader/en/overgeared-chapter-335/', 335),
+    ];
+    // The app bar as the browser shows it on a chapter it is following (the page itself is a WebView,
+    // which tests cannot draw).
+    final screen = Scaffold(
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: const TextField(
+          decoration: InputDecoration(hintText: 'Endereço do site', border: InputBorder.none, isDense: true),
+          style: TextStyle(fontSize: 14),
+        ),
+        actions: [
+          const Chip(
+            visualDensity: VisualDensity.compact,
+            label: Text('90 · 40%'),
+            labelStyle: TextStyle(color: Color(0xFFFF8A5C), fontSize: 12),
+          ),
+          IconButton(onPressed: () {}, icon: const Icon(Icons.more_vert)),
+        ],
+      ),
+      body: BrowserStartPage(recent: recent, onOpen: (_) {}),
+    );
+    await shoot(tester, screen, 'p4-browser');
   }, skip: out == null);
 }

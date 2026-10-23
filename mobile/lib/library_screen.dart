@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import 'api.dart';
+import 'browser_screen.dart';
 import 'models.dart';
 import 'translate_screen.dart';
 import 'work_screen.dart';
@@ -48,6 +47,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  /// The app's browser, at `url` or at its start page; back here, the readings it sent show up.
+  Future<void> _browse(String? url) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: url, recent: _library?.views ?? [])));
+    _refresh();
+  }
+
   Future<void> _unpair() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -72,6 +77,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
       appBar: AppBar(
         title: const Text('Manga Index'),
         actions: [
+          IconButton(
+            tooltip: 'Ler nos sites',
+            icon: const Icon(Icons.public),
+            onPressed: () => _browse(null),
+          ),
           PopupMenuButton<String>(
             onSelected: (_) => _unpair(),
             itemBuilder: (_) => [const PopupMenuItem(value: 'unpair', child: Text('Desparear do PC'))],
@@ -110,7 +120,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 padding: EdgeInsets.all(40),
                 child: Text('Nada por aqui ainda. O que você ler e traduzir aparece nesta lista.', textAlign: TextAlign.center),
               ),
-            for (final view in views) _WorkTile(view: view, api: widget.api, onChanged: _refresh),
+            for (final view in views) _WorkTile(view: view, api: widget.api, onChanged: _refresh, onBrowse: _browse),
           ],
         ),
       ),
@@ -119,11 +129,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
 }
 
 class _WorkTile extends StatelessWidget {
-  const _WorkTile({required this.view, required this.api, required this.onChanged});
+  const _WorkTile({required this.view, required this.api, required this.onChanged, required this.onBrowse});
 
   final WorkView view;
   final Api api;
   final Future<void> Function() onChanged;
+  final Future<void> Function(String url) onBrowse;
 
   @override
   Widget build(BuildContext context) {
@@ -174,7 +185,7 @@ class _WorkTile extends StatelessWidget {
                 IconButton(
                   tooltip: 'Continuar',
                   icon: const Icon(Icons.play_circle_fill, color: Color(0xFFFF5D73), size: 32),
-                  onPressed: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+                  onPressed: () => onBrowse(url),
                 ),
             ],
           ),

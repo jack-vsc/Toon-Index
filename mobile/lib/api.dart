@@ -153,9 +153,33 @@ class Api {
 
   Future<void> flushPending() async {
     final pending = await Store.loadPending();
-    if (pending.isEmpty) return;
-    await _post('/api/reading/app', pending);
-    await Store.removePending(pending);
+    if (pending.isNotEmpty) {
+      await _post('/api/reading/app', pending);
+      await Store.removePending(pending);
+    }
+    final reports = await Store.loadPending(Store.pendingReports);
+    if (reports.isNotEmpty) {
+      await _post('/api/reading', reports);
+      await Store.removePending(reports, Store.pendingReports);
+    }
+  }
+
+  /// A chapter page read in the app's browser (what the PC's extension sends): the PC answers with
+  /// the work and whether the chapter counts as read. Null when the PC could not be reached (the
+  /// report waits on the phone) or the page is not a chapter.
+  Future<Map<String, dynamic>?> reportBrowserReading(Map<String, dynamic> report) async {
+    try {
+      final response = await _send((url) => http.post(url('/api/reading'),
+          headers: {...authHeaders, 'Content-Type': 'application/json'}, body: jsonEncode(report)));
+      unawaited(flushPending().catchError((_) {}));
+      final body = jsonDecode(utf8.decode(response.bodyBytes));
+      return body is Map<String, dynamic> ? body : null;
+    } on UnpairedException {
+      rethrow;
+    } on ApiException {
+      await Store.addPending(report, Store.pendingReports, 'url');
+      return null;
+    }
   }
 
   Future<void> _post(String path, Object body) =>
@@ -202,6 +226,7 @@ class Store {
   static const _connection = 'connection';
   static const _library = 'library';
   static const _pending = 'pending';
+  static const pendingReports = 'pendingReports';
 
   static Future<Connection?> loadConnection() async {
     final text = (await SharedPreferences.getInstance()).getString(_connection);
@@ -224,25 +249,28 @@ class Store {
 
   static Future<void> saveLibrary(String json) async => (await SharedPreferences.getInstance()).setString(_library, json);
 
-  /// Readings not yet sent to the PC, oldest first.
-  static Future<List<Map<String, dynamic>>> loadPending() async {
-    final text = (await SharedPreferences.getInstance()).getString(_pending);
+  /// Readings not yet sent to the PC, oldest first: chapters of the library read in the reader
+  /// (the default list), or pages of sites read in the browser ([pendingReports]).
+  static Future<List<Map<String, dynamic>>> loadPending([String list = _pending]) async {
+    final text = (await SharedPreferences.getInstance()).getString(list);
     return text == null ? [] : (jsonDecode(text) as List).cast<Map<String, dynamic>>();
   }
 
-  static Future<void> addPending(Map<String, dynamic> reading) async {
-    final pending = await loadPending();
-    // Only the latest position of each chapter matters.
-    pending.removeWhere((r) => r['entryId'] == reading['entryId'] && (r['progress'] as num) <= (reading['progress'] as num));
+  /// Keeps a reading to send later; an older one of the same chapter (same `key`) is replaced.
+  static Future<void> addPending(Map<String, dynamic> reading, [String list = _pending, String key = 'entryId']) async {
+    final pending = await loadPending(list);
+    pending.removeWhere((r) => r[key] == reading[key] && (r['at'] as num) <= (reading['at'] as num));
     pending.add(reading);
-    await (await SharedPreferences.getInstance()).setString(_pending, jsonEncode(pending));
+    // A long time away from the PC must not fill the phone.
+    final kept = pending.length > 1000 ? pending.sublist(pending.length - 1000) : pending;
+    await (await SharedPreferences.getInstance()).setString(list, jsonEncode(kept));
   }
 
   /// Drops the readings just sent; ones added meanwhile stay.
-  static Future<void> removePending(List<Map<String, dynamic>> sent) async {
-    bool wasSent(Map<String, dynamic> r) => sent.any((s) => s['entryId'] == r['entryId'] && s['at'] == r['at']);
-    final pending = (await loadPending()).where((r) => !wasSent(r)).toList();
-    await (await SharedPreferences.getInstance()).setString(_pending, jsonEncode(pending));
+  static Future<void> removePending(List<Map<String, dynamic>> sent, [String list = _pending]) async {
+    bool wasSent(Map<String, dynamic> r) => sent.any((s) => s['at'] == r['at'] && s['entryId'] == r['entryId'] && s['url'] == r['url']);
+    final pending = (await loadPending(list)).where((r) => !wasSent(r)).toList();
+    await (await SharedPreferences.getInstance()).setString(list, jsonEncode(pending));
   }
 
   /// The page a chapter was left at in the phone's reader (0-based).

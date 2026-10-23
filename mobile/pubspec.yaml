@@ -41,6 +41,7 @@ dependencies:
   pdfx: ^2.11.0
   path_provider: ^2.1.6
   file_picker: ^13.1.0
+  webview_flutter: ^4.14.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -62,6 +63,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    # A copy of extension/content.js (test/tracker_copy_test.dart checks they match): the browser
+    # inside the app follows the reading the same way the PC's extension does.
+    - assets/reading_tracker.js
 
   # To add assets to your application, add an assets section, like this:
   # assets:
