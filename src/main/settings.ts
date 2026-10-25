@@ -60,6 +60,7 @@ function mergeSettings(raw: (Partial<AppSettings> & LegacySettings) | undefined,
     skipStart: raw?.skipStart ?? d.skipStart,
     skipEnd: raw?.skipEnd ?? d.skipEnd,
     gpuSharing: raw?.gpuSharing ?? d.gpuSharing,
+    aiDevice: raw?.aiDevice === 'cpu' ? 'cpu' : 'gpu',
     readerMode: raw?.readerMode ?? d.readerMode
   }
   const known = new Set(LANGUAGES.map((l) => l.value))

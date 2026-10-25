@@ -15,9 +15,12 @@ export async function runOpenAI(
   baseUrl: string,
   model: string,
   signal: AbortSignal,
-  temperature = 0.2
+  temperature = 0.2,
+  /** Ollama on this computer, kept off the graphics card. */
+  cpu = false
 ): Promise<string> {
   try {
+    if (cpu && isOllama(baseUrl)) return await requestOllama(prompt, req, baseUrl, model, signal, temperature)
     return await withRetries(prompt, req, apiKey, baseUrl, model, signal, temperature)
   } catch (err) {
     if (signal.aborted) throw new Error(CANCELLED)
@@ -122,6 +125,46 @@ async function request(
     throw new Error(`Resposta vazia da API (finish_reason: ${choice?.finish_reason ?? 'desconhecido'}): ${body.slice(0, 300)}`)
   }
   if (choice?.finish_reason === 'length') {
+    throw new TruncatedError(
+      `A resposta da IA foi cortada no limite de ${MAX_OUTPUT_TOKENS} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: ${content.slice(-200)}`,
+      content
+    )
+  }
+  return content
+}
+
+function isOllama(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).port === '11434'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Ollama's own API, which (unlike its OpenAI-compatible one) takes num_gpu: 0 keeps the whole model in
+ * the RAM, on the processor. Ollama loads the model again when this changes.
+ */
+async function requestOllama(prompt: string, req: TranslateRequest, baseUrl: string, model: string, signal: AbortSignal, temperature: number): Promise<string> {
+  const response = await net.fetch(`${new URL(baseUrl).origin}/api/chat`, {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      format: 'json',
+      options: { temperature, num_predict: MAX_OUTPUT_TOKENS, num_gpu: 0 },
+      messages: [{ role: 'user', content: prompt, images: req.images.map((img) => img.base64) }]
+    })
+  })
+  const body = await response.text()
+  if (!response.ok) throw new HttpError(response.status, body)
+  const data = JSON.parse(body) as { error?: string; message?: { content?: string }; done_reason?: string }
+  if (data.error) throw new HttpError(500, body)
+  const content = data.message?.content
+  if (!content) throw new Error(`Resposta vazia do Ollama: ${body.slice(0, 300)}`)
+  if (data.done_reason === 'length') {
     throw new TruncatedError(
       `A resposta da IA foi cortada no limite de ${MAX_OUTPUT_TOKENS} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: ${content.slice(-200)}`,
       content

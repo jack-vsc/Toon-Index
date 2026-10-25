@@ -1,3 +1,6 @@
+import { app } from 'electron'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
@@ -94,6 +97,18 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     const chapters = listLibrary().map(({ cover, ...entry }) => ({ ...entry, hasCover: !!cover }))
     const works = listWorks().map((w) => ({ ...w, hasCover: !!readWorkCover(w.id) }))
     return send(res, 200, { works, reading: listReading(), chapters, updates: newChapters(), ntfyTopic: updatesStatus().ntfyTopic })
+  }
+  // The newest phone app (scripts/phone-release.mjs): phones on an older build offer to update.
+  if (req.method === 'GET' && path === '/api/app') {
+    const release = phoneRelease()
+    return release ? send(res, 200, { version: release.version, build: release.build }) : send(res, 404, { error: 'Nenhum APK no PC.' })
+  }
+  if (req.method === 'GET' && path === '/api/app/apk') {
+    const release = phoneRelease()
+    if (!release) return send(res, 404, { error: 'Nenhum APK no PC.' })
+    res.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Length': statSync(release.file).size })
+    createReadStream(release.file).pipe(res)
+    return
   }
   const cover = /^\/api\/cover\/([a-f0-9-]+)$/i.exec(path)
   if (req.method === 'GET' && cover) {
@@ -234,6 +249,18 @@ function readBody(req: IncomingMessage): Promise<unknown> {
 function send(res: ServerResponse, status: number, body?: unknown): void {
   res.writeHead(status, body === undefined ? {} : { 'Content-Type': 'application/json' })
   res.end(body === undefined ? undefined : JSON.stringify(body))
+}
+
+/** The phone app the PC hands out, when one was built here. */
+function phoneRelease(): { version: string; build: number; file: string } | null {
+  const folder = app.isPackaged ? join(process.resourcesPath, 'phone') : join(app.getAppPath(), 'mobile', 'build')
+  try {
+    const { version, build } = JSON.parse(readFileSync(join(folder, 'MangaIndex.json'), 'utf8')) as { version: string; build: number }
+    const file = join(folder, 'MangaIndex.apk')
+    return existsSync(file) ? { version, build, file } : null
+  } catch {
+    return null
+  }
 }
 
 function sendBytes(res: ServerResponse, type: string, bytes: Buffer): void {

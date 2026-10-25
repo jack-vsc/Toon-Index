@@ -13,6 +13,7 @@ Protocol: one JSON request per line on stdin, one JSON answer per line on stdout
 Run with --test IMAGE to write the detection and a cleaned page next to it.
 """
 import json
+import os
 import sys
 import time
 import traceback
@@ -52,14 +53,18 @@ class Vision:
         from ultralytics import YOLO
 
         self.torch = torch
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # MI_VISION_DEVICE=cpu: the app's setting for computers without a graphics card.
+        on_gpu = torch.cuda.is_available() and os.environ.get("MI_VISION_DEVICE") != "cpu"
+        self.device = "cuda" if on_gpu else "cpu"
         t = time.time()
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if self.device == "cuda" else ["CPUExecutionProvider"]
         self.ctd = ort.InferenceSession(str(MODELS / "comictextdetector.pt.onnx"), providers=providers)
         self.bubble = YOLO(str(MODELS / "bubble-seg.pt"))
         self.lama = torch.jit.load(str(MODELS / "anime-manga-big-lama.pt"), map_location=self.device).eval()
         # The first runs on the GPU pick their kernels (seconds); do it before the first page arrives.
-        self.detect(np.full((1500, 1000, 3), 255, np.uint8))
+        # On the processor there is nothing to pick, and the run itself takes minutes.
+        if self.device == "cuda":
+            self.detect(np.full((1500, 1000, 3), 255, np.uint8))
         log(f"[vision] models loaded on {self.device} in {time.time() - t:.1f}s")
 
     # ------------------------------------------------------------------------------------------------

@@ -26,9 +26,9 @@ interface Props {
   onOpenSettings: () => void
 }
 
-const GPU_LABEL: Record<GpuSharing, string> = {
+export const GPU_LABEL: Record<GpuSharing, string> = {
   auto: 'Automático (separa com modelo local em GPU pequena)',
-  phased: 'Uma IA de cada vez (GPU com pouca memória)',
+  phased: 'Em fila, uma IA de cada vez (GPU com pouca memória, como 2 GB)',
   together: 'Tudo junto, página por página (GPU com bastante memória)'
 }
 

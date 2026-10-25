@@ -171,7 +171,7 @@ function callModel(
 ) {
   return profile.kind === 'cursor'
     ? runCursor(prompt, req, apiKey, profile.model, speed, signal)
-    : runOpenAI(prompt, req, apiKey, profile.baseUrl, profile.model, signal, temperature)
+    : runOpenAI(prompt, req, apiKey, profile.baseUrl, profile.model, signal, temperature, isLocalProfile(profile) && getSettings().aiDevice === 'cpu')
 }
 
 export function currentModelLabel(): string {

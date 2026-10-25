@@ -62,11 +62,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
     super.dispose();
   }
 
+  /// An address opens as it is ("mangadex.org" too); anything else is searched on Google.
   void _go(String text) {
     final typed = text.trim();
     if (typed.isEmpty) return;
-    final uri = Uri.tryParse(typed.contains('://') ? typed : 'https://$typed');
-    if (uri == null || !uri.host.contains('.')) return;
+    var uri = typed.contains(' ') ? null : Uri.tryParse(typed.contains('://') ? typed : 'https://$typed');
+    if (uri == null || !uri.host.contains('.')) {
+      uri = Uri.https('www.google.com', '/search', {'q': typed});
+    }
+    _addressFocus.unfocus();
     setState(() => (_started = true, _status = null));
     _address.text = uri.toString();
     _web.loadRequest(uri);
@@ -151,7 +155,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.go,
             style: const TextStyle(fontSize: 14),
-            decoration: const InputDecoration(hintText: 'Endereço do site', border: InputBorder.none, isDense: true),
+            decoration: InputDecoration(
+              hintText: 'Digite o site ou pesquise',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              prefixIconConstraints: const BoxConstraints(minWidth: 36),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.08),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              isDense: true,
+            ),
             onSubmitted: _go,
             onTap: () => _address.selection = TextSelection(baseOffset: 0, extentOffset: _address.text.length),
           ),
@@ -189,7 +202,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 }
 
-/// Before a site is open: the works to pick up where they were left.
+/// Sites offered on the start page besides those of the works read.
+const _knownSites = ['mangadex.org', 'mgeko.cc', 'mediocrescan.com'];
+
+/// Before a site is open: an address to type, the sites already used, and the works to pick up where
+/// they were left.
 class BrowserStartPage extends StatelessWidget {
   const BrowserStartPage({super.key, required this.recent, required this.onOpen});
 
@@ -199,10 +216,26 @@ class BrowserStartPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final withUrl = recent.where((v) => v.continueUrl != null).take(12).toList();
+    final sites = {
+      for (final view in withUrl) Uri.parse(view.continueUrl!).host.replaceFirst(RegExp(r'^www\.'), ''),
+      ..._knownSites,
+    }.where((h) => h.isNotEmpty).take(10);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('Leia nos sites por aqui: o capítulo é marcado como lido quando você chega ao fim, igual à extensão do PC.'),
+        const Text('Digite o endereço de qualquer site na barra de cima (ou o que quiser pesquisar) e leia por aqui: o '
+            'capítulo é marcado como lido quando você chega ao fim, igual à extensão do PC.'),
+        const SizedBox(height: 20),
+        Text('Sites', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final site in sites)
+              ActionChip(avatar: const Icon(Icons.public, size: 18), label: Text(site), onPressed: () => onOpen(site)),
+          ],
+        ),
         if (withUrl.isNotEmpty) ...[
           const SizedBox(height: 20),
           Text('Continuar de onde parou', style: Theme.of(context).textTheme.titleMedium),

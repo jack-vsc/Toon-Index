@@ -1,8 +1,23 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toAppError, type AppError } from '../../../shared/errors'
-import { isLocalProfile, type ApiProfile, type AppSettings, type ModelOption, type PublicSettings } from '../../../shared/types'
+import {
+  isLocalProfile,
+  type AiDevice,
+  type ApiProfile,
+  type AppSettings,
+  type GpuSharing,
+  type ModelOption,
+  type PublicSettings
+} from '../../../shared/types'
 import { cleanIpcError } from '../lib/pipeline'
 import { LanguageSelect } from './LanguageSelect'
+
+/** Short, to fit the half-width select; the hint below explains them. */
+const GPU_SHORT: Record<GpuSharing, string> = {
+  auto: 'Automático',
+  phased: 'Em fila: uma IA por vez',
+  together: 'Tudo junto (muita VRAM)'
+}
 
 interface Props {
   initial: PublicSettings
@@ -402,6 +417,34 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
           </div>
         </section>
 
+        <section className="grid-2">
+          <div>
+            <label className="field-label">Rodar as IAs deste PC em</label>
+            <select value={settings.aiDevice} onChange={(e) => patch({ aiDevice: e.target.value as AiDevice })}>
+              <option value="gpu">Placa de vídeo (GPU)</option>
+              <option value="cpu">Processador e RAM (sem GPU)</option>
+            </select>
+          </div>
+          <div>
+            <label className="field-label">Uso da GPU (padrão)</label>
+            <select value={settings.gpuSharing} onChange={(e) => patch({ gpuSharing: e.target.value as GpuSharing })}>
+              {(Object.keys(GPU_SHORT) as GpuSharing[]).map((g) => (
+                <option key={g} value={g}>
+                  {GPU_SHORT[g]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
+        <p className="hint">
+          No processador, achar os balões e apagar o texto leva minutos por página em vez de segundos, e um modelo de tradução
+          local (Ollama) fica ainda mais lento; a tradução por API não muda. Em fila, cada IA usa a placa sozinha (detecta o
+          capítulo todo, depois traduz, depois redesenha): serve para placas com pouca memória, como 2 a 4 GB. Automático usa
+          a fila com modelo local em placas de até 12 GB.
+        </p>
+
+        <BackgroundToggle />
+
         <p className="hint">Páginas ao mesmo tempo, velocidade e intervalo são escolhidos ao abrir cada PDF.</p>
 
         <p className="hint">
@@ -421,5 +464,26 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
         </div>
       </div>
     </div>
+  )
+}
+
+/** Kept on in the background, opening with Windows, so the phone can send chapters at any time. Saved at once. */
+function BackgroundToggle() {
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  useEffect(() => {
+    window.api.background.get().then(setEnabled)
+  }, [])
+  if (enabled === null) return null
+  return (
+    <label className="check-row">
+      <input type="checkbox" checked={enabled} onChange={async (e) => setEnabled(await window.api.background.set(e.target.checked))} />
+      <span>
+        <strong>Manter ligado em segundo plano e abrir com o Windows</strong>
+        <span className="hint">
+          O celular alcança o PC a qualquer hora e os capítulos que ele pedir são traduzidos mesmo com a janela fechada. Fechar a
+          janela deixa o app perto do relógio; para sair de vez, use o ícone de lá.
+        </span>
+      </span>
+    </label>
   )
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
+import 'app_update.dart';
 import 'browser_screen.dart';
 import 'models.dart';
 import 'reader_screen.dart';
@@ -45,6 +46,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     try {
       final library = (await widget.api.library()).withShelves(await Store.loadPending(Store.pendingShelves));
       if (mounted) setState(() => (_library = library, _error = null));
+      // The PC reached: a newer build of this app there is offered.
+      if (mounted) AppUpdate.offer(context, widget.api);
     } on UnpairedException {
       await Store.forgetConnection();
       widget.onUnpaired();

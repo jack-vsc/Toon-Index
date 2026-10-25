@@ -60,7 +60,12 @@ export interface AppSettings {
   skipEnd: number
   readerMode: ReaderMode
   gpuSharing: GpuSharing
+  /** Where the AIs on this computer run (vision models, and Ollama). */
+  aiDevice: AiDevice
 }
+
+/** 'cpu' runs them on the processor and RAM, for computers without a graphics card (several times slower). */
+export type AiDevice = 'gpu' | 'cpu'
 
 /**
  * How the AIs share the GPU during a run: 'phased' runs one at a time over the whole chapter (detection,
@@ -321,5 +326,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   skipStart: 0,
   skipEnd: 0,
   readerMode: 'scroll',
-  gpuSharing: 'auto'
+  gpuSharing: 'auto',
+  aiDevice: 'gpu'
 }

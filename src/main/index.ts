@@ -6,6 +6,16 @@ import type { AiStopTarget, ApiProfile, SaveLibraryInput, SaveSettingsInput, Tra
 import { aiStatus, gpuTotals, stopAi, stopMonitor } from './aiMonitor'
 import { registerEvalIpc } from './evaluate'
 import { snapshotRequested, takeSnapshot } from './snapshot'
+import {
+  announceDone,
+  applyBackground,
+  backgroundEnabled,
+  keepInBackground,
+  refreshTray,
+  setBackgroundEnabled,
+  singleInstance,
+  startedHidden
+} from './background'
 import { cancelWebChapter, fetchWebChapter, openSiteLogin } from './webChapter'
 import {
   addWorkSource,
@@ -44,7 +54,7 @@ import { checkNow, onUpdatesChanged, setNtfy, setWorkSources, startUpdates, stop
 import { READING_PORT, restartReadingServer, startReadingServer, stopReadingServer } from './readingServer'
 import { getPublicSettings, saveSettings } from './settings'
 import { cancelTranslations, listModels, testApi, translate } from './translate'
-import { detect as visionDetect, inpaint as visionInpaint, stopVision } from './vision'
+import { releaseVisionWhenIdle, detect as visionDetect, inpaint as visionInpaint, stopVision } from './vision'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -59,7 +69,7 @@ function createWindow(): void {
     // The app's own icon in the taskbar (the desktop shortcut runs Electron itself).
     ...(existsSync(windowIcon) && { icon: windowIcon }),
     backgroundColor: '#14151a',
-    show: !snapshotRequested(),
+    show: !snapshotRequested() && !startedHidden,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -78,6 +88,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  keepInBackground(win)
   if (snapshotRequested()) takeSnapshot(win)
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -92,6 +103,8 @@ function extensionDir(): string {
 
 function registerIpc(): void {
   ipcMain.handle('settings:get', () => getPublicSettings())
+  ipcMain.handle('background:get', () => backgroundEnabled())
+  ipcMain.handle('background:set', (_e, enabled: boolean) => setBackgroundEnabled(enabled, mainWindow))
 
   ipcMain.handle('settings:save', (_e, input: SaveSettingsInput) => saveSettings(input))
 
@@ -181,7 +194,12 @@ function registerIpc(): void {
 // Test runs (MI_USER_DATA) keep settings, library and caches in another folder, away from the real ones.
 if (process.env.MI_USER_DATA) app.setPath('userData', process.env.MI_USER_DATA)
 
+// One copy at a time: opening it again (the desktop shortcut) shows the one already in the background.
+const primary = singleInstance(() => mainWindow)
+if (!primary) app.quit()
+
 app.whenReady().then(() => {
+  if (!primary) return
   // Leftovers from requests interrupted by closing the app.
   rmSync(join(app.getPath('userData'), 'agent-runs'), { recursive: true, force: true })
   registerIpc()
@@ -190,6 +208,13 @@ app.whenReady().then(() => {
   onReadingChanged(() => mainWindow?.webContents.send('reading:changed'))
   requeueInterrupted()
   onRemoteJobsChanged(() => mainWindow?.webContents.send('remote:changed'))
+  // The phone's chapters finished with the window hidden are announced in Windows.
+  announceDone(listRemoteJobs(), mainWindow)
+  onRemoteJobsChanged(() => announceDone(listRemoteJobs(), mainWindow))
+  onRemoteJobsChanged(refreshTray)
+  // In the background only the server for the phone stays on: the vision models leave once unused.
+  releaseVisionWhenIdle(() => !(mainWindow?.isVisible() ?? false))
+  applyBackground(mainWindow)
   onUpdatesChanged(() => mainWindow?.webContents.send('updates:changed'))
   startUpdates()
   app.on('activate', () => {

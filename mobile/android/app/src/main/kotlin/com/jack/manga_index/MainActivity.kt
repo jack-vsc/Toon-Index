@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -30,6 +31,28 @@ class MainActivity : FlutterActivity() {
                 } else {
                     result.notImplemented()
                 }
+            }
+        }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "manga_index/app").setMethodCallHandler { call, result ->
+            when (call.method) {
+                // This build's number, to compare with the one the PC hands out.
+                "build" -> result.success(
+                    if (Build.VERSION.SDK_INT >= 28) packageManager.getPackageInfo(packageName, 0).longVersionCode
+                    else @Suppress("DEPRECATION") packageManager.getPackageInfo(packageName, 0).versionCode.toLong()
+                )
+                // Opens Android's installer on the update downloaded from the PC.
+                "install" -> try {
+                    val file = File(call.argument<String>("path")!!)
+                    val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+                    startActivity(Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "application/vnd.android.package-archive")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                    })
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("install", e.message, null)
+                }
+                else -> result.notImplemented()
             }
         }
         val tiles = PdfTiles()

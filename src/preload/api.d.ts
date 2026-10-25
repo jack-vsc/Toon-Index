@@ -23,6 +23,15 @@ import type { CatalogMatch, CatalogResult, CatalogSite } from '../shared/catalog
 import type { Shelf, Work } from '../shared/works'
 
 export interface MangaApi {
+  /** Kept on in the background (opens with Windows, closing hides it), for the phone to reach the PC. */
+  background: {
+    get(): Promise<boolean>
+    set(enabled: boolean): Promise<boolean>
+    /** The window was closed and hid (the app goes on in the background). */
+    onHidden(callback: () => void): () => void
+    /** "Pausar a tradução e liberar a GPU" in the icon's menu. */
+    onFreeGpu(callback: () => void): () => void
+  }
   getSettings(): Promise<PublicSettings>
   saveSettings(input: SaveSettingsInput): Promise<PublicSettings>
   /** `apiKey` is a key typed but not saved yet; the saved one is used otherwise. */

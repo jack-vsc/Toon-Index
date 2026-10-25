@@ -454,6 +454,26 @@ export default function App() {
   useEffect(() => {
     if (view !== 'result' && immersive) setImmersive(false)
   }, [view])
+  // The window closed and hid: a chapter left open would keep the phone's requests waiting (they run
+  // from the home screen).
+  useEffect(
+    () =>
+      window.api.background.onHidden(() => {
+        if (view === 'result' || (view === 'setup' && !running)) goHome()
+      }),
+    [view, running]
+  )
+  // Freeing the GPU from the icon by the clock: the queue's chapter is stopped by the pause above; one
+  // started here is cancelled.
+  useEffect(
+    () =>
+      window.api.background.onFreeGpu(() => {
+        if (remoteBusy.current) return
+        void window.api.web.cancel()
+        job.current?.cancel()
+      }),
+    []
+  )
   useEffect(() => {
     if (immersive && !document.fullscreenElement) void document.documentElement.requestFullscreen().catch(() => undefined)
     if (!immersive && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)

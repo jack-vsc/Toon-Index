@@ -3,6 +3,20 @@ import type { WebChapterProgress } from '../shared/types'
 import type { MangaApi } from './api'
 
 const api: MangaApi = {
+  background: {
+    get: () => ipcRenderer.invoke('background:get'),
+    set: (enabled) => ipcRenderer.invoke('background:set', enabled),
+    onHidden: (callback) => {
+      const listener = () => callback()
+      ipcRenderer.on('app:hidden', listener)
+      return () => ipcRenderer.removeListener('app:hidden', listener)
+    },
+    onFreeGpu: (callback) => {
+      const listener = () => callback()
+      ipcRenderer.on('app:free-gpu', listener)
+      return () => ipcRenderer.removeListener('app:free-gpu', listener)
+    }
+  },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (input) => ipcRenderer.invoke('settings:save', input),
   listModels: (profile, apiKey) => ipcRenderer.invoke('models:list', profile, apiKey),

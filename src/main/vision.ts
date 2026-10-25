@@ -5,7 +5,8 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
-import type { VisionDetection } from '../shared/types'
+import type { AiDevice, VisionDetection } from '../shared/types'
+import { getSettings } from './settings'
 
 /**
  * The Python vision server (scripts/manga_vision.py): text and speech-bubble detection, and LaMa
@@ -17,6 +18,18 @@ type Pending = { resolve: (value: any) => void; reject: (err: Error) => void }
 let proc: ChildProcessWithoutNullStreams | null = null
 let ready: Promise<void> | null = null
 let nextId = 1
+/** What the running server was started on; changing the setting restarts it. */
+let startedOn: AiDevice | null = null
+
+/** Unused this long while [releaseWhen] says so (the window hidden), the server ends, freeing GPU and RAM. */
+const IDLE_MS = 60_000
+let lastUsed = 0
+let idleCheck: NodeJS.Timeout | null = null
+let releaseWhen: () => boolean = () => false
+
+export function releaseVisionWhenIdle(when: () => boolean): void {
+  releaseWhen = when
+}
 const pending = new Map<number, Pending>()
 const workDir = join(tmpdir(), 'manga-vision')
 
@@ -30,8 +43,16 @@ function start(): Promise<void> {
   ready = new Promise<void>((resolve, reject) => {
     const script = join(process.cwd(), 'scripts', 'manga_vision.py')
     if (!existsSync(script)) return reject(new Error(`Script de visão não encontrado: ${script}`))
-    const child = spawn(pythonExe(), ['-u', script], { cwd: process.cwd(), windowsHide: true })
+    startedOn = getSettings().aiDevice
+    const env = { ...process.env, MI_VISION_DEVICE: startedOn }
+    const child = spawn(pythonExe(), ['-u', script], { cwd: process.cwd(), windowsHide: true, env })
     proc = child
+    idleCheck ??= setInterval(() => {
+      if (proc && !pending.size && Date.now() - lastUsed > IDLE_MS && releaseWhen()) {
+        console.log('[vision] unused in the background: stopped, freeing the GPU')
+        stopVision()
+      }
+    }, 20_000)
     let stderr = ''
     child.stderr.on('data', (d) => {
       const text = d.toString()
@@ -54,21 +75,26 @@ function start(): Promise<void> {
     })
     child.on('exit', (code) => {
       const err = new Error(`Servidor de visão encerrou (código ${code}). ${stderr.trim().split('\n').slice(-3).join(' ')}`)
+      reject(err)
+      // A server stopped on purpose may already have a successor running.
+      if (proc && proc !== child) return
       for (const p of pending.values()) p.reject(err)
       pending.clear()
       proc = null
       ready = null
-      reject(err)
     })
   })
   return ready
 }
 
 async function call(cmd: string, args: Record<string, unknown>): Promise<any> {
+  if (proc && startedOn !== getSettings().aiDevice && !pending.size) stopVision()
+  lastUsed = Date.now()
   await start()
   const id = nextId++
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject })
+    const done = (): void => void (lastUsed = Date.now())
+    pending.set(id, { resolve: (v) => (done(), resolve(v)), reject: (e) => (done(), reject(e)) })
     proc!.stdin.write(JSON.stringify({ id, cmd, ...args }) + '\n')
   })
 }
@@ -111,4 +137,6 @@ export function stopVision(): void {
   proc?.kill()
   proc = null
   ready = null
+  if (idleCheck) clearInterval(idleCheck)
+  idleCheck = null
 }

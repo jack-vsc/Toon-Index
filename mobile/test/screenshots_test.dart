@@ -191,8 +191,17 @@ void main() {
     final screen = Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: const TextField(
-          decoration: InputDecoration(hintText: 'Endereço do site', border: InputBorder.none, isDense: true),
+        title: TextField(
+          decoration: InputDecoration(
+            hintText: 'Digite o site ou pesquise',
+            prefixIcon: const Icon(Icons.search, size: 20),
+            prefixIconConstraints: const BoxConstraints(minWidth: 36),
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.08),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            isDense: true,
+          ),
           style: TextStyle(fontSize: 14),
         ),
         actions: [
