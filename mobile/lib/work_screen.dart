@@ -123,169 +123,249 @@ class _WorkScreenState extends State<WorkScreen> {
     }
   }
 
+  /// The chapter list: filtered by number, newest or oldest first.
+  String _chapterQuery = '';
+  bool _oldestFirst = false;
+
+  void _browse(String url) => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: url)));
+
   @override
   Widget build(BuildContext context) {
     final view = widget.view;
     final aliases = view.work.names.skip(1).map(displayName).toList();
     final missing = view.translated.where((c) => !_downloaded.contains(c.id)).toList();
+    final newest = view.newest;
+    final share = view.share;
+    final next = view.nextInLibrary;
+    final continueUrl = view.continueUrl;
+    final shelf = _shelf ?? (view.records.isNotEmpty ? 'reading' : null);
+    // Every chapter read or translated, the reading and the translation of each side by side.
+    final rows = <double, ({ReadingRecord? record, LibraryChapter? entry})>{};
+    for (final r in view.records) {
+      rows[r.chapter] = (record: r, entry: null);
+    }
+    for (final c in view.translated.where((c) => c.chapter != null)) {
+      rows[c.chapter!] = (record: rows[c.chapter!]?.record, entry: c);
+    }
+    final query = _chapterQuery.trim().replaceAll(',', '.');
+    final numbers = rows.keys.where((n) => query.isEmpty || chapterLabel(n).startsWith(query)).toList()
+      ..sort((a, b) => _oldestFirst ? a.compareTo(b) : b.compareTo(a));
+    final heading = Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800);
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(backgroundColor: Colors.transparent),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.only(bottom: 24),
         children: [
-          _Header(view: view, api: widget.api, aliases: aliases),
-          Row(children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: _shelf ?? '',
-                isDense: true,
-                decoration: const InputDecoration(labelText: 'Lista', contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-                items: [
-                  DropdownMenuItem(value: '', child: Text(view.records.isNotEmpty ? 'Lendo (automático)' : 'Em nenhuma lista')),
-                  for (final e in shelves.entries) DropdownMenuItem(value: e.key, child: Text(e.value)),
-                ],
-                onChanged: (v) => _setShelf(shelf: v == null || v.isEmpty ? null : v, clearShelf: v == null || v.isEmpty),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filledTonal(
-              tooltip: _favorite ? 'Tirar das favoritas' : 'Favoritar',
-              icon: Icon(_favorite ? Icons.star : Icons.star_border, color: _favorite ? const Color(0xFFFFC940) : null),
+          _Header(view: view, api: widget.api, aliases: aliases, shelf: shelf),
+          Wrap(spacing: 14, runSpacing: 4, children: [
+            if (newest != null) Text.rich(TextSpan(children: [TextSpan(text: chapterLabel(newest), style: const TextStyle(fontWeight: FontWeight.w800)), const TextSpan(text: ' capítulos')])),
+            if (view.translated.isNotEmpty)
+              Text.rich(TextSpan(children: [TextSpan(text: '${view.translated.length}', style: const TextStyle(fontWeight: FontWeight.w800)), const TextSpan(text: ' no PC')])),
+          ]),
+          const SizedBox(height: 4),
+          Text(statusText(view), style: const TextStyle(color: muted, fontSize: 13)),
+          const SizedBox(height: 14),
+          Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            if (next != null)
+              FilledButton.icon(
+                onPressed: () => _read(next),
+                icon: Icon(_downloaded.contains(next.id) ? Icons.offline_pin : Icons.play_arrow),
+                label: Text('${view.current != null || view.readUpTo != null ? 'Continuar' : 'Começar'}: cap. ${chapterLabel(next.chapter!)}'),
+              )
+            else if (continueUrl != null)
+              FilledButton.icon(onPressed: () => _browse(continueUrl), icon: const Icon(Icons.play_arrow), label: const Text('Continuar')),
+            if (next != null && continueUrl != null) OutlinedButton(onPressed: () => _browse(continueUrl), child: const Text('No site')),
+            if (view.update != null)
+              OutlinedButton(onPressed: () => _browse(view.update!.url), child: Text('Último · Cap. ${chapterLabel(view.update!.latest)}')),
+            if (view.update != null)
+              IconButton.outlined(tooltip: 'Baixar o capítulo novo para ler sem internet', icon: const Icon(Icons.download), onPressed: () => _downloadUpdate(view.update!)),
+            OutlinedButton.icon(
               onPressed: () => _setShelf(favorite: !_favorite),
+              icon: Icon(_favorite ? Icons.favorite : Icons.favorite_border, color: _favorite ? accent : null, size: 18),
+              label: Text(_favorite ? 'Favorita' : 'Favoritar'),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'A lista de leitura da obra',
+              onSelected: (v) => _setShelf(shelf: v.isEmpty ? null : v, clearShelf: v.isEmpty),
+              itemBuilder: (_) => [
+                PopupMenuItem(value: '', child: Text(view.records.isNotEmpty ? 'Lendo (automático)' : 'Em nenhuma lista')),
+                for (final e in shelves.entries) PopupMenuItem(value: e.key, child: Text(e.value)),
+              ],
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(99), border: Border.all(color: lineColor)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(_shelf != null ? shelves[_shelf]! : (view.records.isNotEmpty ? 'Lendo' : 'Status'), style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const Icon(Icons.expand_more, size: 18),
+                ]),
+              ),
             ),
           ]),
-          const SizedBox(height: 10),
-          Text(statusText(view), style: const TextStyle(color: readGreen)),
-          if (view.nextInLibrary != null) ...[
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: () => _read(view.nextInLibrary!),
-              icon: Icon(_downloaded.contains(view.nextInLibrary!.id) ? Icons.offline_pin : Icons.play_arrow),
-              label: Text('${view.current != null || view.readUpTo != null ? 'Continuar' : 'Começar'}: capítulo ${chapterLabel(view.nextInLibrary!.chapter!)}'),
-            ),
-          ],
-          if (view.update != null) ...[
-            const SizedBox(height: 12),
+          if (share != null && newest != null) ...[
+            const SizedBox(height: 14),
             Row(children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: view.update!.url))),
-                  icon: const Icon(Icons.fiber_new),
-                  label: Text('Ler o cap. ${chapterLabel(view.update!.latest)} em ${view.update!.site}'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.outlined(
-                tooltip: 'Baixar para ler sem internet',
-                icon: const Icon(Icons.download),
-                onPressed: () => _downloadUpdate(view.update!),
-              ),
+              Expanded(child: ProgressBar(share)),
+              const SizedBox(width: 12),
+              Text('${chapterLabel(view.readUpTo!)} de ${chapterLabel(newest)} lidos', style: const TextStyle(color: muted, fontSize: 12)),
             ]),
           ],
+          const SizedBox(height: 22),
+          _Panel(children: [
+            Row(children: [
+              Text('Capítulos', style: heading),
+              Text('  ${rows.length}', style: const TextStyle(color: muted)),
+              const Spacer(),
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(hintText: 'Nº', isDense: true, prefixIcon: Icon(Icons.search, size: 18)),
+                  onChanged: (q) => setState(() => _chapterQuery = q),
+                ),
+              ),
+              TextButton(
+                onPressed: () => setState(() => _oldestFirst = !_oldestFirst),
+                child: Text(_oldestFirst ? '↑ Antigos' : '↓ Recentes'),
+              ),
+            ]),
+            if (rows.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('Nenhum capítulo lido ou traduzido ainda.', style: TextStyle(color: muted))),
+            for (final n in numbers) _chapterRow(n, rows[n]!.record, rows[n]!.entry),
+            if (missing.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              TextButton.icon(
+                onPressed: _downloading.isEmpty ? _downloadAll : null,
+                icon: const Icon(Icons.download_for_offline),
+                label: Text('Baixar todos do PC para o celular (${missing.length})'),
+              ),
+            ],
+          ]),
           if (_phone.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            Text('No celular', style: Theme.of(context).textTheme.titleMedium),
-            for (final c in _phone)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.offline_pin, color: readGreen),
-                title: Text(c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title),
-                subtitle: Text('${c.pageCount} páginas · baixado do site no celular'),
-                trailing: IconButton(
-                  tooltip: 'Apagar do celular',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () async {
-                    await PhoneChapter.remove(c.id);
-                    await _refreshDownloads();
-                  },
-                ),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: c, chapters: _phone))),
-              ),
-          ],
-          if (view.records.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            Text('Capítulos lidos', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final r in view.records)
-                  ActionChip(
-                    label: Text(r.read
-                        ? '${chapterLabel(r.chapter)} ✓'
-                        : '${chapterLabel(r.chapter)} · ${r.progress != null ? '${(r.progress! * 100).round()}%' : '…'}'),
-                    labelStyle: TextStyle(color: r.read ? readGreen : accentSoft),
-                    onPressed: r.url.isEmpty
-                        ? null
-                        : () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: r.url))),
+            const SizedBox(height: 14),
+            _Panel(children: [
+              Text('No celular', style: heading),
+              for (final c in _phone)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.offline_pin, color: readGreen),
+                  title: Text(c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title),
+                  subtitle: Text('${c.pageCount} páginas · baixado do site no celular', style: const TextStyle(color: muted, fontSize: 12)),
+                  trailing: IconButton(
+                    tooltip: 'Apagar do celular',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () async {
+                      await PhoneChapter.remove(c.id);
+                      await _refreshDownloads();
+                    },
                   ),
-              ],
-            ),
-          ],
-          if (view.translated.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            Row(children: [
-              Expanded(child: Text('No PC', style: Theme.of(context).textTheme.titleMedium)),
-              if (missing.isNotEmpty)
-                TextButton.icon(
-                  onPressed: _downloading.isEmpty ? _downloadAll : null,
-                  icon: const Icon(Icons.download_for_offline),
-                  label: Text('Baixar todos (${missing.length})'),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: c, chapters: _phone))),
                 ),
             ]),
-            for (final c in view.translated)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: c.hasCover
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: Image.network('${widget.api.base}/api/cover/${c.id}',
-                            headers: widget.api.authHeaders, width: 40, height: 56, fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => const SizedBox(width: 40)),
-                      )
-                    : null,
-                title: Text(c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title),
-                subtitle: Text(c.downloaded
-                    ? '${c.pageCount} páginas · baixado do site'
-                    : c.translatedPages == c.pageCount
-                        ? '${c.pageCount} páginas · traduzido'
-                        : '${c.translatedPages} de ${c.pageCount} páginas traduzidas'),
-                trailing: _downloadButton(c),
-                onTap: () => _read(c),
-              ),
           ],
-          const SizedBox(height: 24),
-          Text('Leu em outro lugar?', style: Theme.of(context).textTheme.titleMedium),
-          Row(
-            children: [
+          const SizedBox(height: 14),
+          _Panel(children: [
+            Text('Informações', style: heading),
+            const SizedBox(height: 8),
+            _Info('Formato', view.work.isNovel ? 'Novel' : 'Mangá'),
+            _Info('Lista', shelf != null ? shelves[shelf]! : 'Nenhuma'),
+            if (newest != null) _Info('Capítulos', chapterLabel(newest)),
+            if (aliases.isNotEmpty) _Info('Outros nomes', aliases.join(' · ')),
+            const SizedBox(height: 12),
+            const Text('Leu em outro lugar?', style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Row(children: [
               Expanded(
                 child: TextField(
                   controller: _chapter,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Capítulo'),
+                  decoration: const InputDecoration(hintText: 'Capítulo', isDense: true),
                   onSubmitted: (_) => _markRead(),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               FilledButton.tonal(onPressed: _markRead, child: const Text('Marcar lido até ele')),
-            ],
-          ),
-          if (_message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!)),
+            ]),
+            if (_message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!)),
+          ]),
         ].map((w) => w is _Header ? w : Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: w)).toList(),
+      ),
+    );
+  }
+
+  /// A chapter as on the scans' title pages: its number big, its state, and reading it.
+  Widget _chapterRow(double n, ReadingRecord? record, LibraryChapter? entry) {
+    final read = record?.read == true;
+    final where = record != null
+        ? [if (record.url.isNotEmpty) Uri.tryParse(record.url)?.host.replaceFirst(RegExp(r'^www\.'), '') ?? '', timeAgo(record.updatedAt)].where((s) => s.isNotEmpty).join(' · ')
+        : entry != null
+            ? timeAgo(entry.createdAt)
+            : '';
+    return InkWell(
+      onTap: entry != null ? () => _read(entry) : record != null && record.url.isNotEmpty ? () => _browse(record.url) : null,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(children: [
+          SizedBox(
+            width: 52,
+            child: Text(chapterLabel(n), textAlign: TextAlign.center, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: read ? muted : null)),
+          ),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                Text('Capítulo ${chapterLabel(n)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                if (read) Tag('lido', color: readGreen.withValues(alpha: 0.16), textColor: readGreen),
+                if (record != null && !read) Tag(record.progress != null ? '${(record.progress! * 100).round()}%' : 'lendo', color: accent.withValues(alpha: 0.16), textColor: accentSoft),
+                if (entry != null) Tag(entry.downloaded ? 'baixado' : 'traduzido', color: accent.withValues(alpha: 0.16), textColor: accentSoft),
+              ]),
+              if (where.isNotEmpty) Text(where, style: const TextStyle(color: muted, fontSize: 12)),
+            ]),
+          ),
+          if (entry != null) _downloadButton(entry),
+        ]),
       ),
     );
   }
 }
 
-/// The work's cover over a blurred copy of it, its names and tags (MangaDex's title page).
+/// A rounded card on the page (the scans' chapter list and info boxes).
+class _Panel extends StatelessWidget {
+  const _Panel({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(16), border: Border.all(color: lineColor)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+      );
+}
+
+class _Info extends StatelessWidget {
+  const _Info(this.label, this.value);
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(width: 110, child: Text(label, style: const TextStyle(color: muted, fontSize: 13))),
+          Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
+        ]),
+      );
+}
+
+/// The work's cover over a blurred copy of it, its tags and names (the scans' title page).
 class _Header extends StatelessWidget {
-  const _Header({required this.view, required this.api, required this.aliases});
+  const _Header({required this.view, required this.api, required this.aliases, required this.shelf});
 
   final WorkView view;
   final Api api;
   final List<String> aliases;
+  final String? shelf;
 
   @override
   Widget build(BuildContext context) {
@@ -297,8 +377,10 @@ class _Header extends StatelessWidget {
           child: ClipRect(
             child: ImageFiltered(
               imageFilter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-              child: Image.network(cover,
-                  headers: api.authHeaders, fit: BoxFit.cover, color: Colors.black54, colorBlendMode: BlendMode.darken, errorBuilder: (_, _, _) => const SizedBox()),
+              child: ColorFiltered(
+                colorFilter: const ColorFilter.mode(Colors.black54, BlendMode.darken),
+                child: CoverImage(url: cover, api: api, fill: true),
+              ),
             ),
           ),
         ),
@@ -312,21 +394,21 @@ class _Header extends StatelessWidget {
       Padding(
         padding: EdgeInsets.fromLTRB(16, top, 16, 16),
         child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          SizedBox(width: 110, child: CoverImage(url: cover, api: api)),
+          SizedBox(width: 120, child: CoverImage(url: cover, api: api, radius: 12, title: view.work.name)),
           const SizedBox(width: 14),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(view.work.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, height: 1.15)),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                Tag(view.work.isNovel ? 'Novel' : 'Mangá'),
+                if (shelf != null) Tag(shelves[shelf]!, color: readGreen.withValues(alpha: 0.16), textColor: readGreen),
+                if (view.update != null) Tag('Novo · ${chapterLabel(view.update!.latest)}', color: accent),
+              ]),
+              const SizedBox(height: 8),
+              Text(view.work.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1.12)),
               if (aliases.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(aliases.join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
-              const SizedBox(height: 8),
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                Tag(view.work.isNovel ? 'NOVEL' : 'MANGÁ'),
-                if (view.translated.isNotEmpty) Tag(view.chapterCount),
-                if (view.update != null) Tag('NOVO · ${chapterLabel(view.update!.latest)}', color: accent),
-              ]),
             ]),
           ),
         ]),

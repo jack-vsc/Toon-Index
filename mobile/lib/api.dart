@@ -80,10 +80,10 @@ class Api {
   Map<String, String> get authHeaders => {'Authorization': 'Bearer ${connection.token}'};
 
   /// Sends the request to each address in turn until one answers.
-  Future<http.Response> _send(Future<http.Response> Function(Uri Function(String path) url) request) async {
+  Future<http.Response> _send(Future<http.Response> Function(Uri Function(String path) url) request, {Duration timeout = _timeout}) async {
     for (final host in connection.ordered) {
       try {
-        final response = await request((path) => Uri.parse('http://$host:${connection.port}$path')).timeout(_timeout);
+        final response = await request((path) => Uri.parse('http://$host:${connection.port}$path')).timeout(timeout);
         if (connection.lastHost != host) {
           connection.lastHost = host;
           await Store.saveConnection(connection);
@@ -183,6 +183,29 @@ class Api {
     if (response.statusCode != 200) throw ApiException(_error(response));
   }
 
+  /// The work looked up on the PC's catalog sites (MangaDex, mgeko), with covers to choose from.
+  Future<List<CatalogResult>> searchSites(String query) async {
+    final response = await _postFor('/api/works/search', {'query': query}, const Duration(seconds: 60));
+    return (jsonDecode(utf8.decode(response.bodyBytes)) as List).map((r) => CatalogResult.fromJson(r as Map<String, dynamic>)).toList();
+  }
+
+  /// Every chapter of the work on that site (`site` 'link' for a work's page on any site), in order.
+  /// Long lists come a page at a time, so this can take a few minutes.
+  Future<List<SiteChapterLink>> chapterList(String site, String url) async {
+    final response = await _postFor('/api/works/chapters', {'site': site, 'url': url}, const Duration(minutes: 6));
+    return (jsonDecode(utf8.decode(response.bodyBytes)) as List).map((c) => SiteChapterLink.fromJson(c as Map<String, dynamic>)).toList();
+  }
+
+  /// A range of chapters for the PC to translate (or download as they are) one at a time.
+  Future<void> queueBatch({required String work, required String site, required List<SiteChapterLink> chapters, required bool download, String? source}) =>
+      _post('/api/batch', {
+        'work': work,
+        'site': site,
+        'chapters': [for (final c in chapters) {'chapter': c.chapter, 'url': c.url}],
+        'download': download,
+        'source': ?source,
+      });
+
   Future<void> cancelJob(String id) => _post('/api/translate/cancel', {'id': id});
 
   /// Asks the PC to download a chapter already in Portuguese into its library, as it is.
@@ -261,8 +284,10 @@ class Api {
     }
   }
 
-  Future<void> _post(String path, Object body) =>
-      _send((url) => http.post(url(path), headers: {...authHeaders, 'Content-Type': 'application/json'}, body: jsonEncode(body)));
+  Future<void> _post(String path, Object body) => _postFor(path, body, _timeout);
+
+  Future<http.Response> _postFor(String path, Object body, Duration timeout) =>
+      _send((url) => http.post(url(path), headers: {...authHeaders, 'Content-Type': 'application/json'}, body: jsonEncode(body)), timeout: timeout);
 
   /// Trades the code shown on the PC for this phone's token.
   static Future<Connection> pair(PairingInfo info, String deviceName) async {

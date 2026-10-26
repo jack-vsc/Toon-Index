@@ -4,9 +4,11 @@ import { join } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
-import { listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover, setWorkShelf } from './library'
+import { addWorkSource, hasWorkCover, listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover, setWorkShelf } from './library'
 import { displayName, findWork, SHELVES, type Shelf } from '../shared/works'
-import { unreadUpdates } from '../shared/updates'
+import { unreadUpdates, type ChapterLink } from '../shared/updates'
+import { CATALOG_SITES, type CatalogSite } from '../shared/catalog'
+import { chapterList, searchCatalogToChoose } from './catalog'
 import { updatesStatus } from './updates'
 import { bookmarkPage, continueList, pageInfo } from './extensionApi'
 import { addBatch, addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs } from './remoteJobs'
@@ -96,7 +98,9 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   if (req.method === 'GET' && path === '/api/library') {
     // Covers go one by one (/api/cover/…), so the list stays small.
     const chapters = listLibrary().map(({ cover, ...entry }) => ({ ...entry, hasCover: !!cover }))
-    const works = listWorks().map((w) => ({ ...w, hasCover: !!readWorkCover(w.id) }))
+    // The newest chapter out on each work's sites too, for how far along the reading is.
+    const out = updatesStatus().updates
+    const works = listWorks().map((w) => ({ ...w, hasCover: hasWorkCover(w.id), latest: out[w.id]?.latest ?? null }))
     return send(res, 200, { works, reading: listReading(), chapters, updates: newChapters(), ntfyTopic: updatesStatus().ntfyTopic })
   }
   // The newest phone app (scripts/phone-release.mjs): phones on an older build offer to update.
@@ -150,6 +154,40 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     } catch (err) {
       return send(res, 400, { error: err instanceof TypeError ? 'Link inválido.' : (err as Error).message })
     }
+  }
+  // "Vários capítulos" from the phone: the work looked up on the sites, its chapters, and a range of them
+  // queued (translated, or downloaded as they are).
+  if (req.method === 'POST' && path === '/api/works/search') {
+    const { query } = (await readBody(req)) as { query?: unknown }
+    if (typeof query !== 'string' || !query.trim()) return send(res, 400, { error: 'Falta o nome da obra.' })
+    return send(res, 200, await searchCatalogToChoose(query))
+  }
+  if (req.method === 'POST' && path === '/api/works/chapters') {
+    const { site, url: page } = (await readBody(req)) as { site?: unknown; url?: unknown }
+    if (typeof page !== 'string' || (site !== 'link' && !(typeof site === 'string' && site in CATALOG_SITES))) {
+      return send(res, 400, { error: 'Falta o site ou o link da obra.' })
+    }
+    try {
+      return send(res, 200, await chapterList({ site: site as CatalogSite | 'link', url: page }))
+    } catch (err) {
+      return send(res, 400, { error: (err as Error).message })
+    }
+  }
+  if (req.method === 'POST' && path === '/api/batch') {
+    const { work, site, chapters, download, source } = (await readBody(req)) as {
+      work?: unknown
+      site?: unknown
+      chapters?: unknown
+      download?: unknown
+      source?: unknown
+    }
+    const valid = Array.isArray(chapters) && chapters.every((c) => typeof c?.chapter === 'number' && typeof c?.url === 'string')
+    if (typeof work !== 'string' || !work.trim() || typeof site !== 'string' || !valid) {
+      return send(res, 400, { error: 'Falta a obra, o site ou os capítulos.' })
+    }
+    const queue = addBatch(work, site, chapters as ChapterLink[], download === true, device.name)
+    if (typeof source === 'string') addWorkSource(work, source)
+    return send(res, 200, queue)
   }
   if (req.method === 'POST' && path === '/api/translate/pdf') {
     try {

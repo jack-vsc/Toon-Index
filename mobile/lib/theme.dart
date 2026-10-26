@@ -15,6 +15,7 @@ const readGreen = Color(0xFF4CCF8A);
 const background = Color(0xFF131315);
 const panel = Color(0xFF1E1E22);
 const muted = Color(0xFF9E9EA8);
+const lineColor = Color(0xFF33333A);
 
 ThemeData appTheme() {
   final scheme = ColorScheme.fromSeed(seedColor: accent, brightness: Brightness.dark, primary: accent, surface: panel);
@@ -22,13 +23,28 @@ ThemeData appTheme() {
     colorScheme: scheme,
     scaffoldBackgroundColor: background,
     appBarTheme: const AppBarTheme(backgroundColor: background, scrolledUnderElevation: 0),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: panel,
+      indicatorColor: accent.withValues(alpha: 0.18),
+      labelTextStyle: WidgetStateProperty.all(const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+    ),
+    // Round fields and buttons, as on the scans' pages.
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: panel,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(99), borderSide: const BorderSide(color: lineColor)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(99), borderSide: const BorderSide(color: lineColor)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(99), borderSide: const BorderSide(color: accent, width: 1.5)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    ),
+    filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(shape: const StadiumBorder())),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(shape: const StadiumBorder(), side: const BorderSide(color: lineColor))),
     useMaterial3: true,
   );
 }
 
-/// "CAP. 90 · MGREAD.IO": labels in small monospaced capitals.
-TextStyle monoLabel({Color color = muted, double size = 11}) =>
-    TextStyle(fontFamily: 'monospace', fontSize: size, letterSpacing: 0.6, color: color, fontWeight: FontWeight.w600);
+/// "CAP. 90 · MGREAD.IO": small spaced capitals for labels.
+TextStyle monoLabel({Color color = muted, double size = 11}) => TextStyle(fontSize: size, letterSpacing: 0.8, color: color, fontWeight: FontWeight.w700);
 
 /// The work's own cover (found on MangaDex or mgeko), or its latest translated chapter's.
 String? coverUrlOf(WorkView view, Api api) {
@@ -40,11 +56,17 @@ String? coverUrlOf(WorkView view, Api api) {
 /// A cover at 2:3, or a book where there is none. Kept on the phone once seen, so the library looks
 /// the same away from the PC; looked up again after a week (a work's cover can change).
 class CoverImage extends StatefulWidget {
-  const CoverImage({super.key, required this.url, required this.api, this.radius = 8});
+  const CoverImage({super.key, required this.url, required this.api, this.radius = 8, this.title, this.fill = false});
 
   final String? url;
   final Api api;
   final double radius;
+
+  /// Shown on the empty cover of a work none of the sites had a picture for.
+  final String? title;
+
+  /// Fills the box it is in (a background) instead of standing at 2:3.
+  final bool fill;
 
   @override
   State<CoverImage> createState() => _CoverImageState();
@@ -100,35 +122,114 @@ class _CoverImageState extends State<CoverImage> {
 
   @override
   Widget build(BuildContext context) {
-    final none = ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest, child: const Center(child: Text('📚', style: TextStyle(fontSize: 28))));
+    final title = widget.title;
+    final none = ColoredBox(
+      color: Colors.white.withValues(alpha: 0.06),
+      child: Center(
+        child: title == null
+            ? const Text('📚', style: TextStyle(fontSize: 28))
+            : Padding(
+                padding: const EdgeInsets.all(10),
+                child: Text(title, textAlign: TextAlign.center, maxLines: 5, overflow: TextOverflow.ellipsis, style: const TextStyle(color: muted, fontWeight: FontWeight.w700, fontSize: 13)),
+              ),
+      ),
+    );
     final url = widget.url;
+    final picture = url == null
+        ? none
+        : _network
+            ? Image.network(url, headers: widget.api.authHeaders, fit: BoxFit.cover, errorBuilder: (_, _, _) => none)
+            : _bytes != null
+                ? Image.memory(_bytes!, fit: BoxFit.cover, gaplessPlayback: true, errorBuilder: (_, _, _) => none)
+                : none;
+    if (widget.fill) return url == null ? const SizedBox() : SizedBox.expand(child: picture);
     return ClipRRect(
       borderRadius: BorderRadius.circular(widget.radius),
-      child: AspectRatio(
-        aspectRatio: 2 / 3,
-        child: url == null
-            ? none
-            : _network
-                ? Image.network(url, headers: widget.api.authHeaders, fit: BoxFit.cover, errorBuilder: (_, _, _) => none)
-                : _bytes != null
-                    ? Image.memory(_bytes!, fit: BoxFit.cover, gaplessPlayback: true, errorBuilder: (_, _, _) => none)
-                    : none,
-      ),
+      child: AspectRatio(aspectRatio: 2 / 3, child: picture),
     );
   }
 }
 
-/// A small mono tag, as on the sites' title pages.
+/// A small round tag, as on the scans' title pages.
 class Tag extends StatelessWidget {
-  const Tag(this.text, {super.key, this.color});
+  const Tag(this.text, {super.key, this.color, this.textColor});
 
   final String text;
   final Color? color;
+  final Color? textColor;
 
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(color: color ?? Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(5)),
-        child: Text(text, style: monoLabel(color: Colors.white, size: 10)),
+        decoration: BoxDecoration(color: color ?? Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(99)),
+        child: Text(text, style: TextStyle(color: textColor ?? Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+      );
+}
+
+/// A list to pick, with how many it holds: "Lendo 10".
+class Pill extends StatelessWidget {
+  const Pill({super.key, required this.label, required this.selected, required this.onTap, this.count});
+
+  final String label;
+  final int? count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(99),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: selected ? Colors.transparent : lineColor),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
+            if (count != null && count! > 0) ...[const SizedBox(width: 6), Text('$count', style: const TextStyle(fontSize: 12, color: muted))],
+          ]),
+        ),
+      );
+}
+
+/// Tabs underlined in orange when picked ("Tudo · Mangá · Novel").
+class UnderlineTabs extends StatelessWidget {
+  const UnderlineTabs({super.key, required this.tabs, required this.selected, required this.onSelected});
+
+  final Map<String, String> tabs;
+  final String selected;
+  final void Function(String key) onSelected;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: lineColor))),
+        child: Row(children: [
+          for (final t in tabs.entries)
+            InkWell(
+              onTap: () => onSelected(t.key),
+              child: Container(
+                margin: const EdgeInsets.only(right: 18),
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.key == selected ? accent : Colors.transparent, width: 2))),
+                child: Text(t.value, style: TextStyle(fontSize: 13, color: t.key == selected ? Colors.white : muted, fontWeight: FontWeight.w600)),
+              ),
+            ),
+        ]),
+      );
+}
+
+/// How far a work was read: a thin orange bar.
+class ProgressBar extends StatelessWidget {
+  const ProgressBar(this.share, {super.key, this.height = 4});
+
+  final double share;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+        borderRadius: BorderRadius.circular(height),
+        child: LinearProgressIndicator(value: share, minHeight: height, color: accent, backgroundColor: Colors.white.withValues(alpha: 0.08)),
       );
 }

@@ -1,5 +1,6 @@
 // Pictures of the screens without a phone or emulator: SCREENSHOTS=<folder> flutter test test/screenshots_test.dart
 // (PAGES=<folder with translated pages, pNN-after.png> for the reader). Skipped otherwise.
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -7,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:manga_index/api.dart';
 import 'package:manga_index/browser_screen.dart';
@@ -16,6 +19,8 @@ import 'package:manga_index/downloads.dart';
 import 'package:manga_index/library_screen.dart';
 import 'package:manga_index/models.dart';
 import 'package:manga_index/reader_screen.dart';
+import 'package:manga_index/batch_screen.dart';
+import 'package:manga_index/search_screen.dart';
 import 'package:manga_index/site_download.dart';
 import 'package:manga_index/theme.dart';
 import 'package:manga_index/translate_screen.dart';
@@ -38,22 +43,39 @@ Future<void> loadFonts() async {
 }
 
 
-Future<void> shoot(WidgetTester tester, Widget screen, String name) async {
-  final boundary = GlobalKey();
+final _boundary = GlobalKey();
+
+/// Draws `screen` as a phone shows it (after `act`, taps or typing on it) into `out/name.png`.
+Future<void> shoot(WidgetTester tester, Widget screen, String name, {Future<void> Function(WidgetTester tester)? act}) async {
   await tester.pumpWidget(RepaintBoundary(
-    key: boundary,
+    key: _boundary,
     child: MaterialApp(debugShowCheckedModeBanner: false, theme: appTheme(), home: screen),
   ));
+  if (act != null) {
+    await settle(tester);
+    await act(tester);
+  }
+  await settle(tester);
+  await capture(tester, name);
+}
+
+/// Lets requests, images and animations finish.
+Future<void> settle(WidgetTester tester) async {
+  for (var i = 0; i < 10; i++) {
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      // Images decode outside the fake clock.
+      for (final element in find.byType(Image).evaluate()) {
+        await precacheImage((element.widget as Image).image, element).catchError((_) {});
+      }
+    });
+    await tester.pump(const Duration(seconds: 1));
+  }
+}
+
+Future<void> capture(WidgetTester tester, String name) async {
   await tester.runAsync(() async {
-    // Images decode outside the fake clock.
-    for (final element in find.byType(Image).evaluate()) {
-      await precacheImage((element.widget as Image).image, element);
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 200));
-  });
-  await tester.pump(const Duration(seconds: 1));
-  await tester.runAsync(() async {
-    final render = boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final render = _boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final image = await render.toImage(pixelRatio: ratio);
     final png = await image.toByteData(format: ui.ImageByteFormat.png);
     await File('$out/$name.png').writeAsBytes(png!.buffer.asUint8List());
@@ -80,12 +102,49 @@ class FakeJobsApi extends Api {
 
 /// A library with new chapters out, instead of asking a PC.
 class FakeLibraryApi extends Api {
-  FakeLibraryApi(this.fake) : super(Connection(hosts: ['127.0.0.1'], port: 1, token: 'test'));
+  FakeLibraryApi(this.fake, {int port = 1}) : super(Connection(hosts: ['127.0.0.1'], port: port, token: 'test'));
 
   final Library fake;
 
   @override
   Future<Library> library() async => fake;
+}
+
+/// The phone's folders, in a folder of the test's.
+class FakePaths extends PathProviderPlatform with MockPlatformInterfaceMixin {
+  FakePaths(this.root);
+
+  final String root;
+
+  @override
+  Future<String?> getApplicationSupportPath() async => root;
+
+  @override
+  Future<String?> getApplicationDocumentsPath() async => root;
+
+  @override
+  Future<String?> getTemporaryPath() async => root;
+}
+
+/// The sites' answers for "Vários capítulos", instead of asking a PC.
+class FakeBatchApi extends Api {
+  FakeBatchApi({required int port, required this.thumb}) : super(Connection(hosts: ['127.0.0.1'], port: port, token: 'test'));
+
+  final String thumb;
+
+  @override
+  Future<List<CatalogResult>> searchSites(String query) async => [
+        CatalogResult(site: 'mangadex', matches: [
+          CatalogMatch(site: 'mangadex', title: query, url: 'https://mangadex.org/title/x', altNames: ['Hwasan Gwihwan', 'O Retorno da Seita do Monte Hua'], latest: 184, thumb: thumb),
+        ]),
+        CatalogResult(site: 'mgeko', matches: [
+          CatalogMatch(site: 'mgeko', title: query, url: 'https://www.mgeko.cc/manga/x/', altNames: [], latest: 184, thumb: thumb),
+        ]),
+      ];
+
+  @override
+  Future<List<SiteChapterLink>> chapterList(String site, String url) async =>
+      [for (var n = 1; n <= 184; n++) SiteChapterLink(chapter: n.toDouble(), url: 'https://mangadex.org/chapter/$n')];
 }
 
 void main() {
@@ -246,4 +305,126 @@ void main() {
     await shoot(tester, DownloadsScreen(api: api), 'p6-downloads');
     await shoot(tester, DataScreen(api: api), 'p7-data');
   }, skip: out == null);
+
+  // The collection, a work's page, the search and "Vários capítulos" with covers: COVERS=<folder of
+  // <id>.jpg>, the PC's work covers.
+  group('with covers', () {
+    final coversDir = Platform.environment['COVERS'];
+    late Api coverApi;
+    late Library library;
+    late Directory support;
+
+    setUpAll(() async {
+      if (out == null || coversDir == null) return;
+      // The covers as the phone keeps them once seen (theme.dart), so no request goes out.
+      support = Directory.systemTemp.createTempSync('mi-support');
+      Directory('${support.path}/covers').createSync();
+      for (final f in Directory(coversDir).listSync().whereType<File>()) {
+        f.copySync('${support.path}/covers/api-work-cover-${f.uri.pathSegments.last}');
+      }
+      final ids = Directory(coversDir).listSync().whereType<File>().map((f) => f.uri.pathSegments.last.replaceAll('.jpg', '')).toList()..sort();
+      coverApi = FakeLibraryApi(Library(works: [], reading: [], chapters: []));
+      Map<String, dynamic> read(String id, num chapter, int ago, {bool done = true, double? progress}) => {
+            'workId': id,
+            'chapter': chapter,
+            'status': done ? 'read' : 'reading',
+            'progress': progress ?? 1,
+            'url': 'https://mgread.io/manga/x/chapter-$chapter/',
+            'source': 'browser',
+            'updatedAt': now - ago,
+          };
+      final names = [
+        'Return of the Mount Hua Sect',
+        "Omniscient Reader's Viewpoint",
+        'Solo Leveling',
+        'The Mythical Weapon Creation of the Regressed Genius Player',
+        'The Max Level Hero Has Returned!',
+        'Nano Machine',
+        'The Greatest Estate Developer',
+        'Tower of God',
+      ];
+      library = Library.fromJson({
+        'works': [
+          for (final (i, name) in names.indexed)
+            {
+              'id': i < ids.length ? ids[i] : 'w$i',
+              'names': [name],
+              'createdAt': 0,
+              'hasCover': i < ids.length,
+              'latest': [184, 262, 200, 101, 251, 335, 223, 652][i],
+              if (i == 2) 'shelf': 'done',
+              if (i == 6 || i == 7) 'shelf': 'plan',
+              if (i < 3) 'favorite': true,
+            },
+          {'id': 'novel', 'names': ['Versatile Mage'], 'createdAt': 0, 'format': 'novel'},
+          {'id': 'none', 'names': ['Logando 10.000 Anos no Futuro'], 'createdAt': 0},
+        ],
+        'reading': [
+          for (final (i, chapter) in [120, 150, 200, 58, 30, 200, 60].indexed) read(i < ids.length ? ids[i] : 'w$i', chapter, 3600000 * (i + 1)),
+          read(ids.length > 3 ? ids[3] : 'w3', 59, 600000, done: false, progress: 0.3),
+          read('novel', 614, 86400000),
+          read('none', 90, 86400000 * 3),
+        ],
+        'chapters': [
+          for (final n in [53, 54, 55, 56, 57])
+            {
+              'id': 'c$n',
+              'title': 'cap $n',
+              'workId': ids.length > 3 ? ids[3] : 'w3',
+              'chapter': n,
+              'pageCount': 14,
+              'translatedPages': 14,
+              'createdAt': now - 86400000 * 20,
+            },
+        ],
+        'updates': [
+          {'workId': ids.first, 'latest': 184, 'url': 'https://mgeko.cc/x/chapter-184/', 'site': 'mgeko.cc', 'checkedAt': now},
+          {'workId': ids[1], 'latest': 262, 'url': 'https://mangadex.org/chapter/x', 'site': 'mangadex.org', 'checkedAt': now},
+        ],
+      });
+    });
+
+    setUp(() {
+      if (out == null || coversDir == null) return;
+      PathProviderPlatform.instance = FakePaths(support.path);
+    });
+
+    testWidgets('collection', (tester) async {
+      tester.view.physicalSize = phone * ratio;
+      tester.view.devicePixelRatio = ratio;
+      SharedPreferences.setMockInitialValues({});
+      final api = FakeLibraryApi(library);
+      await shoot(tester, LibraryScreen(api: api, onUnpaired: () {}, onConnect: () {}), 'm1-home');
+      await tester.tap(find.text('Biblioteca').last);
+      await settle(tester);
+      await capture(tester, 'm2-collection');
+    }, skip: out == null || coversDir == null);
+
+    testWidgets('work page', (tester) async {
+      tester.view.physicalSize = phone * ratio;
+      tester.view.devicePixelRatio = ratio;
+      Downloads.root = Directory.systemTemp.createTempSync('mi-work');
+      Directory('${Downloads.root!.path}/chapters').createSync();
+      final view = library.views.firstWhere((v) => v.work.name.startsWith('The Mythical'));
+      await shoot(tester, WorkScreen(view: view, api: coverApi), 'm3-work');
+    }, skip: out == null || coversDir == null);
+
+    testWidgets('search', (tester) async {
+      tester.view.physicalSize = phone * ratio;
+      tester.view.devicePixelRatio = ratio;
+      await shoot(tester, SearchScreen(api: coverApi, views: library.views), 'm4-search', act: (tester) async {
+        await tester.enterText(find.byType(TextField), 'the');
+      });
+    }, skip: out == null || coversDir == null);
+
+    testWidgets('several chapters', (tester) async {
+      tester.view.physicalSize = phone * ratio;
+      tester.view.devicePixelRatio = ratio;
+      final thumb = 'data:image/jpeg;base64,${base64Encode(File('$coversDir/${Directory(coversDir!).listSync().whereType<File>().first.uri.pathSegments.last}').readAsBytesSync())}';
+      final api = FakeBatchApi(port: 1, thumb: thumb);
+      await shoot(tester, BatchScreen(api: api, query: 'Return of the Mount Hua Sect'), 'm5-batch', act: (tester) async {
+        await tester.tap(find.text('Return of the Mount Hua Sect').last);
+      });
+    }, skip: out == null || coversDir == null);
+  });
 }

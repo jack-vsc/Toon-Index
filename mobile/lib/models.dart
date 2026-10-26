@@ -19,6 +19,7 @@ class Work {
     this.hasCover = false,
     this.shelf,
     this.favorite = false,
+    this.latest,
   });
 
   final String id;
@@ -35,10 +36,13 @@ class Work {
   final String? shelf;
   final bool favorite;
 
+  /// The newest chapter out on its sites, when the PC checked them.
+  final double? latest;
+
   String get name => displayName(names.first);
 
   Work withShelf({required String? shelf, required bool favorite}) =>
-      Work(id: id, names: names, createdAt: createdAt, isNovel: isNovel, hasCover: hasCover, shelf: shelf, favorite: favorite);
+      Work(id: id, names: names, createdAt: createdAt, isNovel: isNovel, hasCover: hasCover, shelf: shelf, favorite: favorite, latest: latest);
 
   factory Work.fromJson(Map<String, dynamic> j) => Work(
         id: j['id'] as String,
@@ -48,6 +52,7 @@ class Work {
         hasCover: j['hasCover'] == true,
         shelf: shelves.containsKey(j['shelf']) ? j['shelf'] as String : null,
         favorite: j['favorite'] == true,
+        latest: (j['latest'] as num?)?.toDouble(),
       );
 }
 
@@ -250,6 +255,32 @@ class WorkView {
     return translated.where((c) => c.chapter != null && c.chapter! > upTo).firstOrNull;
   }
 
+  /// The newest chapter known: out on its sites, translated, or read (a site may be behind the reading).
+  double? get newest {
+    final all = [?work.latest, ?update?.latest, ...translated.map((c) => c.chapter).whereType<double>(), ...records.map((r) => r.chapter)];
+    return all.isEmpty ? null : all.reduce((a, b) => a > b ? a : b);
+  }
+
+  /// How far the reading is, 0 to 1: the last chapter read out of the newest one; null before any.
+  double? get share {
+    final upTo = readUpTo;
+    final top = newest;
+    return upTo == null || top == null || top <= 0 ? null : (upTo / top).clamp(0.0, 1.0);
+  }
+
+  /// "Cap. 45 · 45% lido", "Concluído · Cap. 222", "Não lido" under a cover (as on the PC).
+  String get metaLine {
+    final upTo = readUpTo;
+    final listed = work.shelf != null && work.shelf != 'reading' ? shelves[work.shelf] : null;
+    final done = share;
+    return [
+      ?listed,
+      if (upTo != null) 'Cap. ${chapterLabel(upTo)}' else if (listed == null) records.isEmpty ? 'Não lido' : 'Lendo',
+      if (done != null && done < 1 && work.shelf != 'done') '${(done * 100).round()}% lido',
+      if (work.isNovel) 'Novel',
+    ].join(' · ');
+  }
+
   /// "5 TRADUZIDOS · 3 BAIXADOS".
   String get chapterCount {
     final downloaded = translated.where((c) => c.downloaded).length;
@@ -323,4 +354,56 @@ class RemoteJob {
         entryId: j['entryId'] as String?,
         updatedAt: (j['updatedAt'] as num).toInt(),
       );
+}
+
+/// A work found on one of the PC's catalog sites (src/shared/catalog.ts).
+class CatalogMatch {
+  CatalogMatch({required this.site, required this.title, required this.url, required this.altNames, this.latest, this.thumb});
+
+  final String site;
+  final String title;
+
+  /// The work's page there, the one that lists its chapters.
+  final String url;
+  final List<String> altNames;
+  final double? latest;
+
+  /// The cover as a data URL.
+  final String? thumb;
+
+  factory CatalogMatch.fromJson(Map<String, dynamic> j) => CatalogMatch(
+        site: j['site'] as String,
+        title: j['title'] as String,
+        url: j['url'] as String,
+        altNames: ((j['altNames'] as List?) ?? []).cast<String>(),
+        latest: (j['latest'] as num?)?.toDouble(),
+        thumb: j['thumb'] as String?,
+      );
+}
+
+/// What one site answered: its matches, or why it could not be searched.
+class CatalogResult {
+  CatalogResult({required this.site, required this.matches, this.error});
+
+  final String site;
+  final List<CatalogMatch> matches;
+  final String? error;
+
+  factory CatalogResult.fromJson(Map<String, dynamic> j) => CatalogResult(
+        site: j['site'] as String,
+        matches: (j['matches'] as List).map((m) => CatalogMatch.fromJson(m as Map<String, dynamic>)).toList(),
+        error: j['error'] as String?,
+      );
+}
+
+const catalogSites = {'mangadex': 'MangaDex', 'mgeko': 'mgeko'};
+
+/// A chapter of a work on a site, to translate or download.
+class SiteChapterLink {
+  SiteChapterLink({required this.chapter, required this.url});
+
+  final double chapter;
+  final String url;
+
+  factory SiteChapterLink.fromJson(Map<String, dynamic> j) => SiteChapterLink(chapter: (j['chapter'] as num).toDouble(), url: j['url'] as String);
 }

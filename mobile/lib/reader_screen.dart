@@ -56,6 +56,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Timer? _reportTimer;
   bool _bars = true;
 
+  LibraryChapter? get _previous {
+    final current = widget.chapter.chapter;
+    if (current == null) return null;
+    final before = widget.chapters.where((c) => c.chapter != null && c.chapter! < current).toList()
+      ..sort((a, b) => b.chapter!.compareTo(a.chapter!));
+    return before.firstOrNull;
+  }
+
   LibraryChapter? get _next {
     final current = widget.chapter.chapter;
     if (current == null) return null;
@@ -223,6 +231,38 @@ class _ReaderScreenState extends State<ReaderScreen> {
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: next, chapters: widget.chapters)));
   }
 
+  /// The chapters of the work in the library, to jump to one.
+  Future<void> _pickChapter() async {
+    final listed = widget.chapters.where((c) => c.chapter != null).toList()..sort((a, b) => b.chapter!.compareTo(a.chapter!));
+    final picked = await showModalBottomSheet<LibraryChapter>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E22),
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 2.6,
+          children: [
+            for (final c in listed)
+              FilledButton.tonal(
+                onPressed: () => Navigator.pop(context, c),
+                style: FilledButton.styleFrom(
+                  backgroundColor: c.id == widget.chapter.id ? const Color(0xFFFF6740) : null,
+                  padding: EdgeInsets.zero,
+                ),
+                child: Text('Cap. ${chapterLabel(c.chapter!)}'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null && picked.id != widget.chapter.id) _openNext(picked);
+  }
+
   @override
   void dispose() {
     _report();
@@ -238,6 +278,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final c = widget.chapter;
     final title = c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title;
     final next = _next;
+    final previous = _previous;
     return Scaffold(
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
@@ -246,9 +287,44 @@ class _ReaderScreenState extends State<ReaderScreen> {
         child: AnimatedOpacity(
           opacity: _bars ? 1 : 0,
           duration: const Duration(milliseconds: 150),
-          child: IgnorePointer(ignoring: !_bars, child: AppBar(title: Text(title), backgroundColor: Colors.black87)),
+          child: IgnorePointer(
+            ignoring: !_bars,
+            child: AppBar(
+              title: Text(title, style: const TextStyle(color: Color(0xFFFF6740), fontWeight: FontWeight.w800)),
+              backgroundColor: Colors.black87,
+            ),
+          ),
         ),
       ),
+      // The chapters around this one, at hand at the bottom while the bars show (as on the scans' reader).
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: c.chapter == null || _document == null
+          ? null
+          : AnimatedOpacity(
+              opacity: _bars ? 1 : 0,
+              duration: const Duration(milliseconds: 150),
+              child: IgnorePointer(
+                ignoring: !_bars,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xEB18181C),
+                    borderRadius: BorderRadius.circular(99),
+                    border: Border.all(color: const Color(0xFF33333A)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconButton(tooltip: 'Capítulo anterior', onPressed: previous == null ? null : () => _openNext(previous), icon: const Icon(Icons.chevron_left)),
+                    TextButton.icon(
+                      onPressed: _pickChapter,
+                      icon: const Icon(Icons.list, size: 18),
+                      label: Text('Cap. ${chapterLabel(c.chapter!)}'),
+                      style: TextButton.styleFrom(foregroundColor: Colors.white),
+                    ),
+                    IconButton(tooltip: 'Próximo capítulo', onPressed: next == null ? null : () => _openNext(next), icon: const Icon(Icons.chevron_right)),
+                  ]),
+                ),
+              ),
+            ),
       body: _error != null
           ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)))
           : _document == null
