@@ -9,8 +9,10 @@ import { canvasToBlob } from './pdf'
  */
 export async function webChapterToPdf(chapter: WebChapter): Promise<Uint8Array> {
   const pages: OutputPage[] = []
-  for (const bytes of chapter.images) {
-    const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]))
+  for (const [i, bytes] of chapter.images.entries()) {
+    const bitmap = await createImageBitmap(new Blob([bytes as BlobPart])).catch(() => {
+      throw new Error(`A página ${i + 1} do capítulo veio do site sem uma imagem que dê para abrir. Tente de novo.`)
+    })
     const { width, height } = bitmap
     let jpeg = bytes
     if (!(bytes[0] === 0xff && bytes[1] === 0xd8)) {

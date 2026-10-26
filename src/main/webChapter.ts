@@ -246,7 +246,8 @@ async function scrollToBottom(win: BrowserWindow, job: { cancelled: boolean }): 
  */
 const COLLECT = `(() => {
   const pick = (img) => {
-    const lazy = ['data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-cfsrc'].map((a) => img.getAttribute(a)).find((v) => v && !v.startsWith('data:image/gif'))
+    // A page not scrolled to in time still shows its placeholder (a grey SVG): its address is in one of these.
+    const lazy = ['data-src', 'data-lazy-src', 'data-original', 'data-original-src', 'data-url', 'data-cfsrc'].map((a) => img.getAttribute(a)).find((v) => v && !v.startsWith('data:image/'))
     const set = (img.getAttribute('data-srcset') || '').split(',').map((s) => s.trim().split(' ')[0]).filter(Boolean).pop()
     const src = lazy || set || img.currentSrc || img.src
     try { return src ? new URL(src.trim(), location.href).href : '' } catch { return '' }
@@ -254,7 +255,7 @@ const COLLECT = `(() => {
   const imgs = [...document.querySelectorAll('img')].map((img) => {
     const r = img.getBoundingClientRect()
     return { url: pick(img), w: Math.max(img.naturalWidth, r.width), h: Math.max(img.naturalHeight, r.height), shown: r.width }
-  }).filter((i) => /^(https?|data|blob):/.test(i.url) && !/\\.(svg|gif)(\\?|$)/i.test(i.url))
+  }).filter((i) => /^(https?|data|blob):/.test(i.url) && !/\\.(svg|gif)(\\?|$)/i.test(i.url) && !/^data:image\\/(svg|gif)/i.test(i.url))
   const widest = Math.max(0, ...imgs.map((i) => i.shown))
   const seen = new Set()
   const urls = imgs.filter((i) => i.shown >= widest * 0.6 && i.w >= 300 && i.h >= 200).map((i) => i.url).filter((u) => !seen.has(u) && seen.add(u))
