@@ -112,10 +112,11 @@ export default function App() {
   const profile = settings ? activeProfile(settings) : undefined
   const configured = !!settings && profileReady(profile, settings.hasKey)
 
-  // Chapters the phone asked for are translated one at a time, whenever this window is free (on the
-  // home screen, nothing else open).
+  // Chapters the phone or a range asked for are translated one at a time, behind whatever is on screen,
+  // whenever no other chapter is being translated (on the home screen or reading a saved chapter).
+  const free = !inBackground && (view === 'home' || (view === 'result' && !reader?.fromJob))
   useEffect(() => {
-    if (view !== 'home' || inBackground || !configured || !settings) return
+    if (!free || !configured || !settings) return
     let left = false
     const check = async () => {
       if (left || remoteBusy.current) return
@@ -136,7 +137,7 @@ export default function App() {
       left = true
       stop()
     }
-  }, [view, inBackground, configured, settings, remoteFinished])
+  }, [free, configured, settings, remoteFinished])
   const readerMode: ReaderMode = settings?.readerMode ?? 'scroll'
 
   // Pausing the queue stops the chapter it is on (runRemote puts it back in the queue). The local AIs
@@ -168,13 +169,17 @@ export default function App() {
   }))
   const readerPages = view === 'processing' ? jobPages : showOriginal ? originalPages : reader?.fromJob ? jobPages : pdfPages
 
-  /** Opens the chapter for setup; false (with the reason shown) when it could not be opened. */
-  async function openFile(selected: File, source?: string): Promise<boolean> {
+  /**
+   * Opens the chapter for setup; false (with the reason shown) when it could not be opened. One from the
+   * queue (`queued`) opens behind what is on screen.
+   */
+  async function openFile(selected: File, source?: string, queued = false): Promise<boolean> {
     if (!settings || !configured) {
       setSettingsOpen(true)
       return false
     }
-    if (behind.current) {
+    // One chapter at a time: the queue's (even while still downloading it) or the one left translating.
+    if ((behind.current || remoteBusy.current) && !queued) {
       setMessage('Um capítulo ainda está sendo traduzido: espere ele terminar, ou abra-o pela barra de cima e pare.')
       return false
     }
@@ -184,7 +189,7 @@ export default function App() {
     fileRef.current = { name: selected.name, bytes, source }
     setFile(fileRef.current)
     setSetupInfo(null)
-    setView('setup')
+    if (!queued) setView('setup')
 
     try {
       job.current = await TranslationJob.open(bytes, setPages)
@@ -194,7 +199,7 @@ export default function App() {
       return true
     } catch (err) {
       setMessage(`Não foi possível abrir o PDF: ${cleanIpcError(err)}`)
-      setView('home')
+      if (!queued) setView('home')
       return false
     }
   }
@@ -223,7 +228,9 @@ export default function App() {
         selected = new File([pdf as BlobPart], remote.name, { type: 'application/pdf' })
       }
       await update({ message: 'Traduzindo' })
-      if (!(await openFile(selected, remote.url))) throw new Error('Não foi possível abrir o PDF.')
+      // Behind what is on screen: the bar on top opens it.
+      toBackground(true)
+      if (!(await openFile(selected, remote.url, true))) throw new Error('Não foi possível abrir o PDF.')
       await startTranslation(defaultChoice(job.current!.numPages, current))
       if ((await window.api.remote.queue()).paused) throw new Paused()
       if (!savedEntry.current && job.current && job.current.translatedCount > 0) await finish()
@@ -278,8 +285,10 @@ export default function App() {
     if (!job.current || !settings) return
     const saved = await saveSettingsPatch(choice.options)
     if (!saved) return
-    setProcessingTab('read')
-    setView('processing')
+    if (!behind.current) {
+      setProcessingTab('read')
+      setView('processing')
+    }
     await job.current.select(choice.pages, choice.untranslated)
     await translate(saved.concurrency)
   }
