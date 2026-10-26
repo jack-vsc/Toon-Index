@@ -80,6 +80,11 @@ export default function App() {
   const [remoteFinished, setRemoteFinished] = useState(0)
   /** The library chapter the last finished translation was saved as. */
   const savedEntry = useRef<string | null>(null)
+  /** The chapter keeps translating while the rest of the app is used; a bar on top brings it back. */
+  const behind = useRef(false)
+  const [inBackground, setInBackground] = useState(false)
+  const shown = useRef({ view, reader })
+  shown.current = { view, reader }
 
   useEffect(() => {
     window.api.getSettings().then(setSettings)
@@ -110,7 +115,7 @@ export default function App() {
   // Chapters the phone asked for are translated one at a time, whenever this window is free (on the
   // home screen, nothing else open).
   useEffect(() => {
-    if (view !== 'home' || !configured || !settings) return
+    if (view !== 'home' || inBackground || !configured || !settings) return
     let left = false
     const check = async () => {
       if (left || remoteBusy.current) return
@@ -131,7 +136,7 @@ export default function App() {
       left = true
       stop()
     }
-  }, [view, configured, settings, remoteFinished])
+  }, [view, inBackground, configured, settings, remoteFinished])
   const readerMode: ReaderMode = settings?.readerMode ?? 'scroll'
 
   // Pausing the queue stops the chapter it is on (runRemote puts it back in the queue). The local AIs
@@ -167,6 +172,10 @@ export default function App() {
   async function openFile(selected: File, source?: string): Promise<boolean> {
     if (!settings || !configured) {
       setSettingsOpen(true)
+      return false
+    }
+    if (behind.current) {
+      setMessage('Um capítulo ainda está sendo traduzido: espere ele terminar, ou abra-o pela barra de cima e pare.')
       return false
     }
     setMessage(null)
@@ -220,7 +229,7 @@ export default function App() {
       if (!savedEntry.current && job.current && job.current.translatedCount > 0) await finish()
       if (!savedEntry.current) throw new Error(job.current?.stopReason?.message ?? 'Nenhuma página foi traduzida.')
       await update({ status: 'done', message: undefined, entryId: savedEntry.current })
-      goHome()
+      closeJob()
       setMessage(`${remote.batch ? 'Traduzido' : 'Pedido do celular traduzido'} e salvo na biblioteca: ${selected.name.replace(/\.pdf$/i, '')}`)
     } catch (err) {
       if (err instanceof Paused || (await window.api.remote.queue()).paused) {
@@ -230,7 +239,7 @@ export default function App() {
       } else {
         await update({ status: 'failed', message: cleanIpcError(err) })
       }
-      goHome()
+      closeJob()
     } finally {
       remoteBusy.current = false
       setRemoteJob(null)
@@ -317,6 +326,11 @@ export default function App() {
     })
     savedEntry.current = entry.id
     await refreshLibrary()
+    if (behind.current) {
+      setMessage(`Capítulo salvo na biblioteca: ${current.name.replace(/\.pdf$/i, '')}`)
+      closeJob()
+      return
+    }
     setReader({ title: current.name, translated: pdf, original: current.bytes, libraryId: entry.id, fromJob: true })
     setShowOriginal(false)
     setMessage('Capítulo salvo na biblioteca.')
@@ -325,8 +339,10 @@ export default function App() {
 
   async function openFromLibrary(entry: LibraryEntry) {
     setMessage(null)
-    disposeJob()
-    setPages([])
+    if (!behind.current) {
+      disposeJob()
+      setPages([])
+    }
     let translated: Uint8Array
     try {
       translated = await window.api.library.pdf(entry.id, 'translated')
@@ -380,16 +396,43 @@ export default function App() {
     job.current = null
   }
 
+  /** A chapter still translating stays behind the home screen; anything else open is closed. */
   function goHome() {
+    if (running || behind.current) {
+      toBackground(true)
+      setReader(null)
+      setView('home')
+      return
+    }
+    closeJob()
+  }
+
+  function toBackground(on: boolean) {
+    behind.current = on
+    setInBackground(on)
+  }
+
+  /** Back to the chapter translating behind the rest. */
+  function showJob() {
+    toBackground(false)
+    setReader(null)
+    setView('processing')
+  }
+
+  /** Drops the chapter being translated, and goes home unless a library chapter was opened over it. */
+  function closeJob() {
     disposeJob()
     if (setupInfo?.cover) URL.revokeObjectURL(setupInfo.cover)
     setFile(null)
     setPages([])
-    setReader(null)
     setSetupInfo(null)
     setRunning(false)
     setStopping(false)
     setStopReason(null)
+    toBackground(false)
+    const { view: now, reader: open } = shown.current
+    if (now === 'result' && open && !open.fromJob) return
+    setReader(null)
     setView('home')
   }
 
@@ -608,7 +651,7 @@ export default function App() {
               {reader.translated && <button className="secondary" title="Salvar o PDF do capítulo" onClick={() => download(reader.translated!, reader.title)}>⬇ PDF</button>}
             </>
           )}
-          <button className="secondary" onClick={goHome} disabled={running}>
+          <button className="secondary" onClick={goHome} title={running ? 'A tradução continua; volte a ela pela barra de cima' : undefined}>
             Início
           </button>
           <button className="icon" title="Configurações" onClick={() => setSettingsOpen(true)}>
@@ -658,7 +701,20 @@ export default function App() {
             </div>
           )}
 
-          {queue && <BatchBar queue={queue} running={remoteJob} />}
+          {inBackground && !remoteJob?.batch && (
+            <div className="banner batch-bar">
+              <span>
+                {running ? '🈂 Traduzindo' : '⏸ Parado:'} {file?.name.replace(/\.pdf$/i, '')} · {finished} de {toTranslate} páginas
+                {failed > 0 ? ` · ${failed} com erro` : ''}
+              </span>
+              <span className="batch-bar-buttons">
+                <button className="small" onClick={showJob}>
+                  Abrir
+                </button>
+              </span>
+            </div>
+          )}
+          {queue && <BatchBar queue={queue} running={remoteJob} onOpen={inBackground ? showJob : undefined} />}
 
           {message && (
             <div className="banner" onClick={() => setMessage(null)}>
@@ -928,7 +984,7 @@ class Paused extends Error {}
  * The ranges of chapters being translated: which one now, how many wait, and pausing (the chapter
  * running goes back to the queue and the GPU is freed) or dropping the rest.
  */
-function BatchBar({ queue, running }: { queue: RemoteQueue; running: RemoteJob | null }) {
+function BatchBar({ queue, running, onOpen }: { queue: RemoteQueue; running: RemoteJob | null; onOpen?: () => void }) {
   const waiting = queue.jobs.filter((j) => j.batch && j.status === 'queued')
   const failed = queue.jobs.filter((j) => j.batch && j.status === 'failed' && Date.now() - j.updatedAt < 86_400_000)
   const now = running?.batch ? running : null
@@ -944,6 +1000,11 @@ function BatchBar({ queue, running }: { queue: RemoteQueue; running: RemoteJob |
         {failed.length > 0 && ` · ${failed.length} falharam: ${failed.map((f) => f.batch!.chapter).join(', ')}`}
       </span>
       <span className="batch-bar-buttons">
+        {onOpen && now && (
+          <button className="secondary small" onClick={onOpen}>
+            Abrir
+          </button>
+        )}
         <button className="small" onClick={() => window.api.remote.pause(!queue.paused)}>
           {queue.paused ? 'Continuar' : 'Pausar'}
         </button>

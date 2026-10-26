@@ -1,7 +1,7 @@
 import { nativeImage, session, type BrowserWindow } from 'electron'
 import { isLikelySameWork, isSameWork, readableNames, type CatalogMatch, type CatalogResult, type CatalogSite } from '../shared/catalog'
 import { chapterLinks, fillChapterGaps, sourceFromChapter, type ChapterLink, type PageLink } from '../shared/updates'
-import { formatOf, normalizeName, type Work } from '../shared/works'
+import { formatOf, normalizeName, sameName, type Work } from '../shared/works'
 import { applyCatalog, hasWorkCover, listWorks, saveWorkCover } from './library'
 import { listReading } from './reading'
 import { hiddenWindow, isChallenged, open, PARTITION, sleep } from './webChapter'
@@ -25,6 +25,8 @@ const SETTLE_MS = 3_000
 const MANGADEX_PAGE = 500
 const MANGADEX_MAX_CHAPTERS = 5_000
 const CHOICES_PER_SITE = 5
+/** Other names of the work a site that found nothing is asked by, at most. */
+const OTHER_NAMES = 4
 
 const SEARCHES: Record<CatalogSite, (win: BrowserWindow, query: string) => Promise<CatalogMatch[]>> = {
   mangadex: (_win, query) => searchMangadex(query),
@@ -38,6 +40,20 @@ export async function searchCatalog(query: string, win?: BrowserWindow, sites = 
   return withWindow(win, async (w) => {
     const results: CatalogResult[] = []
     for (const site of sites) results.push(await attempt(site, () => SEARCHES[site](w, name)))
+    // A site may know the work by another of its names only (mgeko has "Solo Spell Caster", not "The
+    // Lone Spellcaster"): it is asked again by the names the other sites give the same work.
+    const known = results.flatMap((r) => r.matches).filter((m) => isLikelySameWork([name], m))
+    const others = [...new Set(readableNames(known.flatMap((m) => [...m.altNames, m.title])))].filter((n) => !sameName(n, name)).slice(0, OTHER_NAMES)
+    for (const result of results) {
+      if (result.matches.length || result.error) continue
+      for (const other of others) {
+        const again = await attempt(result.site, () => SEARCHES[result.site](w, other))
+        if (again.matches.length) {
+          result.matches = again.matches
+          break
+        }
+      }
+    }
     return results
   })
 }
@@ -379,7 +395,12 @@ async function searchMangadex(query: string): Promise<CatalogMatch[]> {
       title,
       url: `https://mangadex.org/title/${m.id}`,
       cover: file ? `https://uploads.mangadex.org/covers/${m.id}/${file}.512.jpg` : null,
-      altNames: [...titles.filter((t) => t !== title), ...m.attributes.altTitles.flatMap((a) => Object.values(a))],
+      // English names first: the other sites mostly go by them.
+      altNames: [
+        ...m.attributes.altTitles.filter((a) => a.en).map((a) => a.en),
+        ...titles.filter((t) => t !== title),
+        ...m.attributes.altTitles.filter((a) => !a.en).flatMap((a) => Object.values(a))
+      ],
       latest: parseFloat(m.attributes.lastChapter ?? '') || null
     }
   })
