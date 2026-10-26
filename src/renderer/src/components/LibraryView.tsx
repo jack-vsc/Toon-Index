@@ -486,6 +486,21 @@ export function WorkPage({
   const shownRows = rows.filter((r) => !chapterQuery.trim() || String(r.chapter).startsWith(chapterQuery.trim().replace(',', '.')))
   if (oldestFirst) shownRows.reverse()
   const shelf = shelfOf(work, records.length > 0)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [fullSynopsis, setFullSynopsis] = useState(false)
+  const refresh = async () => {
+    setRefreshing(true)
+    setRefreshError(null)
+    try {
+      await window.api.works.refresh(work.id)
+      onWorksChanged()
+    } catch (err) {
+      setRefreshError(String((err as Error).message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   return (
     <div className="page work-page">
@@ -550,7 +565,30 @@ export function WorkPage({
             <button className="secondary" onClick={() => setEditing(!editing)}>
               {editing ? 'Fechar edição' : 'Editar obra'}
             </button>
+            <button
+              className="secondary"
+              onClick={refresh}
+              disabled={refreshing}
+              title="Capa, nome, sinopse, gêneros e situação do MangaDex, ou da página da obra no site dos capítulos"
+            >
+              {refreshing ? 'Atualizando…' : '↻ Atualizar dados'}
+            </button>
           </div>
+          {refreshError && <p className="hint error-text">{refreshError}</p>}
+          {work.info?.synopsis && (
+            <p className={`work-synopsis ${fullSynopsis ? 'full' : ''}`} onClick={() => setFullSynopsis(!fullSynopsis)} title={fullSynopsis ? '' : 'Ver tudo'}>
+              {work.info.synopsis}
+            </p>
+          )}
+          {!!work.info?.tags?.length && (
+            <div className="tags work-genres">
+              {work.info.tags.map((t) => (
+                <span key={t} className="tag">
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
           {share !== null && newest !== null && (
             <div className="work-progress">
               <div className="poster-progress">
@@ -587,7 +625,7 @@ export function WorkPage({
           </div>
           {rows.length === 0 && <p className="hint">Nenhum capítulo lido ou traduzido ainda.</p>}
           <div className="chapter-rows">
-            {shownRows.map(({ chapter, record, entry }) => (
+            {shownRows.map(({ chapter, record, entry, versions }) => (
               <div key={chapter} className={`chapter-row ${record?.status === 'read' ? 'read' : ''}`}>
                 <span className="chapter-num">{chapter}</span>
                 <span className="chapter-text">
@@ -597,11 +635,36 @@ export function WorkPage({
                     {record?.status === 'reading' && (
                       <span className="badge">{record.progress !== null ? `${Math.round(record.progress * 100)}%` : 'lendo'}</span>
                     )}
-                    {entry && <span className="badge">{isDownloaded(entry) ? 'baixado' : 'traduzido'}</span>}
+                    {entry && versions.length === 1 && <span className="badge">{isDownloaded(entry) ? 'baixado' : 'traduzido'}</span>}
+                    {versions.length > 1 && <span className="badge">{versions.length} versões</span>}
                   </span>
                   <span className="chapter-where">
-                    {record ? `${siteOf(record.url) || sourceLabel(record.source)} · ${timeAgo(record.updatedAt)}` : entry ? timeAgo(entry.createdAt) : ''}
+                    {record
+                      ? `${siteOf(record.url) || sourceLabel(record.source)} · ${timeAgo(record.updatedAt)}`
+                      : entry
+                        ? `${siteOf(entry.source ?? '') || 'arquivo'} · ${timeAgo(entry.createdAt)}`
+                        : ''}
                   </span>
+                  {versions.length > 1 && (
+                    <span className="chapter-versions">
+                      {versions.map((v) => (
+                        <span key={v.id} className="chapter-version">
+                          <button className="link" onClick={() => onOpen(v)} title={`Ler esta versão (${timeAgo(v.createdAt)})`}>
+                            {versionLabel(v)}
+                          </button>
+                          <button
+                            className="link danger"
+                            title="Apagar esta versão"
+                            onClick={() => {
+                              if (confirm(`Apagar a versão de ${versionLabel(v)} do capítulo ${chapter}?`)) onDelete(v)
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </span>
                 <span className="chapter-actions">
                   {entry && (
@@ -627,6 +690,29 @@ export function WorkPage({
             <dd>{work.format === 'novel' ? 'Novel' : 'Mangá'}</dd>
             <dt>Lista</dt>
             <dd>{shelf ? SHELVES[shelf] : 'Nenhuma'}</dd>
+            {work.info?.status && (
+              <>
+                <dt>Situação</dt>
+                <dd>{work.info.status}</dd>
+              </>
+            )}
+            {work.info?.year && (
+              <>
+                <dt>Ano</dt>
+                <dd>{work.info.year}</dd>
+              </>
+            )}
+            {work.info && (
+              <>
+                <dt>Dados de</dt>
+                <dd>
+                  <a href={work.info.from} target="_blank" rel="noreferrer">
+                    {siteOf(work.info.from)} ↗
+                  </a>{' '}
+                  · {timeAgo(work.info.updatedAt)}
+                </dd>
+              </>
+            )}
             {newest !== null && (
               <>
                 <dt>Capítulos</dt>
@@ -690,18 +776,33 @@ export function WorkPage({
   )
 }
 
-/** Every chapter read or translated, newest first, the reading and the translation of each side by side. */
-function chapterRows(records: ReadingRecord[], chapters: LibraryEntry[]): { chapter: number; record?: ReadingRecord; entry?: LibraryEntry }[] {
-  const rows = new Map<number, { chapter: number; record?: ReadingRecord; entry?: LibraryEntry }>()
-  for (const r of records) rows.set(r.chapter, { chapter: r.chapter, record: r })
-  for (const e of chapters) {
+interface ChapterRow {
+  chapter: number
+  record?: ReadingRecord
+  /** The newest of `versions`, the one "Ler" opens. */
+  entry?: LibraryEntry
+  /** The chapter as saved from each site, newest first. */
+  versions: LibraryEntry[]
+}
+
+/** Every chapter read or translated, newest first, the reading and the translations of each side by side. */
+function chapterRows(records: ReadingRecord[], chapters: LibraryEntry[]): ChapterRow[] {
+  const rows = new Map<number, ChapterRow>()
+  for (const r of records) rows.set(r.chapter, { chapter: r.chapter, record: r, versions: [] })
+  for (const e of [...chapters].sort((a, b) => b.createdAt - a.createdAt)) {
     if (e.chapter === null) continue
-    rows.set(e.chapter, {
-      ...(rows.get(e.chapter) ?? { chapter: e.chapter }),
-      entry: e
-    })
+    const row = rows.get(e.chapter) ?? { chapter: e.chapter, versions: [] }
+    row.versions.push(e)
+    row.entry = row.versions[0]
+    rows.set(e.chapter, row)
   }
   return [...rows.values()].sort((a, b) => b.chapter - a.chapter)
+}
+
+/** Where a saved chapter came from, to tell its versions apart. */
+function versionLabel(entry: LibraryEntry): string {
+  const site = siteOf(entry.source ?? '') || 'arquivo'
+  return `${site} · ${isDownloaded(entry) ? 'baixado' : 'traduzido'}`
 }
 
 function TranslatedGrid({
@@ -732,8 +833,9 @@ function TranslatedGrid({
             </strong>
             <span>
               {isDownloaded(entry)
-                ? `${languageLabel(entry.targetLanguage)} · baixado do site`
+                ? `${languageLabel(entry.targetLanguage)} · baixado`
                 : `${languageLabel(entry.sourceLanguage)} → ${languageLabel(entry.targetLanguage)}`}
+              {entry.source && ` · ${siteOf(entry.source)}`}
             </span>
             <span>
               {entry.translatedPages === entry.pageCount

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { CatalogSite } from '../shared/catalog'
 import { DOWNLOADED_MODEL, type LibraryEntry, type SaveLibraryInput } from '../shared/types'
 import { MAX_SOURCES } from '../shared/updates'
-import { findWork, formatOf, normalizeName, parseChapterName, withName, type Shelf, type Work, type WorkFormat } from '../shared/works'
+import { findWork, formatOf, normalizeName, parseChapterName, sameName, withName, type Shelf, type Work, type WorkFormat, type WorkInfo } from '../shared/works'
 import { moveReading } from './reading'
 import { getSettings } from './settings'
 import { currentModelLabel } from './translate'
@@ -107,6 +107,21 @@ export function saveToLibrary(input: SaveLibraryInput): LibraryEntry {
   }
   // Written last so a half-saved entry never shows up in the list.
   writeMeta(meta)
+  // The chapter saved again from the same site replaces the old copy; one from another site stays
+  // beside it as another version, for the person to keep or delete.
+  const site = hostOf(meta.source)
+  if (site && meta.chapter !== null) {
+    for (const other of readdirSync(root())) {
+      if (other === id || !existsSync(join(root(), other, 'meta.json'))) continue
+      let old: StoredEntry
+      try {
+        old = readMeta(other)
+      } catch {
+        continue
+      }
+      if (old.workId === meta.workId && old.chapter === meta.chapter && hostOf(old.source) === site) deleteFromLibrary(other)
+    }
+  }
   return { ...meta, cover: `data:image/jpeg;base64,${Buffer.from(input.coverJpeg).toString('base64')}` }
 }
 
@@ -183,6 +198,22 @@ export function applyCatalog(
   }
   if (found.cover) saveWorkCover(workId, found.cover)
   const works = all.map((w) => (w.id === workId ? updated : w))
+  saveWorks(works)
+  return works
+}
+
+/** A work brought up to date from a site: as applyCatalog, plus the name it is shown by and what the site says of it. */
+export function saveWorkInfo(
+  workId: string,
+  found: { title: string | null; names: string[]; sources: string[]; sites: CatalogSite[]; cover: Buffer | null; info: WorkInfo }
+): Work[] {
+  applyCatalog(workId, found)
+  const works = listWorks().map((w) => {
+    if (w.id !== workId) return w
+    // Shown first, written as the site writes it, when it is one of its names (no other work has it).
+    const at = found.title ? w.names.findIndex((n) => sameName(n, found.title!)) : -1
+    return { ...w, names: at >= 0 ? [found.title!, ...w.names.filter((_, i) => i !== at)] : w.names, info: found.info }
+  })
   saveWorks(works)
   return works
 }
@@ -297,4 +328,12 @@ export function readCover(id: string): Buffer | null {
 
 export function deleteFromLibrary(id: string): void {
   rmSync(entryDir(id), { recursive: true, force: true })
+}
+
+function hostOf(url: string | undefined): string {
+  try {
+    return url ? new URL(url).hostname.replace(/^www\./, '') : ''
+  } catch {
+    return ''
+  }
 }

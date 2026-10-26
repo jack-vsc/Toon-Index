@@ -2423,6 +2423,64 @@ details pre {
   color: var(--muted);
 }
 
+.work-synopsis {
+  max-width: 720px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.work-synopsis.full {
+  display: block;
+  cursor: default;
+}
+
+.work-genres {
+  margin-top: 10px;
+}
+
+.error-text {
+  color: #ff8a8a;
+}
+
+.chapter-versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.chapter-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.chapter-version button.link {
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.chapter-version button.link.danger {
+  color: var(--muted);
+}
+
+.chapter-version button.link.danger:hover {
+  color: #ff6b6b;
+}
+
 .badge {
   font-size: 10px;
   font-weight: 800;

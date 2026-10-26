@@ -35,7 +35,7 @@ import {
 } from './library'
 import type { CatalogMatch, CatalogSite } from '../shared/catalog'
 import type { Shelf } from '../shared/works'
-import { chapterList, linkWork, searchCatalogToChoose } from './catalog'
+import { chapterList, linkWork, refreshWork, searchCatalogToChoose } from './catalog'
 import type { ChapterLink } from '../shared/updates'
 import type { HistoryWork } from '../shared/reading'
 import { finishedInApp, forgetReading, importHistory, listReading, markRead, onReadingChanged, readInApp, scanHistory } from './reading'
@@ -226,6 +226,7 @@ function registerIpc(): void {
   ipcMain.handle('works:chapters', (_e, match: { site: CatalogSite | 'link'; url: string }) => chapterList(match))
   ipcMain.handle('works:search', (_e, query: string) => searchCatalogToChoose(query))
   ipcMain.handle('works:link', (_e, workId: string, matches: CatalogMatch[]) => linkWork(workId, matches))
+  ipcMain.handle('works:refresh', (_e, workId: string) => refreshWork(workId))
   ipcMain.handle('works:move', (_e, entryId: string, target: { workId: string } | { newName: string }) => moveToWork(entryId, target))
   registerEvalIpc()
 }

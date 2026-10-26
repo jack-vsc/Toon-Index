@@ -1,8 +1,8 @@
 import { nativeImage, session, type BrowserWindow } from 'electron'
 import { isLikelySameWork, isSameWork, readableNames, type CatalogMatch, type CatalogResult, type CatalogSite } from '../shared/catalog'
 import { chapterLinks, fillChapterGaps, sourceFromChapter, type ChapterLink, type PageLink } from '../shared/updates'
-import { formatOf, normalizeName, sameName, type Work } from '../shared/works'
-import { applyCatalog, hasWorkCover, listWorks, saveWorkCover } from './library'
+import { formatOf, normalizeName, sameName, type Work, type WorkInfo } from '../shared/works'
+import { applyCatalog, hasWorkCover, listLibrary, listWorks, saveWorkCover, saveWorkInfo } from './library'
 import { listReading } from './reading'
 import { hiddenWindow, isChallenged, open, PARTITION, sleep } from './webChapter'
 
@@ -194,6 +194,190 @@ async function coverInPage(win: BrowserWindow, url: string): Promise<Buffer | nu
   })()`)) as string
   return data.startsWith('data:image/jpeg;base64,') ? Buffer.from(data.split(',')[1], 'base64') : null
 }
+
+/**
+ * "Atualizar dados": the work's cover, the name it is shown by, synopsis, tags, status and year from
+ * MangaDex; what MangaDex lacks (or the whole, for works it does not have) from the work's page on the
+ * site its chapters come from.
+ */
+export async function refreshWork(workId: string): Promise<Work[]> {
+  const work = listWorks().find((w) => w.id === workId)
+  if (!work) throw new Error('Obra não encontrada.')
+  const mangadex = (work.sources ?? []).map(mangadexId).find((id): id is string => !!id) ?? (await findMangadexId(work))
+  const details = mangadex ? await mangadexDetails(mangadex).catch(() => null) : null
+  const pages = workPages(work).filter((p) => !mangadexId(p))
+  const lacking = !details || !details.cover || !details.info.synopsis || !details.info.tags?.length
+  const page = lacking && pages.length ? await withWindow(undefined, (w) => pageDetails(w, pages.slice(0, 2))) : null
+  if (!details && !page) {
+    throw new Error('Não achei a obra no MangaDex nem uma página dela num site: adicione o site dela em "Editar obra" e tente de novo.')
+  }
+  const info: WorkInfo = {
+    ...page?.info,
+    ...details?.info,
+    synopsis: details?.info.synopsis || page?.info.synopsis,
+    tags: details?.info.tags?.length ? details.info.tags : page?.info.tags,
+    from: details?.info.from ?? page!.info.from,
+    updatedAt: Date.now()
+  }
+  return saveWorkInfo(workId, {
+    title: details?.title ?? null,
+    names: readableNames([...(details?.names ?? []), ...(page?.names ?? [])]),
+    // Its MangaDex page once, however its link was written.
+    sources: mangadex && !(work.sources ?? []).some((s) => mangadexId(s) === mangadex) ? [`https://mangadex.org/title/${mangadex}`] : [],
+    sites: mangadex ? ['mangadex'] : [],
+    cover: details?.cover ?? page?.cover ?? null,
+    info
+  })
+}
+
+/** The work's pages on sites: the ones set for it, then the ones its chapters were read or saved from. */
+function workPages(work: Work): string[] {
+  const read = listReading()
+    .filter((r) => r.workId === work.id && r.url)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map((r) => r.url)
+  const saved = listLibrary()
+    .filter((e) => e.workId === work.id && e.source)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((e) => e.source!)
+  const fromChapters = [...read, ...saved].map((u) => (mangadexId(u) ? u : sourceFromChapter(u))).filter((p): p is string => !!p)
+  return [...new Set([...(work.sources ?? []), ...fromChapters])]
+}
+
+async function findMangadexId(work: Work): Promise<string | null> {
+  if (formatOf(work) !== 'comic') return null
+  for (const name of readableNames(work.names).slice(0, AUTO_SEARCHES)) {
+    const match = (await searchMangadex(name).catch(() => [])).find((m) => isLikelySameWork(work.names, m))
+    if (match) return mangadexId(match.url)
+  }
+  return null
+}
+
+const MANGADEX_STATUS: Record<string, string> = { ongoing: 'Em andamento', completed: 'Completo', hiatus: 'Em hiato', cancelled: 'Cancelado' }
+
+/** MangaDex's tags, as Portuguese readers know them. */
+const TAGS_PT: Record<string, string> = {
+  Action: 'Ação',
+  Adventure: 'Aventura',
+  Comedy: 'Comédia',
+  Drama: 'Drama',
+  Fantasy: 'Fantasia',
+  Horror: 'Terror',
+  Mystery: 'Mistério',
+  Romance: 'Romance',
+  'Sci-Fi': 'Ficção científica',
+  'Slice of Life': 'Cotidiano',
+  Sports: 'Esportes',
+  Thriller: 'Suspense',
+  Tragedy: 'Tragédia',
+  Psychological: 'Psicológico',
+  Historical: 'Histórico',
+  'Martial Arts': 'Artes marciais',
+  Magic: 'Magia',
+  'Time Travel': 'Viagem no tempo',
+  Reincarnation: 'Reencarnação',
+  Isekai: 'Isekai',
+  Monsters: 'Monstros',
+  Demons: 'Demônios',
+  Supernatural: 'Sobrenatural',
+  'School Life': 'Vida escolar',
+  'Video Games': 'Videogames',
+  'Survival': 'Sobrevivência',
+  'Long Strip': 'Webtoon',
+  'Full Color': 'Colorido',
+  'Web Comic': 'Web comic',
+  Adaptation: 'Adaptação',
+  Military: 'Militar',
+  Villainess: 'Vilã',
+  Wuxia: 'Wuxia'
+}
+
+async function mangadexDetails(id: string): Promise<{ title: string | null; names: string[]; cover: Buffer | null; info: WorkInfo }> {
+  const { data } = (await getJson(`${MANGADEX}/manga/${id}?includes[]=cover_art`)) as {
+    data: MangadexManga & {
+      attributes: {
+        description: Record<string, string>
+        status: string | null
+        year: number | null
+        tags: { attributes: { name: Record<string, string>; group: string } }[]
+      }
+    }
+  }
+  const { title, altTitles, description, status, year, tags } = data.attributes
+  const alt = (lang: string) => title[lang] ?? altTitles.find((a) => a[lang])?.[lang]
+  const file = data.relationships.find((r) => r.type === 'cover_art')?.attributes?.fileName
+  const cover = file ? await downloadCover(`https://uploads.mangadex.org/covers/${id}/${file}.512.jpg`).catch(() => null) : null
+  const synopsis = cleanSynopsis(description['pt-br'] || description.en || '')
+  return {
+    // In Portuguese when it has a name in it, else in English.
+    title: alt('pt-br') ?? alt('en') ?? null,
+    names: [...Object.values(title), ...altTitles.flatMap((a) => Object.values(a))],
+    cover,
+    info: {
+      ...(synopsis && { synopsis }),
+      tags: tags
+        .filter((t) => t.attributes.group !== 'content')
+        .map((t) => t.attributes.name.en)
+        .filter(Boolean)
+        .map((t) => TAGS_PT[t] ?? t),
+      ...(status && { status: MANGADEX_STATUS[status] ?? status }),
+      ...(year && { year }),
+      from: `https://mangadex.org/title/${id}`,
+      updatedAt: Date.now()
+    }
+  }
+}
+
+/** MangaDex's descriptions in Markdown: links to plain text, the notes after a rule or "Links:" left out. */
+function cleanSynopsis(text: string): string {
+  return text
+    .split(/\n\s*(?:---+|\*\*\*+|___+)\s*\n|\n\s*\**(?:links?|official|raw)\**\s*:/i)[0]
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_]{1,2}([^*_]+)[*_]{1,2}/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** What the work's page on a site says of it: its name, synopsis, genres and cover. */
+async function pageDetails(win: BrowserWindow, pages: string[]): Promise<{ names: string[]; cover: Buffer | null; info: WorkInfo } | null> {
+  for (const page of pages) {
+    try {
+      await load(win, page)
+      await sleep(SETTLE_MS)
+      const found = (await win.webContents.executeJavaScript(PAGE_DETAILS)) as { title: string; synopsis: string; tags: string[] }
+      const cover = await pageCover(win, [page])
+      if (!found.synopsis && !found.tags.length && !cover) continue
+      return {
+        names: found.title ? [found.title] : [],
+        cover,
+        info: {
+          ...(found.synopsis && { synopsis: found.synopsis }),
+          ...(found.tags.length && { tags: found.tags }),
+          from: page,
+          updatedAt: Date.now()
+        }
+      }
+    } catch {
+      // The next page.
+    }
+  }
+  return null
+}
+
+/** Runs in a work's page: its title (without the site's name), the longest synopsis it has, and its genre links. */
+const PAGE_DETAILS = `(() => {
+  const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim()
+  const meta = (s) => norm(document.querySelector(s)?.content)
+  const title = norm((meta('meta[property="og:title"]') || document.querySelector('h1')?.innerText || '').split(/\\s+[|–—-]\\s+/)[0])
+  const blocks = [...document.querySelectorAll('[class*="summary" i], [class*="synopsis" i], [class*="sinopse" i], [class*="description" i], [id*="summary" i], [id*="synopsis" i], [itemprop="description"]')]
+    .map((el) => (el.innerText || '').trim())
+    .filter((t) => t.length > 40 && t.length < 4000)
+  const synopsis = [meta('meta[property="og:description"]'), meta('meta[name="description"]'), ...blocks].sort((a, b) => b.length - a.length)[0] || ''
+  const tags = [...new Set([...document.querySelectorAll('a[href*="genre" i], a[href*="genero" i], a[href*="/tag/" i], a[href*="/tags/" i]')]
+    .map((a) => norm(a.innerText))
+    .filter((t) => t && t.length < 25))].slice(0, 12)
+  return { title, synopsis, tags }
+})()`
 
 /**
  * The work on each site, by its names. The sites often list it under another English name, so the

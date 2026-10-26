@@ -78,7 +78,8 @@ const api: MangaApi = {
     covers: () => ipcRenderer.invoke('works:covers'),
     chapters: (match) => ipcRenderer.invoke('works:chapters', match),
     search: (query) => ipcRenderer.invoke('works:search', query),
-    link: (workId, matches) => ipcRenderer.invoke('works:link', workId, matches)
+    link: (workId, matches) => ipcRenderer.invoke('works:link', workId, matches),
+    refresh: (workId) => ipcRenderer.invoke('works:refresh', workId)
   },
   devices: {
     status: () => ipcRenderer.invoke('devices:status'),

@@ -109,6 +109,8 @@ export interface MangaApi {
     search(query: string): Promise<CatalogResult[]>
     /** Takes the chosen matches' names, pages and cover into the work. */
     link(workId: string, matches: CatalogMatch[]): Promise<Work[]>
+    /** Brings the work's cover, name, synopsis, tags and status up to date from MangaDex or its page on a site. */
+    refresh(workId: string): Promise<Work[]>
   }
   /** Phones paired with the app (the Android app reaches it on the home network or Tailscale). */
   devices: {

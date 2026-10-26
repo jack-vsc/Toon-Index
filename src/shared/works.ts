@@ -22,6 +22,19 @@ export interface Work {
   favorite?: boolean
   /** What happens to a new chapter found on its sites, besides the notice: translated, or downloaded as it is. */
   auto?: 'translate' | 'download'
+  /** What a site says of the work ("Atualizar dados"): MangaDex first, else its page on a site. */
+  info?: WorkInfo
+}
+
+export interface WorkInfo {
+  synopsis?: string
+  tags?: string[]
+  /** "Em andamento", "Completo"… */
+  status?: string
+  year?: number
+  /** The page it was taken from. */
+  from: string
+  updatedAt: number
 }
 
 /** The reading lists, as MangaDex has them. */
