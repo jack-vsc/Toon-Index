@@ -60,9 +60,41 @@ export interface AppSettings {
   skipEnd: number
   readerMode: ReaderMode
   gpuSharing: GpuSharing
-  /** Where the AIs on this computer run (vision models, and Ollama). */
+  /** Where the local translation model (Ollama) runs. */
   aiDevice: AiDevice
+  /** Where the vision server (text and bubble detection, LaMa) runs: on the processor it leaves the GPU free. */
+  visionDevice: AiDevice
 }
+
+/** The options a chapter is translated with, chosen when it is sent (on the PC, or from the phone). */
+export type TranslateOptions = Pick<
+  AppSettings,
+  | 'activeProfileId'
+  | 'sourceLanguage'
+  | 'targetLanguage'
+  | 'concurrency'
+  | 'speed'
+  | 'translateSfx'
+  | 'skipStart'
+  | 'skipEnd'
+  | 'gpuSharing'
+  | 'aiDevice'
+  | 'visionDevice'
+>
+
+export const TRANSLATE_OPTION_KEYS: (keyof TranslateOptions)[] = [
+  'activeProfileId',
+  'sourceLanguage',
+  'targetLanguage',
+  'concurrency',
+  'speed',
+  'translateSfx',
+  'skipStart',
+  'skipEnd',
+  'gpuSharing',
+  'aiDevice',
+  'visionDevice'
+]
 
 /** 'cpu' runs them on the processor and RAM, for computers without a graphics card (several times slower). */
 export type AiDevice = 'gpu' | 'cpu'
@@ -357,5 +389,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   skipEnd: 0,
   readerMode: 'scroll',
   gpuSharing: 'auto',
-  aiDevice: 'gpu'
+  aiDevice: 'gpu',
+  visionDevice: 'gpu'
 }

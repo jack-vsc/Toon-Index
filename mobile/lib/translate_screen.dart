@@ -8,6 +8,7 @@ import 'api.dart';
 import 'models.dart';
 import 'queue_screen.dart';
 import 'reader_screen.dart';
+import 'translate_options.dart';
 
 /// Asks the PC to translate a chapter, from a site's link or a PDF on the phone, and follows the
 /// requests until they are in the library. Opened from the library or by sharing a link or PDF.
@@ -82,12 +83,15 @@ class _TranslateScreenState extends State<TranslateScreen> {
       setState(() => _error = 'Cole o link da página de leitura do capítulo.');
       return;
     }
-    await _send(() => widget.api.translateLink(link));
+    await _send(() => widget.api.translateLink(link, options: _options));
     if (_error == null) _link.clear();
   }
 
+  /// Options chosen for the requests sent from here (null: the PC's settings).
+  Map<String, dynamic>? _options;
+
   Future<void> _sendFile(String name, Stream<List<int>> bytes, int? length) =>
-      _send(() => widget.api.translatePdf(name, bytes, length));
+      _send(() => widget.api.translatePdf(name, bytes, length, options: _options));
 
   Future<void> _pickPdf() async {
     final picked = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
@@ -117,7 +121,9 @@ class _TranslateScreenState extends State<TranslateScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text('O PC traduz com as suas configurações e o capítulo entra na biblioteca. Ele precisa estar ligado, com o Manga Index na tela inicial.'),
+            const Text('O PC traduz e o capítulo entra na biblioteca. Ele precisa estar ligado, com o Manga Index aberto.'),
+            const SizedBox(height: 12),
+            TranslateOptionsCard(api: widget.api, onChanged: (o) => _options = o),
             const SizedBox(height: 16),
             TextField(
               controller: _link,

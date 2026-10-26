@@ -71,8 +71,13 @@ export function BatchDialog({ works, reading, initialQuery, onClose }: Props) {
     setError(null)
     setBusy(`Lendo os capítulos no ${siteName(match)}…`)
     try {
-      const list = await window.api.works.chapters({ site: match.site, url: match.url })
+      const { title, chapters: list } = await window.api.works.chapters({ site: match.site, url: match.url })
       setChapters(list)
+      // A link pasted without the work's name: the name its page gives.
+      if (title && !match.title) {
+        setPicked({ ...match, title })
+        if (!query.trim()) setQuery(title)
+      }
       if (!list.length) setError(`Não encontrei capítulos dessa obra no ${siteName(match)}. Confira se o link é o da página da obra, a que lista os capítulos.`)
       // From the one after the last read, when the work is in the library.
       const start = list.find((c) => c.chapter > lastRead) ?? list[0]

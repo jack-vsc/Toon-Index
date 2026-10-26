@@ -10,7 +10,8 @@ import {
   type ApiProfile,
   type AppSettings,
   type PublicSettings,
-  type SaveSettingsInput
+  type SaveSettingsInput,
+  type TranslateOptions
 } from '../shared/types'
 
 type StoredKey = { value: string; encrypted: boolean }
@@ -63,6 +64,8 @@ function mergeSettings(raw: (Partial<AppSettings> & LegacySettings) | undefined,
     skipEnd: raw?.skipEnd ?? d.skipEnd,
     gpuSharing: raw?.gpuSharing ?? d.gpuSharing,
     aiDevice: raw?.aiDevice === 'cpu' ? 'cpu' : 'gpu',
+    // Settings saved before the two were apart: the vision server ran where Ollama did.
+    visionDevice: (raw?.visionDevice ?? raw?.aiDevice) === 'cpu' ? 'cpu' : 'gpu',
     readerMode: raw?.readerMode ?? d.readerMode
   }
   const known = new Set(LANGUAGES.map((l) => l.value))
@@ -168,6 +171,20 @@ export function getApiKey(profileId: string): string | undefined {
   if (profileId === EVAL_PROFILE) return 'local'
   const entry = readStore().keys[profileId]
   return entry ? decryptKey(entry) : undefined
+}
+
+const changedElsewhere = new Set<() => void>()
+
+/** Called when the settings are changed from outside the window (the phone), so it reads them again. */
+export function onSettingsChangedElsewhere(listener: () => void): void {
+  changedElsewhere.add(listener)
+}
+
+/** The translation options the phone chose as the PC's defaults. */
+export function saveTranslateDefaults(options: Partial<TranslateOptions>): PublicSettings {
+  const saved = saveSettings({ settings: { ...readStore().settings, ...options } })
+  for (const listener of changedElsewhere) listener()
+  return saved
 }
 
 export function saveSettings(input: SaveSettingsInput): PublicSettings {

@@ -1,11 +1,17 @@
 import { useState } from 'react'
-import { activeProfile, isLocalProfile, profileReady, type AppSettings, type GpuSharing, type PublicSettings, type Speed } from '../../../shared/types'
+import {
+  activeProfile,
+  isLocalProfile,
+  profileReady,
+  type AiDevice,
+  type GpuSharing,
+  type PublicSettings,
+  type Speed,
+  type TranslateOptions
+} from '../../../shared/types'
 import { LanguageSelect } from './LanguageSelect'
 
-export type RunOptions = Pick<
-  AppSettings,
-  'sourceLanguage' | 'targetLanguage' | 'concurrency' | 'speed' | 'translateSfx' | 'skipStart' | 'skipEnd' | 'gpuSharing'
->
+export type RunOptions = TranslateOptions
 
 export interface SetupChoice {
   /** Pages of the output, in order. */
@@ -39,7 +45,7 @@ const SPEED_LABEL: Record<Speed, string> = {
 }
 
 export function SetupView({ fileName, numPages, cover, settings, onStart, onCancel, onProfileChange, onOpenSettings }: Props) {
-  const [draft, setDraft] = useState<RunOptions>(() => ({
+  const [draft, setDraft] = useState<Omit<RunOptions, 'activeProfileId'>>(() => ({
     sourceLanguage: settings.sourceLanguage,
     targetLanguage: settings.targetLanguage,
     concurrency: settings.concurrency,
@@ -47,13 +53,15 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
     translateSfx: settings.translateSfx,
     skipStart: settings.skipStart,
     skipEnd: settings.skipEnd,
-    gpuSharing: settings.gpuSharing
+    gpuSharing: settings.gpuSharing,
+    visionDevice: settings.visionDevice,
+    aiDevice: settings.aiDevice
   }))
   const [mode, setMode] = useState<'all' | 'range'>('all')
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(numPages)
 
-  const patch = (p: Partial<RunOptions>) => setDraft((d) => ({ ...d, ...p }))
+  const patch = (p: Partial<Omit<RunOptions, 'activeProfileId'>>) => setDraft((d) => ({ ...d, ...p }))
   const first = clamp(Math.min(from, to), 1, numPages)
   const last = clamp(Math.max(from, to), 1, numPages)
   // Always leave at least one page to translate.
@@ -64,13 +72,15 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
   const ready = profileReady(profile, settings.hasKey)
 
   function start() {
+    // The API as picked above (saved at once when changed).
+    const options = { ...draft, activeProfileId: settings.activeProfileId }
     if (mode === 'all') {
       const pages = Array.from({ length: numPages }, (_, i) => i + 1)
       const untranslated = pages.filter((n) => n <= skipStart || n > numPages - skipEnd)
-      onStart({ pages, untranslated, options: { ...draft, skipStart, skipEnd } })
+      onStart({ pages, untranslated, options: { ...options, skipStart, skipEnd } })
     } else {
       const pages = Array.from({ length: last - first + 1 }, (_, i) => first + i)
-      onStart({ pages, untranslated: [], options: draft })
+      onStart({ pages, untranslated: [], options })
     }
   }
 
@@ -181,6 +191,26 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
             modelos locais bem mais rápidos em placas de até 8 GB.
           </p>
         </section>
+
+        <section className="grid-2">
+          <div>
+            <label className="field-label">Visão (achar e apagar o texto) em</label>
+            <select value={draft.visionDevice} onChange={(e) => patch({ visionDevice: e.target.value as AiDevice })}>
+              <option value="gpu">Placa de vídeo (GPU)</option>
+              <option value="cpu">Processador (deixa a GPU livre)</option>
+            </select>
+          </div>
+          {profile && isLocalProfile(profile) && (
+            <div>
+              <label className="field-label">Modelo de tradução local em</label>
+              <select value={draft.aiDevice} onChange={(e) => patch({ aiDevice: e.target.value as AiDevice })}>
+                <option value="gpu">Placa de vídeo (GPU)</option>
+                <option value="cpu">Processador e RAM</option>
+              </select>
+            </div>
+          )}
+        </section>
+        {draft.visionDevice === 'cpu' && <p className="hint">No processador cada página leva minutos em vez de segundos, mas a placa fica livre para outra coisa.</p>}
 
         <section>
           <label className="field-label">API</label>

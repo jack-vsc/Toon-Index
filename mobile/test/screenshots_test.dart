@@ -153,6 +153,32 @@ class FakeQueueApi extends Api {
         ].map(RemoteJob.fromJson).toList(),
         paused: false,
       );
+
+  @override
+  Future<PcTranslateSettings> translateSettings() async => PcTranslateSettings.fromJson({
+        'defaults': {
+          'activeProfileId': 'gemini',
+          'sourceLanguage': 'auto',
+          'targetLanguage': 'Brazilian Portuguese',
+          'concurrency': 3,
+          'speed': 'fast',
+          'translateSfx': false,
+          'skipStart': 0,
+          'skipEnd': 0,
+          'gpuSharing': 'auto',
+          'aiDevice': 'gpu',
+          'visionDevice': 'gpu',
+        },
+        'profiles': [
+          {'id': 'gemini', 'name': 'Gemini', 'model': 'gemini-3-flash', 'ready': true, 'local': false},
+          {'id': 'local', 'name': 'Neste PC', 'model': 'gemma-3-12b', 'ready': true, 'local': true},
+        ],
+        'languages': [
+          {'value': 'English', 'label': 'Inglês'},
+          {'value': 'Brazilian Portuguese', 'label': 'Português (Brasil)'},
+        ],
+        'auto': 'auto',
+      });
 }
 
 class FakeBatchApi extends Api {
@@ -171,8 +197,10 @@ class FakeBatchApi extends Api {
       ];
 
   @override
-  Future<List<SiteChapterLink>> chapterList(String site, String url) async =>
-      [for (var n = 1; n <= 184; n++) SiteChapterLink(chapter: n.toDouble(), url: 'https://mangadex.org/chapter/$n')];
+  Future<({String? title, List<SiteChapterLink> chapters})> chapterList(String site, String url) async => (
+        title: 'Solo Spell Caster',
+        chapters: [for (var n = 1; n <= 184; n++) SiteChapterLink(chapter: n.toDouble(), url: 'https://mangadex.org/chapter/$n')],
+      );
 }
 
 void main() {
@@ -207,6 +235,13 @@ void main() {
     tester.view.physicalSize = phone * ratio;
     tester.view.devicePixelRatio = ratio;
     await shoot(tester, QueueScreen(api: FakeQueueApi()), 'm6-queue');
+    await tester.tap(find.text('Mudar'));
+    await settle(tester);
+    await tester.tap(find.text('Placa de vídeo (GPU)').first);
+    await settle(tester);
+    await tester.tap(find.text('Processador (deixa a GPU livre)').last);
+    await settle(tester);
+    await capture(tester, 'm7-options');
   }, skip: out == null);
 
   testWidgets('reader', (tester) async {

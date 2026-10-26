@@ -43,7 +43,7 @@ function start(): Promise<void> {
   ready = new Promise<void>((resolve, reject) => {
     const script = join(process.cwd(), 'scripts', 'manga_vision.py')
     if (!existsSync(script)) return reject(new Error(`Script de visão não encontrado: ${script}`))
-    startedOn = getSettings().aiDevice
+    startedOn = getSettings().visionDevice
     const env = { ...process.env, MI_VISION_DEVICE: startedOn }
     const child = spawn(pythonExe(), ['-u', script], { cwd: process.cwd(), windowsHide: true, env })
     proc = child
@@ -88,7 +88,8 @@ function start(): Promise<void> {
 }
 
 async function call(cmd: string, args: Record<string, unknown>): Promise<any> {
-  if (proc && startedOn !== getSettings().aiDevice && !pending.size) stopVision()
+  // Moved to the processor or back (a chapter sent with the other choice): started again there.
+  if (proc && startedOn !== getSettings().visionDevice && !pending.size) stopVision()
   lastUsed = Date.now()
   await start()
   const id = nextId++

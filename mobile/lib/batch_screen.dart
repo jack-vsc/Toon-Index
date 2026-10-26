@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'models.dart';
 import 'theme.dart';
+import 'translate_options.dart';
 
 /// "Vários capítulos", as on the PC: the work looked up on MangaDex and mgeko (or its page on any site
 /// given), then a range of its chapters for the PC to translate, or download as they are (a scan
@@ -32,6 +33,9 @@ class _BatchScreenState extends State<BatchScreen> {
   ({String site, String url, String title})? _picked;
   List<SiteChapterLink>? _chapters;
   bool _download = false;
+
+  /// The range translated with these instead of the PC's settings.
+  Map<String, dynamic>? _options;
   String? _busy;
   String? _error;
 
@@ -66,10 +70,15 @@ class _BatchScreenState extends State<BatchScreen> {
   Future<void> _pick(String site, String url, String title) async {
     setState(() => (_picked = (site: site, url: url, title: title), _chapters = null));
     await _run(site == 'link' ? 'Lendo a lista de capítulos (pode levar alguns minutos)…' : 'Lendo os capítulos…', () async {
-      final chapters = await widget.api.chapterList(site, url);
+      final (:title, :chapters) = await widget.api.chapterList(site, url);
       if (!mounted) return;
       setState(() {
         _chapters = chapters;
+        // A link read without the work's name: the name its page gives.
+        if (title != null && title.isNotEmpty && _name.text.trim().isEmpty) {
+          _name.text = title;
+          _picked = (site: site, url: url, title: title);
+        }
         if (chapters.isNotEmpty) {
           _from.text = chapterLabel(chapters.first.chapter);
           _to.text = chapterLabel(chapters.last.chapter);
@@ -91,7 +100,7 @@ class _BatchScreenState extends State<BatchScreen> {
     final work = _name.text.trim().isNotEmpty ? _name.text.trim() : picked.title;
     final site = picked.site == 'link' ? Uri.parse(picked.url).host.replaceFirst(RegExp(r'^www\.'), '') : picked.site;
     await _run('Mandando para o PC…', () async {
-      await widget.api.queueBatch(work: work, site: site, chapters: range, download: _download, source: picked.url);
+      await widget.api.queueBatch(work: work, site: site, chapters: range, download: _download, source: picked.url, options: _download ? null : _options);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('${range.length} capítulos na fila do PC: ${_download ? 'baixados' : 'traduzidos'} um por vez.'),
@@ -159,6 +168,10 @@ class _BatchScreenState extends State<BatchScreen> {
             onChanged: () => setState(() {}),
             onQueue: range.isEmpty || _busy != null ? null : _queue,
           ),
+          if (!_download) ...[
+            const SizedBox(height: 10),
+            TranslateOptionsCard(api: widget.api, onChanged: (o) => _options = o),
+          ],
         ],
         for (final result in _results ?? <CatalogResult>[]) ...[
           const SizedBox(height: 18),

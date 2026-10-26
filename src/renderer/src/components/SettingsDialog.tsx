@@ -440,12 +440,22 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
 
         <section className="grid-2">
           <div>
-            <label className="field-label">Rodar as IAs deste PC em</label>
+            <label className="field-label">Visão (achar e apagar o texto) em</label>
+            <select value={settings.visionDevice} onChange={(e) => patch({ visionDevice: e.target.value as AiDevice })}>
+              <option value="gpu">Placa de vídeo (GPU)</option>
+              <option value="cpu">Processador e RAM (deixa a GPU livre)</option>
+            </select>
+          </div>
+          <div>
+            <label className="field-label">Modelo de tradução deste PC em</label>
             <select value={settings.aiDevice} onChange={(e) => patch({ aiDevice: e.target.value as AiDevice })}>
               <option value="gpu">Placa de vídeo (GPU)</option>
               <option value="cpu">Processador e RAM (sem GPU)</option>
             </select>
           </div>
+        </section>
+
+        <section className="grid-2">
           <div>
             <label className="field-label">Uso da GPU (padrão)</label>
             <select value={settings.gpuSharing} onChange={(e) => patch({ gpuSharing: e.target.value as GpuSharing })}>

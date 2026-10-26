@@ -44,7 +44,9 @@ import type { RemoteJob } from '../shared/remoteJobs'
 import {
   addBatch,
   cancelRemoteJob,
+  cleanOptions,
   clearBatch,
+  setQueueOptions,
   retryBatch,
   listRemoteJobs,
   onRemoteJobsChanged,
@@ -58,7 +60,7 @@ import {
 } from './remoteJobs'
 import { checkNow, onUpdatesChanged, setNtfy, setWorkSources, startUpdates, stopUpdates, updatesStatus } from './updates'
 import { READING_PORT, restartReadingServer, startReadingServer, stopReadingServer } from './readingServer'
-import { getPublicSettings, saveSettings } from './settings'
+import { getPublicSettings, onSettingsChangedElsewhere, saveSettings } from './settings'
 import { cancelTranslations, listModels, testApi, translate } from './translate'
 import { releaseVisionWhenIdle, detect as visionDetect, inpaint as visionInpaint, stopVision } from './vision'
 
@@ -221,6 +223,7 @@ function registerIpc(): void {
   ipcMain.handle('remote:retry-batch', (_e, ids?: string[]) => retryBatch(ids))
   ipcMain.handle('remote:reorder', (_e, ids: string[]) => reorderQueue(ids))
   ipcMain.handle('remote:sort', () => sortQueue())
+  ipcMain.handle('remote:options', (_e, options: unknown) => setQueueOptions(cleanOptions(options)))
   ipcMain.handle('remote:cancel', (_e, id: string) => (cancelRemoteJob(id), remoteQueue()))
   ipcMain.handle('remote:take', () => takeRemoteJob())
   ipcMain.handle('remote:update', (_e, id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>) =>
@@ -264,6 +267,7 @@ app.whenReady().then(() => {
   releaseVisionWhenIdle(() => !(mainWindow?.isVisible() ?? false))
   applyBackground(mainWindow)
   onUpdatesChanged(() => mainWindow?.webContents.send('updates:changed'))
+  onSettingsChangedElsewhere(() => mainWindow?.webContents.send('settings:changed'))
   startUpdates()
   app.on('activate', () => {
     if (mainWindow) {

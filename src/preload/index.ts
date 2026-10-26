@@ -35,6 +35,11 @@ const api: MangaApi = {
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (input) => ipcRenderer.invoke('settings:save', input),
+  onSettingsChanged: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on('settings:changed', listener)
+    return () => ipcRenderer.removeListener('settings:changed', listener)
+  },
   listModels: (profile, apiKey) => ipcRenderer.invoke('models:list', profile, apiKey),
   testApi: (profile, apiKey) => ipcRenderer.invoke('api:test', profile, apiKey),
   translate: (req) => ipcRenderer.invoke('translate', req),
@@ -110,6 +115,7 @@ const api: MangaApi = {
     retryBatch: (ids) => ipcRenderer.invoke('remote:retry-batch', ids),
     reorder: (ids) => ipcRenderer.invoke('remote:reorder', ids),
     sort: () => ipcRenderer.invoke('remote:sort'),
+    setOptions: (options) => ipcRenderer.invoke('remote:options', options),
     cancel: (id) => ipcRenderer.invoke('remote:cancel', id),
     update: (id, patch) => ipcRenderer.invoke('remote:update', id, patch),
     onChanged: (callback) => {

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'models.dart';
 import 'theme.dart';
+import 'translate_options.dart';
 
 /// The PC's queue as it will run, as in its queue window: the chapter on now, the ones waiting (dragged
 /// into another order, or taken off), and the ones that failed, to try again.
@@ -78,6 +79,22 @@ class _QueueScreenState extends State<QueueScreen> {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     if (_error != null) Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                     if (_paused) const Text('Pausada: nada novo começa até continuar.', style: TextStyle(color: accentSoft)),
+                    if (waiting.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      TranslateOptionsCard(
+                        // Made again when the queue's options change, to show them.
+                        key: ValueKey(waiting.first.options.toString()),
+                        api: widget.api,
+                        title: 'Opções da fila (${waiting.length})',
+                        initial: waiting.first.options,
+                        onChanged: (_) {},
+                        apply: (options) async {
+                          await widget.api.setQueueOptions(options);
+                          await _refresh();
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     for (final j in running)
                       ListTile(
                         contentPadding: EdgeInsets.zero,
@@ -118,7 +135,10 @@ class _QueueScreenState extends State<QueueScreen> {
                       child: ListTile(
                         leading: SizedBox(width: 28, child: Text('${i + 1}', textAlign: TextAlign.end, style: const TextStyle(color: muted))),
                         title: Text(j.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text(j.downloadOnly ? 'baixar' : 'traduzir', style: const TextStyle(color: muted, fontSize: 12)),
+                        subtitle: Text(
+                          [j.downloadOnly ? 'baixar' : 'traduzir', if (j.options?['visionDevice'] == 'cpu') 'visão na CPU'].join(' · '),
+                          style: const TextStyle(color: muted, fontSize: 12),
+                        ),
                         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                           IconButton(
                             tooltip: 'Para o começo da fila',

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RemoteJob, RemoteQueue } from '../shared/remoteJobs'
+import type { TranslateOptions } from '../shared/types'
 
 /** Finished ones are kept a while for the phone to see how they went. */
 const KEEP_DONE_DAYS = 7
@@ -46,7 +47,14 @@ export function pauseRemoteJobs(paused: boolean): RemoteQueue {
 }
 
 /** A range of a work's chapters, translated in order, after whatever is queued already. */
-export function addBatch(work: string, site: string, chapters: { chapter: number; url: string }[], download = false, device = 'PC'): RemoteQueue {
+export function addBatch(
+  work: string,
+  site: string,
+  chapters: { chapter: number; url: string }[],
+  download = false,
+  device = 'PC',
+  options: Partial<TranslateOptions> | null = null
+): RemoteQueue {
   const clean = work.trim()
   if (!clean) throw new Error('Informe o nome da obra.')
   if (!chapters.length) throw new Error('Nenhum capítulo nessa faixa.')
@@ -61,9 +69,45 @@ export function addBatch(work: string, site: string, chapters: { chapter: number
     createdAt: now + i,
     updatedAt: now + i,
     status: 'queued',
-    batch: { work: clean, chapter: c.chapter, site, ...(download && { download }) }
+    batch: { work: clean, chapter: c.chapter, site, ...(download && { download }) },
+    ...(options && !download && { options })
   }))
   save(inChapterOrder([...listRemoteJobs(), ...added], clean))
+  return remoteQueue()
+}
+
+/**
+ * The options sent with a request, kept when they are ones the app knows (a phone on another version may
+ * send others); null for none.
+ */
+export function cleanOptions(raw: unknown): Partial<TranslateOptions> | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const out: Partial<TranslateOptions> = {}
+  const text = (k: 'activeProfileId' | 'sourceLanguage' | 'targetLanguage') => typeof r[k] === 'string' && (out[k] = r[k] as string)
+  text('activeProfileId')
+  text('sourceLanguage')
+  text('targetLanguage')
+  if (typeof r.concurrency === 'number') out.concurrency = Math.min(8, Math.max(1, Math.round(r.concurrency)))
+  if (r.speed === 'fast' || r.speed === 'balanced' || r.speed === 'quality') out.speed = r.speed
+  if (typeof r.translateSfx === 'boolean') out.translateSfx = r.translateSfx
+  if (typeof r.skipStart === 'number') out.skipStart = Math.min(50, Math.max(0, Math.round(r.skipStart)))
+  if (typeof r.skipEnd === 'number') out.skipEnd = Math.min(50, Math.max(0, Math.round(r.skipEnd)))
+  if (r.gpuSharing === 'auto' || r.gpuSharing === 'phased' || r.gpuSharing === 'together') out.gpuSharing = r.gpuSharing
+  if (r.aiDevice === 'gpu' || r.aiDevice === 'cpu') out.aiDevice = r.aiDevice
+  if (r.visionDevice === 'gpu' || r.visionDevice === 'cpu') out.visionDevice = r.visionDevice
+  return Object.keys(out).length ? out : null
+}
+
+/** Every queued request (or the ones in `ids`) is translated with these options; null goes back to the PC's settings. */
+export function setQueueOptions(options: Partial<TranslateOptions> | null, ids?: string[]): RemoteQueue {
+  save(
+    listRemoteJobs().map((j) => {
+      if (j.status !== 'queued' || (ids && !ids.includes(j.id))) return j
+      const { options: _old, ...rest } = j
+      return options ? { ...rest, options } : rest
+    })
+  )
   return remoteQueue()
 }
 
@@ -127,20 +171,22 @@ export function sortQueue(): RemoteQueue {
   return remoteQueue()
 }
 
-export function addLinkJob(url: string, device: string): RemoteJob {
+export function addLinkJob(url: string, device: string, options: Partial<TranslateOptions> | null = null): RemoteJob {
   const parsed = new URL(url)
   if (!/^https?:$/.test(parsed.protocol)) throw new Error('Só links http ou https.')
-  return add({ kind: 'link', url, name: parsed.hostname + parsed.pathname, device })
+  return add({ kind: 'link', url, name: parsed.hostname + parsed.pathname, device, ...(options && { options }) })
 }
 
-export function addPdfJob(name: string, pdf: Buffer, device: string): RemoteJob {
+export function addPdfJob(name: string, pdf: Buffer, device: string, options: Partial<TranslateOptions> | null = null): RemoteJob {
   if (pdf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('O arquivo enviado não é um PDF.')
   const clean = (name.trim() || 'capitulo.pdf').replace(/[\\/:*?"<>|]+/g, ' ')
   // Written before the job is listed, so the window never takes a job whose PDF is not there yet.
-  return add({ kind: 'pdf', name: /\.pdf$/i.test(clean) ? clean : `${clean}.pdf`, device }, (id) => writeFileSync(pdfPath(id), pdf))
+  return add({ kind: 'pdf', name: /\.pdf$/i.test(clean) ? clean : `${clean}.pdf`, device, ...(options && { options }) }, (id) =>
+    writeFileSync(pdfPath(id), pdf)
+  )
 }
 
-function add(fields: Pick<RemoteJob, 'kind' | 'name' | 'device'> & { url?: string }, before?: (id: string) => void): RemoteJob {
+function add(fields: Pick<RemoteJob, 'kind' | 'name' | 'device' | 'options'> & { url?: string }, before?: (id: string) => void): RemoteJob {
   mkdirSync(dir(), { recursive: true })
   const now = Date.now()
   const job: RemoteJob = { id: randomUUID(), ...fields, createdAt: now, updatedAt: now, status: 'queued' }

@@ -179,13 +179,26 @@ class Api {
 
   Future<void> pauseQueue(bool paused) => _post('/api/queue/pause', {'paused': paused});
 
-  /// Asks the PC to translate the chapter at a site's link.
-  Future<void> translateLink(String link) => _post('/api/translate', {'url': link});
+  /// The PC's translation settings: its defaults, its APIs and languages, to choose a request's options from.
+  Future<PcTranslateSettings> translateSettings() async {
+    final response = await _send((url) => http.get(url('/api/translate/options'), headers: authHeaders));
+    return PcTranslateSettings.fromJson(jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  /// Makes these the PC's defaults for everything it translates.
+  Future<void> saveTranslateDefaults(Map<String, dynamic> options) => _post('/api/translate/options', {'options': options});
+
+  /// Every chapter waiting in the PC's queue translated with these options (null: with the PC's settings).
+  Future<void> setQueueOptions(Map<String, dynamic>? options) => _post('/api/queue/options', {'options': options});
+
+  /// Asks the PC to translate the chapter at a site's link (with options of its own, or the PC's).
+  Future<void> translateLink(String link, {Map<String, dynamic>? options}) => _post('/api/translate', {'url': link, 'options': ?options});
 
   /// Sends a PDF for the PC to translate, streamed (a chapter's scans can be large).
-  Future<void> translatePdf(String name, Stream<List<int>> bytes, int? length) async {
+  Future<void> translatePdf(String name, Stream<List<int>> bytes, int? length, {Map<String, dynamic>? options}) async {
+    final query = 'name=${Uri.encodeQueryComponent(name)}${options != null ? '&options=${Uri.encodeQueryComponent(jsonEncode(options))}' : ''}';
     // Streams can be read once, so this goes only to the address that answered last.
-    final request = http.StreamedRequest('POST', Uri.parse('$base/api/translate/pdf?name=${Uri.encodeQueryComponent(name)}'))
+    final request = http.StreamedRequest('POST', Uri.parse('$base/api/translate/pdf?$query'))
       ..headers.addAll(authHeaders)
       ..headers['Content-Type'] = 'application/pdf';
     if (length != null) request.contentLength = length;
@@ -207,21 +220,35 @@ class Api {
     return (jsonDecode(utf8.decode(response.bodyBytes)) as List).map((r) => CatalogResult.fromJson(r as Map<String, dynamic>)).toList();
   }
 
-  /// Every chapter of the work on that site (`site` 'link' for a work's page on any site), in order.
-  /// Long lists come a page at a time, so this can take a few minutes.
-  Future<List<SiteChapterLink>> chapterList(String site, String url) async {
-    final response = await _postFor('/api/works/chapters', {'site': site, 'url': url}, const Duration(minutes: 6));
-    return (jsonDecode(utf8.decode(response.bodyBytes)) as List).map((c) => SiteChapterLink.fromJson(c as Map<String, dynamic>)).toList();
+  /// Every chapter of the work on that site (`site` 'link' for a work's page on any site), in order, and
+  /// the work's name as its page gives it. Long lists come a page at a time, so this can take a few minutes.
+  Future<({String? title, List<SiteChapterLink> chapters})> chapterList(String site, String url) async {
+    final response = await _postFor('/api/works/chapters', {'site': site, 'url': url, 'withTitle': true}, const Duration(minutes: 6));
+    final body = jsonDecode(utf8.decode(response.bodyBytes));
+    // A PC from before the name came along sends the list alone.
+    final list = body is Map ? body['chapters'] as List : body as List;
+    return (
+      title: body is Map ? body['title'] as String? : null,
+      chapters: list.map((c) => SiteChapterLink.fromJson(c as Map<String, dynamic>)).toList(),
+    );
   }
 
   /// A range of chapters for the PC to translate (or download as they are) one at a time.
-  Future<void> queueBatch({required String work, required String site, required List<SiteChapterLink> chapters, required bool download, String? source}) =>
+  Future<void> queueBatch({
+    required String work,
+    required String site,
+    required List<SiteChapterLink> chapters,
+    required bool download,
+    String? source,
+    Map<String, dynamic>? options,
+  }) =>
       _post('/api/batch', {
         'work': work,
         'site': site,
         'chapters': [for (final c in chapters) {'chapter': c.chapter, 'url': c.url}],
         'download': download,
         'source': ?source,
+        'options': ?options,
       });
 
   Future<void> cancelJob(String id) => _post('/api/translate/cancel', {'id': id});

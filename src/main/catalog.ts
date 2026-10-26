@@ -292,6 +292,14 @@ const TAGS_PT: Record<string, string> = {
   Wuxia: 'Wuxia'
 }
 
+/** A MangaDex work's name, in Portuguese when it has one there, else in English. */
+async function mangadexTitle(id: string): Promise<string | null> {
+  const { data } = (await getJson(`${MANGADEX}/manga/${id}`)) as { data: MangadexManga }
+  const { title, altTitles } = data.attributes
+  const alt = (lang: string) => title[lang] ?? altTitles.find((a) => a[lang])?.[lang]
+  return alt('pt-br') ?? alt('en') ?? Object.values(title)[0] ?? null
+}
+
 async function mangadexDetails(id: string): Promise<{ title: string | null; names: string[]; cover: Buffer | null; info: WorkInfo }> {
   const { data } = (await getJson(`${MANGADEX}/manga/${id}?includes[]=cover_art`)) as {
     data: MangadexManga & {
@@ -405,12 +413,17 @@ async function findSameWork(work: Work, win: BrowserWindow): Promise<{ picks: Ca
 }
 
 /**
- * Every chapter of the work on its site, in order, for translating a range of them. MangaDex's are the
- * English ones it hosts (not links to official sites); mgeko lists them all on one page.
+ * Every chapter of the work on its site, in order, for translating a range of them, and the work's name
+ * as its page gives it (for a link pasted without one). MangaDex's are the English ones it hosts (not
+ * links to official sites); mgeko lists them all on one page.
  */
-export async function chapterList(match: { site: CatalogSite | 'link'; url: string }): Promise<ChapterLink[]> {
+export async function chapterList(match: { site: CatalogSite | 'link'; url: string }): Promise<{ title: string | null; chapters: ChapterLink[] }> {
   // A pasted MangaDex link too: its site lists the chapters a page at a time, the API all of them.
-  if (match.site === 'mangadex' || mangadexId(match.url)) return mangadexChapters(match.url)
+  const id = mangadexId(match.url)
+  if (match.site === 'mangadex' || id) {
+    const [title, chapters] = await Promise.all([id ? mangadexTitle(id).catch(() => null) : null, mangadexChapters(match.url)])
+    return { title, chapters }
+  }
   if (match.site === 'link') return pageChapters(match.url)
   return withWindow(undefined, async (w) => {
     await load(w, new URL('all-chapters/', match.url.endsWith('/') ? match.url : `${match.url}/`).href)
@@ -418,20 +431,22 @@ export async function chapterList(match: { site: CatalogSite | 'link'; url: stri
     const links = (await w.webContents.executeJavaScript(
       `[...document.querySelectorAll('.chapter-list a[href]')].map((a) => ({ href: a.href, text: (a.innerText || '').trim().slice(0, 120) }))`
     )) as PageLink[]
-    return chapterLinks(match.url, links, true)
+    return { title: null, chapters: chapterLinks(match.url, links, true) }
   })
 }
 
 /** Any site: the chapters linked from the work's page, scrolled to the end for lists that load as they show. */
-async function pageChapters(url: string): Promise<ChapterLink[]> {
+async function pageChapters(url: string): Promise<{ title: string | null; chapters: ChapterLink[] }> {
   if (!/^https?:\/\//i.test(url)) throw new Error('Cole o link da página da obra (o que começa com https://).')
   return withWindow(undefined, async (w) => {
     await load(w, url)
     // After the wait: some sites only send to their sign-in page once the page's script has run.
     await sleep(SETTLE_MS)
-    if (/\/(entrar|login|signin|sign-in|auth)\b/i.test(new URL(w.webContents.getURL()).pathname)) {
+    if (/\/(entrar|login|signin|sign-in|auth)/i.test(new URL(w.webContents.getURL()).pathname)) {
       throw new Error('O site pediu login: clique em "Entrar no site", entre com a sua conta e tente de novo.')
     }
+    // Read before the list's pages, which can take the window to other addresses.
+    const { title } = (await w.webContents.executeJavaScript(PAGE_DETAILS).catch(() => ({ title: '' }))) as { title: string }
     // Long lists come a page at a time (numbered pages, "next" links, or buttons that swap the list in
     // place): every page is read until one adds no chapter.
     const seen = new Map<string, PageLink>()
@@ -451,8 +466,20 @@ async function pageChapters(url: string): Promise<ChapterLink[]> {
         for (let waited = 0; waited < 8_000 && (await listSignature(w)) === before; waited += 300) await sleep(300)
       }
     }
-    return fillChapterGaps(chapterLinks(url, [...seen.values()]))
+    return { title: workTitle(title), chapters: fillChapterGaps(chapterLinks(url, [...seen.values()])) }
   })
+}
+
+/** A page's title without what sites add to it: the last chapter ("[Ch. 229]"), "Read … Online", "Manga". */
+function workTitle(title: string): string | null {
+  const name = title
+    .replace(/[[(]\s*(?:ch|chap|chapter|cap|capítulo|ep)[^\])]*[\])]/gi, '')
+    .replace(/\s+(?:chapter|cap[ií]tulo|ch\.?)\s*[\d.]+.*$/i, '')
+    .replace(/^read\s+/i, '')
+    .replace(/\s+(?:manga|manhwa|manhua|webtoon)?\s*(?:online|free|em português)?(?:\s+(?:online|free))?\s*$/i, '')
+    .replace(/\s+(?:manga|manhwa|manhua)$/i, '')
+    .trim()
+  return name || null
 }
 
 // Sites with ten chapters a page list long works over a hundred pages.

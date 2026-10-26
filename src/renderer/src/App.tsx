@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppError } from '../../shared/errors'
-import { activeProfile, isDownloaded, profileReady, type AppSettings, type LibraryEntry, type PublicSettings, type ReaderMode } from '../../shared/types'
+import {
+  activeProfile,
+  isDownloaded,
+  profileReady,
+  TRANSLATE_OPTION_KEYS,
+  type AppSettings,
+  type LibraryEntry,
+  type PublicSettings,
+  type ReaderMode,
+  type TranslateOptions
+} from '../../shared/types'
 import type { ReadingRecord } from '../../shared/reading'
 import type { RemoteJob, RemoteQueue } from '../../shared/remoteJobs'
 import type { UpdatesStatus, WorkUpdate } from '../../shared/updates'
@@ -97,7 +107,10 @@ export default function App() {
     const stopUpdates = window.api.updates.onChanged(() => window.api.updates.status().then(setUpdates))
     // Chapters read in the browser arrive while the app is open (and may bring new works).
     const stopReading = window.api.reading.onChanged(refreshLibrary)
+    // Defaults chosen on the phone.
+    const stopSettings = window.api.onSettingsChanged(() => window.api.getSettings().then(setSettings))
     return () => {
+      stopSettings()
       stopQueue()
       stopUpdates()
       stopReading()
@@ -233,7 +246,8 @@ export default function App() {
       // Behind what is on screen: the bar on top opens it.
       toBackground(true)
       if (!(await openFile(selected, remote.url, true))) throw new Error('Não foi possível abrir o PDF.')
-      await startTranslation(defaultChoice(job.current!.numPages, current))
+      // Sent with options of its own (from the phone, or the queue's): they hold for this chapter only.
+      await startTranslation(defaultChoice(job.current!.numPages, { ...current, ...remote.options }))
       if ((await window.api.remote.queue()).paused) throw new Paused()
       if (!savedEntry.current && job.current && job.current.translatedCount > 0) await finish()
       if (!savedEntry.current) throw new Error(job.current?.stopReason?.message ?? 'Nenhuma página foi traduzida.')
@@ -250,6 +264,7 @@ export default function App() {
       }
       closeJob()
     } finally {
+      if (remote.options) await saveSettingsPatch(pickOptions(current))
       remoteBusy.current = false
       setRemoteJob(null)
       setRemoteFinished((n) => n + 1)
@@ -292,15 +307,16 @@ export default function App() {
       setView('processing')
     }
     await job.current.select(choice.pages, choice.untranslated)
-    await translate(saved.concurrency)
+    await translate(saved.concurrency, saved)
   }
 
-  async function translate(concurrency = settings?.concurrency ?? 3) {
+  /** `run`: the settings just saved for this run (the state may not have them yet). */
+  async function translate(concurrency = settings?.concurrency ?? 3, run = settings) {
     const current = job.current
-    if (!current || !settings) return
+    if (!current || !run) return
     setRunning(true)
     setStopReason(null)
-    await current.run(concurrency, await runPhased(settings))
+    await current.run(concurrency, await runPhased(run))
     setRunning(false)
     setStopping(false)
     setStopReason(current.stopReason)
@@ -726,7 +742,7 @@ export default function App() {
             </div>
           )}
           {queue && <BatchBar queue={queue} running={remoteJob} onOpen={inBackground ? showJob : undefined} onQueue={() => setQueueOpen(true)} />}
-          {queue && queueOpen && <QueueDialog queue={queue} running={remoteJob} onClose={() => setQueueOpen(false)} />}
+          {queue && queueOpen && settings && <QueueDialog queue={queue} running={remoteJob} settings={settings} onClose={() => setQueueOpen(false)} />}
 
           {message && (
             <div className="banner" onClick={() => setMessage(null)}>
@@ -976,17 +992,13 @@ function defaultChoice(numPages: number, s: AppSettings): SetupChoice {
   return {
     pages,
     untranslated: pages.filter((n) => n <= skipStart || n > numPages - skipEnd),
-    options: {
-      sourceLanguage: s.sourceLanguage,
-      targetLanguage: s.targetLanguage,
-      concurrency: s.concurrency,
-      speed: s.speed,
-      translateSfx: s.translateSfx,
-      skipStart,
-      skipEnd,
-      gpuSharing: s.gpuSharing
-    }
+    options: { ...pickOptions(s), skipStart, skipEnd }
   }
+}
+
+/** The settings a chapter is translated with. */
+function pickOptions(s: AppSettings): TranslateOptions {
+  return Object.fromEntries(TRANSLATE_OPTION_KEYS.map((k) => [k, s[k]])) as unknown as TranslateOptions
 }
 
 /** Thrown when the queue was paused mid-chapter: the chapter goes back to the queue. */

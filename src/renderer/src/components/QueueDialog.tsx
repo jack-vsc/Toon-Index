@@ -1,11 +1,33 @@
 import { useEffect, useState } from 'react'
 import type { RemoteJob, RemoteQueue } from '../../../shared/remoteJobs'
+import {
+  isLocalProfile,
+  languageLabel,
+  TRANSLATE_OPTION_KEYS,
+  type AiDevice,
+  type GpuSharing,
+  type PublicSettings,
+  type Speed,
+  type TranslateOptions
+} from '../../../shared/types'
+import { LanguageSelect } from './LanguageSelect'
+import { GPU_LABEL } from './SetupView'
 
 /**
  * The queue as it will run: the chapter on now, then the ones waiting, which can be dragged or moved
  * up, down or to the top, or taken off; and the ones that failed, to try again.
  */
-export function QueueDialog({ queue, running, onClose }: { queue: RemoteQueue; running: RemoteJob | null; onClose: () => void }) {
+export function QueueDialog({
+  queue,
+  running,
+  settings,
+  onClose
+}: {
+  queue: RemoteQueue
+  running: RemoteJob | null
+  settings: PublicSettings
+  onClose: () => void
+}) {
   const waiting = queue.jobs.filter((j) => j.status === 'queued')
   const failed = queue.jobs.filter((j) => j.status === 'failed' && j.kind === 'link' && Date.now() - j.updatedAt < 86_400_000)
   // The order shown while dragging, before it is saved.
@@ -41,6 +63,8 @@ export function QueueDialog({ queue, running, onClose }: { queue: RemoteQueue; r
           </button>
         </div>
         <p className="hint">Arraste um capítulo, ou use as setas, para mudar a ordem em que serão traduzidos ou baixados.</p>
+
+        {waiting.length > 0 && <QueueOptions waiting={waiting} settings={settings} />}
 
         {running && (
           <div className="queue-row now">
@@ -128,6 +152,126 @@ export function QueueDialog({ queue, running, onClose }: { queue: RemoteQueue; r
   )
 }
 
+const SPEED: Record<Speed, string> = { fast: 'Rápido', balanced: 'Equilibrado', quality: 'Qualidade máxima' }
+
+/**
+ * The options the chapters waiting are translated with: the PC's settings, or others chosen here for
+ * the whole queue (the vision server on the processor overnight, say).
+ */
+function QueueOptions({ waiting, settings }: { waiting: RemoteJob[]; settings: PublicSettings }) {
+  const own = waiting.find((j) => j.options)?.options
+  const mixed = waiting.some((j) => JSON.stringify(j.options ?? null) !== JSON.stringify(waiting[0].options ?? null))
+  const [open, setOpen] = useState(false)
+  const base = Object.fromEntries(TRANSLATE_OPTION_KEYS.map((k) => [k, settings[k]])) as unknown as TranslateOptions
+  const [draft, setDraft] = useState<TranslateOptions>({ ...base, ...own })
+  const patch = (p: Partial<TranslateOptions>) => setDraft((d) => ({ ...d, ...p }))
+  const profile = settings.profiles.find((p) => p.id === draft.activeProfileId)
+  const now = { ...base, ...own }
+  const summary = [
+    `visão na ${now.visionDevice === 'cpu' ? 'CPU' : 'GPU'}`,
+    settings.profiles.find((p) => p.id === now.activeProfileId)?.name,
+    SPEED[now.speed],
+    languageLabel(now.targetLanguage)
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <div className="queue-options">
+      <div className="queue-head">
+        <span>
+          <strong>Opções da fila:</strong> {mixed ? 'cada capítulo com as suas' : own ? summary : `as do PC (${summary})`}
+        </span>
+        <button className="secondary small" onClick={() => setOpen(!open)}>
+          {open ? 'Fechar' : 'Mudar'}
+        </button>
+      </div>
+      {open && (
+        <>
+          <div className="grid-2">
+            <div>
+              <label className="field-label">Visão (achar e apagar o texto) em</label>
+              <select value={draft.visionDevice} onChange={(e) => patch({ visionDevice: e.target.value as AiDevice })}>
+                <option value="gpu">Placa de vídeo (GPU)</option>
+                <option value="cpu">Processador (deixa a GPU livre)</option>
+              </select>
+            </div>
+            <div>
+              <label className="field-label">API</label>
+              <select value={draft.activeProfileId} onChange={(e) => patch({ activeProfileId: e.target.value })}>
+                {settings.profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.model || 'sem modelo'}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {profile && isLocalProfile(profile) && (
+              <div>
+                <label className="field-label">Modelo de tradução local em</label>
+                <select value={draft.aiDevice} onChange={(e) => patch({ aiDevice: e.target.value as AiDevice })}>
+                  <option value="gpu">Placa de vídeo (GPU)</option>
+                  <option value="cpu">Processador e RAM</option>
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="field-label">Velocidade</label>
+              <select value={draft.speed} onChange={(e) => patch({ speed: e.target.value as Speed })}>
+                {(Object.keys(SPEED) as Speed[]).map((s) => (
+                  <option key={s} value={s}>
+                    {SPEED[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Idioma original</label>
+              <LanguageSelect allowAuto value={draft.sourceLanguage} onChange={(sourceLanguage) => patch({ sourceLanguage })} />
+            </div>
+            <div>
+              <label className="field-label">Traduzir para</label>
+              <LanguageSelect value={draft.targetLanguage} onChange={(targetLanguage) => patch({ targetLanguage })} />
+            </div>
+            <div>
+              <label className="field-label">Uso da GPU</label>
+              <select value={draft.gpuSharing} onChange={(e) => patch({ gpuSharing: e.target.value as GpuSharing })}>
+                {(Object.keys(GPU_LABEL) as GpuSharing[]).map((g) => (
+                  <option key={g} value={g}>
+                    {GPU_LABEL[g]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Páginas ao mesmo tempo</label>
+              <select value={draft.concurrency} onChange={(e) => patch({ concurrency: Number(e.target.value) })}>
+                {[1, 2, 3, 4, 5, 6, 8].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <label className="checkbox">
+            <input type="checkbox" checked={draft.translateSfx} onChange={(e) => patch({ translateSfx: e.target.checked })} />
+            Traduzir onomatopeias
+          </label>
+          <div className="modal-actions">
+            <button className="secondary small" onClick={() => (window.api.remote.setOptions(null), setOpen(false))}>
+              Usar as do PC
+            </button>
+            <button className="small" onClick={() => (window.api.remote.setOptions(draft), setOpen(false))}>
+              Aplicar aos {waiting.length} da fila
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function JobLabel({ job }: { job: RemoteJob }) {
   return (
     <span className="queue-name">
@@ -139,6 +283,7 @@ function JobLabel({ job }: { job: RemoteJob }) {
         <strong>{job.kind === 'link' ? job.url : job.name}</strong>
       )}
       <span className="badge">{job.batch?.download ? 'baixar' : 'traduzir'}</span>
+      {job.options?.visionDevice === 'cpu' && <span className="badge">visão na CPU</span>}
     </span>
   )
 }

@@ -10,6 +10,7 @@ import type {
   SaveLibraryInput,
   SaveSettingsInput,
   TextBlock,
+  TranslateOptions,
   TranslateRequest,
   VisionDetection,
   WebChapter,
@@ -52,6 +53,8 @@ export interface MangaApi {
   }
   getSettings(): Promise<PublicSettings>
   saveSettings(input: SaveSettingsInput): Promise<PublicSettings>
+  /** The settings were changed from the phone; returns a function that stops listening. */
+  onSettingsChanged(callback: () => void): () => void
   /** `apiKey` is a key typed but not saved yet; the saved one is used otherwise. */
   listModels(profile: ApiProfile, apiKey?: string): Promise<{ models: ModelOption[]; suggested: string }>
   /** Sends a tiny request with an image; rejects with the reason when the API or model can't be used. */
@@ -104,7 +107,8 @@ export interface MangaApi {
     /** By work id, the covers found on the catalog sites (data URLs). */
     covers(): Promise<Record<string, string>>
     /** Every chapter of a work on MangaDex or mgeko, or on any site from its page's link ('link'), in order. */
-    chapters(match: { site: CatalogSite | 'link'; url: string }): Promise<ChapterLink[]>
+    /** The chapters, and the work's name as its page gives it. */
+    chapters(match: { site: CatalogSite | 'link'; url: string }): Promise<{ title: string | null; chapters: ChapterLink[] }>
     /** Looks a name up on MangaDex, mgeko and comix. */
     search(query: string): Promise<CatalogResult[]>
     /** Takes the chosen matches' names, pages and cover into the work. */
@@ -154,6 +158,8 @@ export interface MangaApi {
     reorder(ids: string[]): Promise<RemoteQueue>
     /** Every work's queued chapters back in the order of their numbers. */
     sort(): Promise<RemoteQueue>
+    /** Every queued request translated with these options; null: with the PC's settings again. */
+    setOptions(options: Partial<TranslateOptions> | null): Promise<RemoteQueue>
     /** Takes one queued request off the queue. */
     cancel(id: string): Promise<RemoteQueue>
     /** Returns a function that stops listening. */

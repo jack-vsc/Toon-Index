@@ -358,7 +358,11 @@ class RemoteJob {
     this.work,
     this.chapter,
     this.downloadOnly = false,
+    this.options,
   });
+
+  /// Translated with these instead of the PC's settings.
+  final Map<String, dynamic>? options;
 
   /// For a chapter of a range ("Vários capítulos"): its work and number, and whether it is only downloaded.
   final String? work;
@@ -393,7 +397,44 @@ class RemoteJob {
         work: (j['batch'] as Map<String, dynamic>?)?['work'] as String?,
         chapter: ((j['batch'] as Map<String, dynamic>?)?['chapter'] as num?)?.toDouble(),
         downloadOnly: (j['batch'] as Map<String, dynamic>?)?['download'] == true,
+        options: j['options'] == null ? null : Map<String, dynamic>.from(j['options'] as Map),
       );
+}
+
+/// The PC's translation settings, to choose a request's options from: its defaults (the keys of
+/// TranslateOptions in src/shared/types.ts), its APIs, and the languages it translates.
+class PcTranslateSettings {
+  PcTranslateSettings({required this.defaults, required this.profiles, required this.languages, required this.auto});
+
+  final Map<String, dynamic> defaults;
+  final List<({String id, String name, String model, bool ready, bool local})> profiles;
+  final List<({String value, String label})> languages;
+
+  /// The source language value for "detect it".
+  final String auto;
+
+  factory PcTranslateSettings.fromJson(Map<String, dynamic> j) => PcTranslateSettings(
+        defaults: Map<String, dynamic>.from(j['defaults'] as Map),
+        profiles: [
+          for (final p in (j['profiles'] as List).cast<Map<String, dynamic>>())
+            (id: p['id'] as String, name: p['name'] as String, model: p['model'] as String? ?? '', ready: p['ready'] == true, local: p['local'] == true),
+        ],
+        languages: [for (final l in (j['languages'] as List).cast<Map<String, dynamic>>()) (value: l['value'] as String, label: l['label'] as String)],
+        auto: j['auto'] as String? ?? 'auto',
+      );
+
+  String languageLabel(String value) => value == auto ? 'Detectar' : languages.where((l) => l.value == value).firstOrNull?.label ?? value;
+
+  /// "Visão na GPU · Gemini · Rápido · Português (Brasil)".
+  String summary(Map<String, dynamic> o) => [
+        'Visão na ${o['visionDevice'] == 'cpu' ? 'CPU' : 'GPU'}',
+        ?profiles.where((p) => p.id == o['activeProfileId']).firstOrNull?.name,
+        speeds[o['speed']] ?? '',
+        languageLabel(o['targetLanguage'] as String? ?? ''),
+      ].where((s) => s.isNotEmpty).join(' · ');
+
+  static const speeds = {'fast': 'Rápido', 'balanced': 'Equilibrado', 'quality': 'Qualidade máxima'};
+  static const gpuSharing = {'auto': 'Automático', 'phased': 'Uma IA de cada vez (GPU pequena)', 'together': 'Tudo junto (GPU grande)'};
 }
 
 /// A work found on one of the PC's catalog sites (src/shared/catalog.ts).

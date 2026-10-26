@@ -4,6 +4,8 @@
  * takes them one at a time, in order, when it is free, and the result goes into its library.
  */
 
+import type { TranslateOptions } from './types'
+
 export type RemoteJobStatus = 'queued' | 'running' | 'done' | 'failed'
 
 export interface RemoteJob {
@@ -26,6 +28,8 @@ export interface RemoteJob {
    * `download`: only saved as it is (already in the language read, to read offline), not translated.
    */
   batch?: { work: string; chapter: number; site: string; download?: boolean }
+  /** Translated with these instead of the PC's settings (chosen on the phone, or for the whole queue). */
+  options?: Partial<TranslateOptions>
 }
 
 export interface RemoteQueue {

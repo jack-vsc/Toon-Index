@@ -11,7 +11,22 @@ import { CATALOG_SITES, type CatalogSite } from '../shared/catalog'
 import { chapterList, searchCatalogToChoose } from './catalog'
 import { updatesStatus } from './updates'
 import { bookmarkPage, continueList, pageInfo } from './extensionApi'
-import { addBatch, addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs, pauseRemoteJobs, remoteQueue, reorderQueue, retryBatch, sortQueue } from './remoteJobs'
+import {
+  addBatch,
+  addLinkJob,
+  addPdfJob,
+  cancelRemoteJob,
+  cleanOptions,
+  listRemoteJobs,
+  pauseRemoteJobs,
+  remoteQueue,
+  reorderQueue,
+  retryBatch,
+  setQueueOptions,
+  sortQueue
+} from './remoteJobs'
+import { getPublicSettings, saveTranslateDefaults } from './settings'
+import { AUTO_LANGUAGE, isLocalProfile, LANGUAGES, profileReady, TRANSLATE_OPTION_KEYS } from '../shared/types'
 import { finishedInApp, forgetReading, libraryChangedElsewhere, listReading, markRead, readInApp, reportReading } from './reading'
 import { mergeData, resolveWork } from './dataSync'
 
@@ -135,19 +150,36 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   // The queue as it will run, and changing it from the phone as from the PC's queue window.
   if (req.method === 'GET' && path === '/api/queue') return send(res, 200, remoteQueue())
   if (req.method === 'POST' && path.startsWith('/api/queue/')) {
-    const { ids, paused } = (await readBody(req)) as { ids?: unknown; paused?: unknown }
+    const { ids, paused, options } = (await readBody(req)) as { ids?: unknown; paused?: unknown; options?: unknown }
     const list = Array.isArray(ids) && ids.every((i) => typeof i === 'string') ? (ids as string[]) : undefined
     if (path === '/api/queue/reorder' && list) return send(res, 200, reorderQueue(list))
+    // The whole queue (or these) translated with other options; null: with the PC's settings again.
+    if (path === '/api/queue/options') return send(res, 200, setQueueOptions(cleanOptions(options), list))
     if (path === '/api/queue/sort') return send(res, 200, sortQueue())
     if (path === '/api/queue/retry') return send(res, 200, retryBatch(list))
     if (path === '/api/queue/pause' && typeof paused === 'boolean') return send(res, 200, pauseRemoteJobs(paused))
     return send(res, 400, { error: 'Pedido da fila inválido.' })
   }
+  // The PC's translation settings, to choose from on the phone (its APIs, languages…), and saving them as its defaults.
+  if (req.method === 'GET' && path === '/api/translate/options') {
+    const s = getPublicSettings()
+    return send(res, 200, {
+      defaults: Object.fromEntries(TRANSLATE_OPTION_KEYS.map((k) => [k, s[k]])),
+      profiles: s.profiles.map((p) => ({ id: p.id, name: p.name, model: p.model, ready: profileReady(p, s.hasKey), local: isLocalProfile(p) })),
+      languages: LANGUAGES,
+      auto: AUTO_LANGUAGE
+    })
+  }
+  if (req.method === 'POST' && path === '/api/translate/options') {
+    const options = cleanOptions(((await readBody(req)) as { options?: unknown }).options)
+    if (options) saveTranslateDefaults(options)
+    return send(res, 200, { ok: true })
+  }
   if (req.method === 'POST' && path === '/api/translate') {
-    const { url: link } = (await readBody(req)) as { url?: unknown }
+    const { url: link, options } = (await readBody(req)) as { url?: unknown; options?: unknown }
     if (typeof link !== 'string') return send(res, 400, { error: 'Falta o link.' })
     try {
-      return send(res, 200, addLinkJob(link.trim(), device.name))
+      return send(res, 200, addLinkJob(link.trim(), device.name, cleanOptions(options)))
     } catch (err) {
       return send(res, 400, { error: err instanceof TypeError ? 'Link inválido.' : (err as Error).message })
     }
@@ -174,35 +206,45 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     return send(res, 200, await searchCatalogToChoose(query))
   }
   if (req.method === 'POST' && path === '/api/works/chapters') {
-    const { site, url: page } = (await readBody(req)) as { site?: unknown; url?: unknown }
+    const { site, url: page, withTitle } = (await readBody(req)) as { site?: unknown; url?: unknown; withTitle?: unknown }
     if (typeof page !== 'string' || (site !== 'link' && !(typeof site === 'string' && site in CATALOG_SITES))) {
       return send(res, 400, { error: 'Falta o site ou o link da obra.' })
     }
     try {
-      return send(res, 200, await chapterList({ site: site as CatalogSite | 'link', url: page }))
+      const found = await chapterList({ site: site as CatalogSite | 'link', url: page })
+      // Phones before 1.5 take the list alone.
+      return send(res, 200, withTitle ? found : found.chapters)
     } catch (err) {
       return send(res, 400, { error: (err as Error).message })
     }
   }
   if (req.method === 'POST' && path === '/api/batch') {
-    const { work, site, chapters, download, source } = (await readBody(req)) as {
+    const { work, site, chapters, download, source, options } = (await readBody(req)) as {
       work?: unknown
       site?: unknown
       chapters?: unknown
       download?: unknown
       source?: unknown
+      options?: unknown
     }
     const valid = Array.isArray(chapters) && chapters.every((c) => typeof c?.chapter === 'number' && typeof c?.url === 'string')
     if (typeof work !== 'string' || !work.trim() || typeof site !== 'string' || !valid) {
       return send(res, 400, { error: 'Falta a obra, o site ou os capítulos.' })
     }
-    const queue = addBatch(work, site, chapters as ChapterLink[], download === true, device.name)
+    const queue = addBatch(work, site, chapters as ChapterLink[], download === true, device.name, cleanOptions(options))
     if (typeof source === 'string') addWorkSource(work, source)
     return send(res, 200, queue)
   }
   if (req.method === 'POST' && path === '/api/translate/pdf') {
     try {
-      return send(res, 200, addPdfJob(url.searchParams.get('name') ?? '', await readRaw(req, MAX_PDF), device.name))
+      // The body is the PDF: the options come in the address, as JSON.
+      let options: unknown = null
+      try {
+        options = JSON.parse(url.searchParams.get('options') ?? 'null')
+      } catch {
+        // Sent by a phone that knows no options.
+      }
+      return send(res, 200, addPdfJob(url.searchParams.get('name') ?? '', await readRaw(req, MAX_PDF), device.name, cleanOptions(options)))
     } catch (err) {
       return send(res, 400, { error: (err as Error).message })
     }
