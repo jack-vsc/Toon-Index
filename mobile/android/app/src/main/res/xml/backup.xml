@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's backup to the Google account (Android 11 and older): the app's data (library, readings,
+     lists, settings), not the chapters downloaded, which would go past its 25 MB. -->
+<full-backup-content>
+    <include domain="sharedpref" path="."/>
+</full-backup-content>

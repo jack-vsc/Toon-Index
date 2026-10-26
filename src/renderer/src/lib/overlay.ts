@@ -70,6 +70,8 @@ interface Look {
 /** What the overlay measured and chose for one block (evaluation runs). */
 export interface OverlayInfo {
   drawn: boolean
+  /** Why it was not: "kept" (same text, no lettering found...), "duplicate" (another block's copy), "footnote". */
+  skipped?: string
   /** Letter height of the original glyphs found, 0 when none were. */
   letterHeight: number
   capHeight?: number
@@ -116,6 +118,7 @@ export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]
   // A watermark shares its box with the lettering beside it: it is no rival copy of that text.
   const watermarks = blocks.flatMap((block, i) => (block.kind === 'watermark' ? [i] : []))
   const skipDraw = duplicates(blocks, glyphs, new Set([...kept, ...watermarks]))
+  const copies = new Set(skipDraw)
   for (const i of kept) skipDraw.add(i)
   blocks.forEach((block, i) => {
     if (!skipDraw.has(i) && isFootnote(block)) skipDraw.add(i)
@@ -143,6 +146,7 @@ export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]
     const alone = bubble !== null && bubbles.filter((b) => b === bubble).length === 1
     return {
       drawn: !skipDraw.has(i),
+      ...(skipDraw.has(i) && { skipped: kept.has(i) ? 'kept' : copies.has(i) ? 'duplicate' : isFootnote(block) ? 'footnote' : 'watermark' }),
       letterHeight: glyphs[i].letterHeight,
       ...(skipDraw.has(i) ? {} : sfx[i] ? drawSfx(ctx, block, sfx[i]!) : typeset(ctx, block, glyphs[i], W, H, bubble, alone))
     }
@@ -440,6 +444,8 @@ function duplicates(blocks: TextBlock[], glyphs: Glyphs[], ignored: Set<number>)
           drop.add(a.bbox ? j : i)
           continue
         }
+        // A copy lies where the other was found (the same bubble seen from two slices of the page).
+        if (!close) continue
         // One text is lettered at one size; a copy whose "letters" are far bigger or smaller is artwork.
         const sizes = [a.letterHeight, b.letterHeight].sort((x, y) => x - y)
         const ratio = Math.min(a.score, b.score) / Math.max(a.score, b.score, 1e-6)
@@ -1314,10 +1320,18 @@ function typeset(
   const look = g.look
   const textBox = g.bbox ?? block.textBox
   const capHeight = look?.capHeight ?? block.letterHeight ?? estimateLetter(block) * 0.9
-  const profile = bubble
-    ? bubbleProfile(ctx, bubble, textBox, capHeight, alone)
-    : measureBubble(ctx, block, textBox, g.bbox !== null, capHeight, W, H)
-  const style = resolveStyle(ctx, block, look, profile)
+  const measured = bubble ? bubbleProfile(ctx, bubble, textBox, capHeight, alone) : measureBubble(ctx, block, textBox, g.bbox !== null, capHeight, W, H)
+  // A remark in a bubble's corner or beside it often runs across the outline: the free space around it
+  // stops at the outline (and a bubble's room is its main text's) and would squeeze it into a column.
+  // It takes the room the original took instead.
+  const profile = block.kind === 'aside' ? ownRoom(measured, textBox, capHeight) : measured
+  const resolved = resolveStyle(ctx, block, look, profile)
+  // Such remarks are lettered with an outline of the page's colour to stay legible over the bubble's
+  // border; on white the outline doesn't show in the original's measurements.
+  const style =
+    block.kind === 'aside' && !resolved.stroke
+      ? { ...resolved, stroke: luminance(fromHex(resolved.fill)) > 140 ? '#000000' : '#ffffff', strokeRatio: 0.2 }
+      : resolved
   // Between the original's proportions and the bubble's: a one-line original in a round bubble becomes
   // a few lines, never a narrow column.
   // Windows and caption boxes leave room for icons and gauges: their text keeps the original's shape.
@@ -1708,6 +1722,26 @@ function measureBubble(
     square,
     frame: false,
     bg
+  }
+}
+
+/** The original lettering's own box (a little wider), keeping its proportions, as the free space. */
+function ownRoom(around: Profile, textBox: Box, letterHeight: number): Profile {
+  const top = Math.floor(textBox[1] - letterHeight * 0.5)
+  const bottom = Math.ceil(textBox[3] + letterHeight * 0.5)
+  const width = (textBox[2] - textBox[0]) * 1.15
+  return {
+    ...around,
+    widths: new Float32Array(Math.max(1, bottom - top)).fill(width),
+    top,
+    cx: Math.round((textBox[0] + textBox[2]) / 2),
+    cy: Math.round((textBox[1] + textBox[3]) / 2),
+    spanTop: top,
+    spanBottom: bottom,
+    aspect: width / Math.max(1, bottom - top),
+    round: false,
+    square: true,
+    frame: true
   }
 }
 

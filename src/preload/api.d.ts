@@ -13,7 +13,10 @@ import type {
   TranslateRequest,
   VisionDetection,
   WebChapter,
-  WebChapterProgress
+  WebChapterProgress,
+  LocalAiEngine,
+  LocalAiProgress,
+  LocalAiState
 } from '../shared/types'
 import type { DevicesStatus, PairingCode } from '../shared/devices'
 import type { HistoryWork, ReadingRecord } from '../shared/reading'
@@ -31,6 +34,21 @@ export interface MangaApi {
     onHidden(callback: () => void): () => void
     /** "Pausar a tradução e liberar a GPU" in the icon's menu. */
     onFreeGpu(callback: () => void): () => void
+  }
+  /** The app's own translation model: llama.cpp's server and Gemma models, downloaded once. */
+  localAi: {
+    state(): Promise<LocalAiState>
+    installEngine(engine: LocalAiEngine): Promise<void>
+    /** fromOllama: Ollama's copy of the model, nothing downloaded. */
+    installModel(id: string, fromOllama: boolean): Promise<void>
+    remove(id: string): Promise<void>
+    cancel(): Promise<void>
+    onProgress(callback: (progress: LocalAiProgress | null) => void): () => void
+  }
+  /** The works and readings as a JSON file, the same the phone exports and restores. Null: cancelled. */
+  data: {
+    export(): Promise<{ path: string; works: number; chapters: number } | null>
+    import(): Promise<{ works: number; chapters: number } | null>
   }
   getSettings(): Promise<PublicSettings>
   saveSettings(input: SaveSettingsInput): Promise<PublicSettings>

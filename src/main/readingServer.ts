@@ -5,12 +5,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
 import { listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover, setWorkShelf } from './library'
-import { displayName, SHELVES, type Shelf } from '../shared/works'
+import { displayName, findWork, SHELVES, type Shelf } from '../shared/works'
 import { unreadUpdates } from '../shared/updates'
 import { updatesStatus } from './updates'
 import { bookmarkPage, continueList, pageInfo } from './extensionApi'
-import { addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs } from './remoteJobs'
+import { addBatch, addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs } from './remoteJobs'
 import { finishedInApp, forgetReading, listReading, markRead, readInApp, reportReading } from './reading'
+import { mergeData, resolveWork } from './dataSync'
 
 /** The browser extension (extension/background.js) and the phone app reach the app here. */
 export const READING_PORT = 47321
@@ -136,6 +137,20 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
       return send(res, 400, { error: err instanceof TypeError ? 'Link inválido.' : (err as Error).message })
     }
   }
+  // A chapter already in Portuguese, saved as it is in the library (the phone's "Baixar").
+  if (req.method === 'POST' && path === '/api/download') {
+    const { url: link, work, chapter, site } = (await readBody(req)) as { url?: unknown; work?: unknown; chapter?: unknown; site?: unknown }
+    if (typeof link !== 'string' || typeof work !== 'string' || typeof chapter !== 'number') {
+      return send(res, 400, { error: 'Falta o link, a obra ou o capítulo.' })
+    }
+    try {
+      new URL(link)
+      const host = typeof site === 'string' && site ? site : new URL(link).hostname
+      return send(res, 200, addBatch(work, host, [{ chapter, url: link.trim() }], true, device.name))
+    } catch (err) {
+      return send(res, 400, { error: err instanceof TypeError ? 'Link inválido.' : (err as Error).message })
+    }
+  }
   if (req.method === 'POST' && path === '/api/translate/pdf') {
     try {
       return send(res, 200, addPdfJob(url.searchParams.get('name') ?? '', await readRaw(req, MAX_PDF), device.name))
@@ -167,23 +182,36 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     }
     return send(res, 200, { ok: true })
   }
+  // Works the phone made on its own come with their name, and are found (or made) by it.
   if (req.method === 'POST' && path === '/api/reading/mark') {
-    const { workId, chapter } = (await readBody(req)) as { workId: string; chapter: number }
-    if (typeof workId !== 'string' || typeof chapter !== 'number') return send(res, 400, { error: 'workId e chapter.' })
-    markRead(workId, chapter)
+    const { workId, name, chapter } = (await readBody(req)) as { workId?: unknown; name?: unknown; chapter?: unknown }
+    const id = resolveWork(workId, name)
+    if (!id || typeof chapter !== 'number') return send(res, 400, { error: 'workId e chapter.' })
+    markRead(id, chapter)
     return send(res, 200, { ok: true })
   }
+  // What the phone has (a backup restored there): merged into the PC's.
+  if (req.method === 'POST' && path === '/api/merge') {
+    try {
+      return send(res, 200, mergeData((await readBody(req)) as { works?: unknown; reading?: unknown }))
+    } catch (err) {
+      return send(res, 400, { error: (err as Error).message })
+    }
+  }
   if (req.method === 'POST' && path === '/api/works/shelf') {
-    const { workId, shelf, favorite } = (await readBody(req)) as { workId?: unknown; shelf?: unknown; favorite?: unknown }
-    if (typeof workId !== 'string' || (shelf !== null && !(typeof shelf === 'string' && shelf in SHELVES))) {
+    const { workId, name, shelf, favorite } = (await readBody(req)) as { workId?: unknown; name?: unknown; shelf?: unknown; favorite?: unknown }
+    const id = resolveWork(workId, name)
+    if (!id || (shelf !== null && !(typeof shelf === 'string' && shelf in SHELVES))) {
       return send(res, 400, { error: 'workId e shelf.' })
     }
-    setWorkShelf(workId, { shelf: shelf as Shelf | null, favorite: favorite === true })
+    setWorkShelf(id, { shelf: shelf as Shelf | null, favorite: favorite === true })
     return send(res, 200, { ok: true })
   }
   if (req.method === 'POST' && path === '/api/reading/forget') {
-    const { workId, chapter } = (await readBody(req)) as { workId: string; chapter: number | null }
-    forgetReading(workId, chapter ?? null)
+    const { workId, name, chapter } = (await readBody(req)) as { workId?: unknown; name?: unknown; chapter?: number | null }
+    // A work the PC does not know has nothing to forget (nor is it made for that).
+    const id = typeof workId === 'string' && listWorks().some((w) => w.id === workId) ? workId : typeof name === 'string' ? findWork(listWorks(), name)?.id : undefined
+    if (id) forgetReading(id, chapter ?? null)
     return send(res, 200, { ok: true })
   }
   send(res, 404, { error: 'Não encontrado.' })

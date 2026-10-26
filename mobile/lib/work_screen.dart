@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'browser_screen.dart';
 import 'downloads.dart';
+import 'downloads_screen.dart';
 import 'library_screen.dart';
 import 'models.dart';
 import 'reader_screen.dart';
+import 'site_download.dart';
 import 'theme.dart';
 
 /// One work: its other names, every chapter read (and where), the ones translated on the PC, and
@@ -41,7 +43,23 @@ class _WorkScreenState extends State<WorkScreen> {
 
   Future<void> _refreshDownloads() async {
     final ids = await Downloads.downloaded();
-    if (mounted) setState(() => _downloaded = ids);
+    final phone = await phoneChaptersOf(widget.view.work.id);
+    if (mounted) setState(() => (_downloaded = ids, _phone = phone));
+  }
+
+  /// Chapters the phone downloaded from the sites.
+  List<LibraryChapter> _phone = [];
+
+  /// The new chapter on its site, downloaded where the settings say.
+  Future<void> _downloadUpdate(ChapterUpdate update) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final message = await SiteDownloads.request(
+      context,
+      widget.api,
+      SiteChapter(url: update.url, work: widget.view.work.name, workId: widget.view.work.id, chapter: update.latest, site: update.site),
+    );
+    if (message != null) messenger.showSnackBar(SnackBar(content: Text(message)));
+    await _refreshDownloads();
   }
 
   Future<void> _download(LibraryChapter c) async {
@@ -149,11 +167,41 @@ class _WorkScreenState extends State<WorkScreen> {
           ],
           if (view.update != null) ...[
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: view.update!.url))),
-              icon: const Icon(Icons.fiber_new),
-              label: Text('Ler o cap. ${chapterLabel(view.update!.latest)} em ${view.update!.site}'),
-            ),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: view.update!.url))),
+                  icon: const Icon(Icons.fiber_new),
+                  label: Text('Ler o cap. ${chapterLabel(view.update!.latest)} em ${view.update!.site}'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.outlined(
+                tooltip: 'Baixar para ler sem internet',
+                icon: const Icon(Icons.download),
+                onPressed: () => _downloadUpdate(view.update!),
+              ),
+            ]),
+          ],
+          if (_phone.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Text('No celular', style: Theme.of(context).textTheme.titleMedium),
+            for (final c in _phone)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.offline_pin, color: readGreen),
+                title: Text(c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title),
+                subtitle: Text('${c.pageCount} páginas · baixado do site no celular'),
+                trailing: IconButton(
+                  tooltip: 'Apagar do celular',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () async {
+                    await PhoneChapter.remove(c.id);
+                    await _refreshDownloads();
+                  },
+                ),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: c, chapters: _phone))),
+              ),
           ],
           if (view.records.isNotEmpty) ...[
             const SizedBox(height: 18),

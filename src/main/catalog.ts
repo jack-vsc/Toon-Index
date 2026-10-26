@@ -1,8 +1,9 @@
 import { nativeImage, session, type BrowserWindow } from 'electron'
-import { isSameWork, readableNames, type CatalogMatch, type CatalogResult, type CatalogSite } from '../shared/catalog'
-import { chapterLinks, fillChapterGaps, type ChapterLink, type PageLink } from '../shared/updates'
+import { isLikelySameWork, isSameWork, readableNames, type CatalogMatch, type CatalogResult, type CatalogSite } from '../shared/catalog'
+import { chapterLinks, fillChapterGaps, sourceFromChapter, type ChapterLink, type PageLink } from '../shared/updates'
 import { formatOf, normalizeName, type Work } from '../shared/works'
-import { applyCatalog, listWorks } from './library'
+import { applyCatalog, hasWorkCover, listWorks, saveWorkCover } from './library'
+import { listReading } from './reading'
 import { hiddenWindow, isChallenged, open, PARTITION, sleep } from './webChapter'
 
 const MANGADEX = 'https://api.mangadex.org'
@@ -15,7 +16,10 @@ const AUTO_PER_RUN = 5
 const AUTO_SEARCHES = 3
 /** A work none of the sites had is looked up again after this long (it may be added there later). */
 const AUTO_RETRY_MS = 7 * 24 * 60 * 60_000
-const COVER_WIDTH = 300
+/** Wide enough for the library's big covers on a sharp screen. */
+const COVER_WIDTH = 400
+/** Works given a cover per run: MangaDex's API answers fast, so many more than are linked. */
+const COVERS_PER_RUN = 20
 /** Lists drawn by the page's scripts get this long after it loads. */
 const SETTLE_MS = 3_000
 const MANGADEX_PAGE = 500
@@ -28,11 +32,7 @@ const SEARCHES: Record<CatalogSite, (win: BrowserWindow, query: string) => Promi
 }
 
 /** Looks the name up on the catalog sites (all by default); a site that fails says why and leaves the others. */
-export async function searchCatalog(
-  query: string,
-  win?: BrowserWindow,
-  sites = Object.keys(SEARCHES) as CatalogSite[]
-): Promise<CatalogResult[]> {
+export async function searchCatalog(query: string, win?: BrowserWindow, sites = Object.keys(SEARCHES) as CatalogSite[]): Promise<CatalogResult[]> {
   const name = query.trim()
   if (!name) return []
   return withWindow(win, async (w) => {
@@ -51,7 +51,12 @@ export async function searchCatalogToChoose(query: string): Promise<CatalogResul
       matches: await Promise.all(
         r.matches.slice(0, CHOICES_PER_SITE).map(async (m) => {
           const jpeg = m.cover ? await downloadCover(m.cover).catch(() => null) : null
-          return jpeg ? { ...m, thumb: `data:image/jpeg;base64,${jpeg.toString('base64')}` } : m
+          return jpeg
+            ? {
+                ...m,
+                thumb: `data:image/jpeg;base64,${jpeg.toString('base64')}`
+              }
+            : m
         })
       )
     }))
@@ -100,6 +105,80 @@ export async function autoLink(win: BrowserWindow): Promise<void> {
   }
 }
 
+/** When each work without a cover was last looked up for one (this run of the app). */
+const coverTried = new Map<string, number>()
+
+/**
+ * Works still without a cover of their own (none of the sites had them by their exact name, or they were
+ * never looked up) get one: MangaDex's, from the result named all but the same as one of the work's
+ * names; else the one the work's own page on a site it is read on shows when shared (its og:image) —
+ * scans name works their own way ("Logando 10.000 Anos no Futuro" is "Log into the Future").
+ */
+export async function autoCovers(win: BrowserWindow): Promise<number> {
+  const reading = listReading()
+  const due = listWorks()
+    .filter((w) => !hasWorkCover(w.id) && Date.now() - (coverTried.get(w.id) ?? 0) > AUTO_RETRY_MS)
+    .slice(0, COVERS_PER_RUN)
+  let found = 0
+  for (const work of due) {
+    coverTried.set(work.id, Date.now())
+    const read = reading.filter((r) => r.workId === work.id && r.url).sort((a, b) => b.updatedAt - a.updatedAt)
+    const pages = [...new Set([...(work.sources ?? []), ...read.map((r) => sourceFromChapter(r.url)).filter((p): p is string => !!p)])]
+    const jpeg = (formatOf(work) === 'comic' && (await mangadexCover(work))) || (await pageCover(win, pages.slice(0, 2)))
+    if (jpeg) {
+      saveWorkCover(work.id, jpeg)
+      found++
+    }
+  }
+  return found
+}
+
+async function mangadexCover(work: Work): Promise<Buffer | null> {
+  for (const name of readableNames(work.names).slice(0, AUTO_SEARCHES)) {
+    const match = (await searchMangadex(name).catch(() => [])).find((m) => m.cover && isLikelySameWork(work.names, m))
+    const jpeg = match ? await downloadCover(match.cover!).catch(() => null) : null
+    if (jpeg) return jpeg
+  }
+  return null
+}
+
+/** The picture the first of the pages that has one gives for being shared: the work's cover on scan sites. */
+async function pageCover(win: BrowserWindow, pages: string[]): Promise<Buffer | null> {
+  for (const page of pages) {
+    try {
+      await load(win, page)
+      const image = (await win.webContents.executeJavaScript(
+        `(() => { const m = document.querySelector('meta[property="og:image"], meta[name="og:image"], meta[name="twitter:image"], meta[property="twitter:image"]'); return m ? new URL(m.content, location.href).href : null })()`
+      )) as string | null
+      if (!image) continue
+      // WebP and AVIF, which scans use, only the page can read.
+      const jpeg = (await downloadCover(image).catch(() => null)) ?? (await coverInPage(win, image).catch(() => null))
+      // A site's own logo is no cover: covers are taller than wide.
+      if (jpeg) {
+        const { width, height } = nativeImage.createFromBuffer(jpeg).getSize()
+        if (height > width) return jpeg
+      }
+    } catch {
+      // The next page, or none this time.
+    }
+  }
+  return null
+}
+
+/** The image opened on its own and drawn smaller as a JPEG by the page, for formats Electron cannot read. */
+async function coverInPage(win: BrowserWindow, url: string): Promise<Buffer | null> {
+  await load(win, url)
+  const data = (await win.webContents.executeJavaScript(`(async () => {
+    const bitmap = await createImageBitmap(await (await fetch(location.href)).blob())
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.min(${COVER_WIDTH}, bitmap.width)
+    canvas.height = Math.round((bitmap.height * canvas.width) / bitmap.width)
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', 0.85)
+  })()`)) as string
+  return data.startsWith('data:image/jpeg;base64,') ? Buffer.from(data.split(',')[1], 'base64') : null
+}
+
 /**
  * The work on each site, by its names. The sites often list it under another English name, so the
  * names one site gives are searched on the sites that did not find it yet.
@@ -130,7 +209,8 @@ async function findSameWork(work: Work, win: BrowserWindow): Promise<{ picks: Ca
  * English ones it hosts (not links to official sites); mgeko lists them all on one page.
  */
 export async function chapterList(match: { site: CatalogSite | 'link'; url: string }): Promise<ChapterLink[]> {
-  if (match.site === 'mangadex') return mangadexChapters(match.url)
+  // A pasted MangaDex link too: its site lists the chapters a page at a time, the API all of them.
+  if (match.site === 'mangadex' || mangadexId(match.url)) return mangadexChapters(match.url)
   if (match.site === 'link') return pageChapters(match.url)
   return withWindow(undefined, async (w) => {
     await load(w, new URL('all-chapters/', match.url.endsWith('/') ? match.url : `${match.url}/`).href)
@@ -152,19 +232,83 @@ async function pageChapters(url: string): Promise<ChapterLink[]> {
     if (/\/(entrar|login|signin|sign-in|auth)\b/i.test(new URL(w.webContents.getURL()).pathname)) {
       throw new Error('O site pediu login: clique em "Entrar no site", entre com a sua conta e tente de novo.')
     }
-    for (let i = 0; i < 30; i++) {
-      const bottom = (await w.webContents.executeJavaScript(
-        `(() => { window.scrollBy(0, window.innerHeight); return window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4 })()`
-      )) as boolean
-      if (bottom) break
-      await sleep(250)
+    // Long lists come a page at a time (numbered pages, "next" links, or buttons that swap the list in
+    // place): every page is read until one adds no chapter.
+    const seen = new Map<string, PageLink>()
+    let found = 0
+    for (let page = 1; page <= MAX_LIST_PAGES; page++) {
+      for (const link of await pageLinks(w)) seen.set(link.href, link)
+      const count = chapterLinks(url, [...seen.values()]).length
+      if (page > 1 && count <= found) break
+      found = count
+      const before = await listSignature(w)
+      const next = (await w.webContents.executeJavaScript(`(${NEXT_PAGE})(${page + 1})`)) as { href: string } | { clicked: true } | null
+      if (!next) break
+      if ('href' in next) {
+        await load(w, next.href)
+        await sleep(PAGE_SETTLE_MS)
+      } else {
+        for (let waited = 0; waited < 8_000 && (await listSignature(w)) === before; waited += 300) await sleep(300)
+      }
     }
-    const links = (await w.webContents.executeJavaScript(
-      `[...document.querySelectorAll('a[href]')].map((a) => ({ href: a.href, text: (a.innerText || '').trim().slice(0, 120) }))`
-    )) as PageLink[]
-    return fillChapterGaps(chapterLinks(url, links))
+    return fillChapterGaps(chapterLinks(url, [...seen.values()]))
   })
 }
+
+// Sites with ten chapters a page list long works over a hundred pages.
+const MAX_LIST_PAGES = 200
+const PAGE_SETTLE_MS = 1_500
+
+/** The page's links, scrolled to the end first for lists that load as they show. */
+async function pageLinks(w: BrowserWindow): Promise<PageLink[]> {
+  for (let i = 0; i < 30; i++) {
+    const bottom = (await w.webContents.executeJavaScript(
+      `(() => { window.scrollBy(0, window.innerHeight); return window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4 })()`
+    )) as boolean
+    if (bottom) break
+    await sleep(250)
+  }
+  return (await w.webContents.executeJavaScript(
+    `[...document.querySelectorAll('a[href]')].map((a) => ({ href: a.href, text: (a.innerText || '').trim().slice(0, 120) }))`
+  )) as PageLink[]
+}
+
+/** Changes when a list swapped in place has loaded its next page. */
+function listSignature(w: BrowserWindow): Promise<string> {
+  return w.webContents.executeJavaScript(`[...document.querySelectorAll('a[href]')].map((a) => a.href).join('|')`) as Promise<string>
+}
+
+/**
+ * Runs in the page: goes to the list's page `want` — a rel="next" link, the pager's button numbered
+ * `want`, a "next" link or button by label or arrow, else any button numbered `want`. Returns the link to load, { clicked } for a button that
+ * swaps the list in place, or null on the last page. Links and buttons to chapters are no pages.
+ */
+const NEXT_PAGE = `(want) => {
+  const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim()
+  const usable = (el) => {
+    const r = el.getBoundingClientRect()
+    const off = el.disabled || el.getAttribute('aria-disabled') === 'true' || /\\bdisabled\\b/.test(String(el.className))
+    const chapter = /cap[ií]tulo|chapter|\\bch\\.?\\s*\\d|\\bcap\\.?\\s*\\d/i.test(norm(el.innerText) + ' ' + (el.getAttribute('href') || ''))
+    return r.width > 0 && r.height > 0 && !off && !chapter
+  }
+  const all = [...document.querySelectorAll('a, button, [role="button"]')].filter(usable)
+  const label = (el) => norm(el.getAttribute('aria-label') || el.getAttribute('title'))
+  // A pager's own number first: on some ("1 2 … 10 Next") "Next" jumps to the next ten pages.
+  const inPager = (el) =>
+    /[?&/](page|pagina|p)[=/-]?\\d/i.test(el.getAttribute('href') || '') ||
+    !!el.closest('[class*="paginat" i], [class*="pager" i], [aria-label*="pagination" i]')
+  const pick =
+    all.find((el) => el.getAttribute('rel') === 'next') ||
+    all.find((el) => norm(el.innerText) === String(want) && inPager(el)) ||
+    all.find((el) => /^(next|próxim[ao]|seguinte)( page| página)?$/i.test(label(el))) ||
+    all.find((el) => /^(next|próxim[ao]|seguinte|›|»|>|>>|→)( page| página)?$/i.test(norm(el.innerText))) ||
+    all.find((el) => norm(el.innerText) === String(want))
+  if (!pick) return null
+  const href = pick.href
+  if (pick.tagName === 'A' && href && !href.startsWith('javascript') && href.split('#')[0] !== location.href.split('#')[0]) return { href }
+  pick.click()
+  return { clicked: true }
+}`
 
 async function mangadexChapters(source: string): Promise<ChapterLink[]> {
   const id = mangadexId(source)
@@ -194,7 +338,10 @@ export async function mangadexLatest(source: string): Promise<{ chapter: number;
   for (const c of feed.data) {
     const chapter = parseFloat(c.attributes.chapter ?? '')
     if (Number.isNaN(chapter) || (best && best.chapter >= chapter)) continue
-    best = { chapter, url: c.attributes.externalUrl ?? `https://mangadex.org/chapter/${c.id}` }
+    best = {
+      chapter,
+      url: c.attributes.externalUrl ?? `https://mangadex.org/chapter/${c.id}`
+    }
   }
   return best
 }
@@ -202,13 +349,20 @@ export async function mangadexLatest(source: string): Promise<{ chapter: number;
 const mangadexId = (url: string): string | null => /mangadex\.org\/title\/([0-9a-f-]{36})/i.exec(url)?.[1] ?? null
 
 interface MangadexFeed {
-  data: { id: string; attributes: { chapter: string | null; externalUrl: string | null } }[]
+  data: {
+    id: string
+    attributes: { chapter: string | null; externalUrl: string | null }
+  }[]
   total: number
 }
 
 interface MangadexManga {
   id: string
-  attributes: { title: Record<string, string>; altTitles: Record<string, string>[]; lastChapter: string | null }
+  attributes: {
+    title: Record<string, string>
+    altTitles: Record<string, string>[]
+    lastChapter: string | null
+  }
   relationships: { type: string; attributes?: { fileName?: string } }[]
 }
 
@@ -224,7 +378,7 @@ async function searchMangadex(query: string): Promise<CatalogMatch[]> {
       site: 'mangadex',
       title,
       url: `https://mangadex.org/title/${m.id}`,
-      cover: file ? `https://uploads.mangadex.org/covers/${m.id}/${file}.256.jpg` : null,
+      cover: file ? `https://uploads.mangadex.org/covers/${m.id}/${file}.512.jpg` : null,
       altNames: [...titles.filter((t) => t !== title), ...m.attributes.altTitles.flatMap((a) => Object.values(a))],
       latest: parseFloat(m.attributes.lastChapter ?? '') || null
     }
@@ -243,14 +397,24 @@ async function searchMgeko(win: BrowserWindow, query: string): Promise<CatalogMa
       cover: src ? new URL(src, location.href).href : null,
       chapters: ((li.querySelector('.novel-stats strong') || {}).innerText || '').trim()
     }
-  })`)) as { url: string; title: string; cover: string | null; chapters: string }[]
+  })`)) as {
+    url: string
+    title: string
+    cover: string | null
+    chapters: string
+  }[]
   // Its pages list other names all in one line split by commas, which names also have: those are left out.
   return items
     .filter((i) => i.url && i.title)
-    .map((i) => ({ site: 'mgeko', title: i.title, url: i.url, cover: i.cover, altNames: [], latest: firstNumber(i.chapters) }))
+    .map((i) => ({
+      site: 'mgeko',
+      title: i.title,
+      url: i.url,
+      cover: i.cover,
+      altNames: [],
+      latest: firstNumber(i.chapters)
+    }))
 }
-
-
 
 /** The cover as a JPEG small enough for the library, fetched like the sites' own pages fetch it. */
 async function downloadCover(url: string): Promise<Buffer | null> {

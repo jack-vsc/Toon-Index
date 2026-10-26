@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync, rmSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { AiStopTarget, ApiProfile, SaveLibraryInput, SaveSettingsInput, TranslateRequest } from '../shared/types'
+import type { AiStopTarget, ApiProfile, LocalAiEngine, SaveLibraryInput, SaveSettingsInput, TranslateRequest } from '../shared/types'
 import { aiStatus, gpuTotals, stopAi, stopMonitor } from './aiMonitor'
 import { registerEvalIpc } from './evaluate'
 import { snapshotRequested, takeSnapshot } from './snapshot'
@@ -16,6 +16,8 @@ import {
   singleInstance,
   startedHidden
 } from './background'
+import { exportData, mergeData } from './dataSync'
+import { cancelLocalDownload, installEngine, installModel, localAiState, removeModel, watchProgress } from './localAi'
 import { cancelWebChapter, fetchWebChapter, openSiteLogin } from './webChapter'
 import {
   addWorkSource,
@@ -136,6 +138,43 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('shell:show-file', (_e, path: string) => shell.showItemInFolder(path))
+
+  ipcMain.handle('localai:state', (e) => {
+    watchProgress(e.sender)
+    return localAiState()
+  })
+  ipcMain.handle('localai:engine', (_e, engine: LocalAiEngine) => installEngine(engine))
+  ipcMain.handle('localai:model', (_e, id: string, fromOllama: boolean) => installModel(id, fromOllama))
+  ipcMain.handle('localai:remove', (_e, id: string) => removeModel(id))
+  ipcMain.handle('localai:cancel', () => cancelLocalDownload())
+
+  // The works and readings as a file (the phone exports and restores the same one).
+  ipcMain.handle('data:export', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options = {
+      title: 'Exportar os dados do Manga Index',
+      defaultPath: join(app.getPath('documents'), `manga-index-${new Date().toISOString().slice(0, 10)}.json`),
+      filters: [{ name: 'Backup do Manga Index', extensions: ['json'] }]
+    }
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return null
+    const data = exportData()
+    await writeFile(result.filePath, JSON.stringify(data, null, 1))
+    return { path: result.filePath, works: data.works.length, chapters: data.reading.length }
+  })
+  ipcMain.handle('data:import', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options = {
+      title: 'Restaurar um backup do Manga Index',
+      properties: ['openFile' as const],
+      filters: [{ name: 'Backup do Manga Index', extensions: ['json'] }]
+    }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    const file = JSON.parse(await readFile(result.filePaths[0], 'utf8')) as { app?: unknown; works?: unknown; reading?: unknown }
+    if (file.app !== 'manga-index') throw new Error('Esse arquivo não é um backup do Manga Index.')
+    return mergeData(file)
+  })
 
   ipcMain.handle('library:list', () => listLibrary())
   ipcMain.handle('library:save', (_e, input: SaveLibraryInput) => saveToLibrary(input))

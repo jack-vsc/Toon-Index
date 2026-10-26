@@ -7,6 +7,7 @@ import {
   activeProfile,
   CANCELLED,
   isLocalProfile,
+  LOCAL_AI_PROFILE_ID,
   type ApiProfile,
   type AppSettings,
   type ModelOption,
@@ -15,6 +16,7 @@ import {
   type TranslateRequest
 } from '../../shared/types'
 import { getApiKey, getSettings } from '../settings'
+import { ensureLocalServer } from '../localAi'
 import { listCursorModels, pickDefaultCursorModel, runCursor } from './cursorProvider'
 import { describeError, FormatError, TruncatedError } from './errors'
 import { listOpenAIModels, runOpenAI } from './openaiProvider'
@@ -107,7 +109,9 @@ function matchCase(block: TextBlock): TextBlock {
     const letters = [...text].filter((c) => c.toLowerCase() !== c.toUpperCase())
     return letters.length ? letters.filter((c) => (upper ? c === c.toUpperCase() : c === c.toLowerCase())).length / letters.length : 0
   }
-  if (share(block.original, true) < 0.9 || share(block.translation, false) < 0.3) return block
+  // Lettering in capitals is translated in capitals, a word or two the model left small included
+  // ("PERDIDOS, então VOCÊ").
+  if (share(block.original, true) < 0.9 || share(block.translation, false) === 0) return block
   return { ...block, translation: block.translation.toLocaleUpperCase('pt-BR') }
 }
 
@@ -160,7 +164,7 @@ function requireReady(profile: ApiProfile, apiKey: string | undefined): string {
   return apiKey
 }
 
-function callModel(
+async function callModel(
   profile: ApiProfile,
   apiKey: string,
   prompt: string,
@@ -169,9 +173,10 @@ function callModel(
   signal: AbortSignal,
   temperature?: number
 ) {
+  if (profile.id === LOCAL_AI_PROFILE_ID) await ensureLocalServer(profile.model)
   return profile.kind === 'cursor'
     ? runCursor(prompt, req, apiKey, profile.model, speed, signal)
-    : runOpenAI(prompt, req, apiKey, profile.baseUrl, profile.model, signal, temperature, isLocalProfile(profile) && getSettings().aiDevice === 'cpu')
+    : runOpenAI(prompt, req, apiKey, profile.baseUrl, profile.model, signal, temperature, isLocalProfile(profile), getSettings().aiDevice === 'cpu')
 }
 
 export function currentModelLabel(): string {

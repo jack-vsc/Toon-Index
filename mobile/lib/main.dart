@@ -63,13 +63,17 @@ class _MangaIndexAppState extends State<MangaIndexApp> {
       theme: appTheme(),
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : _connection == null
-              ? PairScreen(onPaired: (c) => setState(() => _connection = c))
-              : LibraryScreen(
-                  key: ValueKey(_connection!.token),
-                  api: Api(_connection!),
-                  onUnpaired: () => setState(() => _connection = null),
-                ),
+          : LibraryScreen(
+              key: ValueKey(_connection?.token ?? 'phone'),
+              api: Api(_connection ?? Connection.none()),
+              onUnpaired: () => setState(() => _connection = null),
+              onConnect: () => _navigator.currentState?.push(MaterialPageRoute(
+                builder: (_) => PairScreen(onPaired: (c) {
+                  _navigator.currentState?.pop();
+                  setState(() => _connection = c);
+                }),
+              )),
+            ),
     );
   }
 }

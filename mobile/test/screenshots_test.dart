@@ -10,10 +10,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:manga_index/api.dart';
 import 'package:manga_index/browser_screen.dart';
+import 'package:manga_index/data_screen.dart';
+import 'package:manga_index/downloads_screen.dart';
 import 'package:manga_index/downloads.dart';
 import 'package:manga_index/library_screen.dart';
 import 'package:manga_index/models.dart';
 import 'package:manga_index/reader_screen.dart';
+import 'package:manga_index/site_download.dart';
 import 'package:manga_index/theme.dart';
 import 'package:manga_index/translate_screen.dart';
 import 'package:manga_index/work_screen.dart';
@@ -171,7 +174,7 @@ void main() {
       ],
       'ntfyTopic': 'manga-index-test',
     });
-    await shoot(tester, LibraryScreen(api: FakeLibraryApi(library), onUnpaired: () {}), 'p5-library');
+    await shoot(tester, LibraryScreen(api: FakeLibraryApi(library), onUnpaired: () {}, onConnect: () {}), 'p5-library');
   }, skip: out == null);
 
   testWidgets('browser start page', (tester) async {
@@ -216,5 +219,31 @@ void main() {
       body: BrowserStartPage(recent: recent, onOpen: (_) {}),
     );
     await shoot(tester, screen, 'p4-browser');
+  }, skip: out == null);
+
+  testWidgets('downloads and data screens', (tester) async {
+    tester.view.physicalSize = phone * ratio;
+    tester.view.devicePixelRatio = ratio;
+    final docs = Directory.systemTemp.createTempSync('mi-shots');
+    Downloads.root = docs;
+    SharedPreferences.setMockInitialValues({});
+    final api = Api(Connection.none());
+    await tester.runAsync(() async {
+      for (final (i, chapter) in [(1, 90.0), (2, 91.0)]) {
+        final id = PhoneChapter.idOf('https://mgread.io/manga/the-mythical/chapter-${chapter.round()}/');
+        await Downloads.save(id, [37, 80, 68, 70]);
+        await PhoneChapter.add(PhoneChapter(
+          id: id,
+          url: 'https://mgread.io/manga/the-mythical/chapter-${chapter.round()}/',
+          title: 'The Mythical Weapon Creation — capítulo ${chapter.round()}',
+          work: 'The Mythical Weapon Creation',
+          chapter: chapter,
+          pages: 40 + i,
+          savedAt: i,
+        ));
+      }
+    });
+    await shoot(tester, DownloadsScreen(api: api), 'p6-downloads');
+    await shoot(tester, DataScreen(api: api), 'p7-data');
   }, skip: out == null);
 }

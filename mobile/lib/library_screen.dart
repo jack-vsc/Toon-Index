@@ -3,6 +3,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'app_update.dart';
 import 'browser_screen.dart';
+import 'data_screen.dart';
+import 'local_data.dart';
+import 'downloads_screen.dart';
 import 'models.dart';
 import 'reader_screen.dart';
 import 'theme.dart';
@@ -12,10 +15,13 @@ import 'work_screen.dart';
 /// Every work read or translated, where it was left, the most recent first. Shows the last library
 /// seen when the PC cannot be reached.
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key, required this.api, required this.onUnpaired});
+  const LibraryScreen({super.key, required this.api, required this.onUnpaired, required this.onConnect});
 
   final Api api;
   final VoidCallback onUnpaired;
+
+  /// Pairs with a PC, from a phone used on its own.
+  final VoidCallback onConnect;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -52,7 +58,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       await Store.forgetConnection();
       widget.onUnpaired();
     } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      // The phone's own data, with what was read here since.
+      final local = (await LocalData.library()).withShelves(await Store.loadPending(Store.pendingShelves));
+      if (mounted) setState(() => (_library = local, _error = widget.api.paired ? e.message : null));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -86,7 +94,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Desparear?'),
-        content: const Text('O celular para de sincronizar com o PC até ser pareado de novo.'),
+        content: const Text('O celular para de sincronizar com o PC até ser pareado de novo. A biblioteca e as leituras continuam no celular.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Desparear')),
@@ -125,8 +133,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
             onPressed: () => _browse(null),
           ),
           PopupMenuButton<String>(
-            onSelected: (_) => _unpair(),
-            itemBuilder: (_) => [const PopupMenuItem(value: 'unpair', child: Text('Desparear do PC'))],
+            onSelected: (action) => switch (action) {
+              'update' => AppUpdate.check(context, widget.api),
+              'downloads' => Navigator.push(context, MaterialPageRoute(builder: (_) => DownloadsScreen(api: widget.api))),
+              'data' => Navigator.push(context, MaterialPageRoute(builder: (_) => DataScreen(api: widget.api))).then((_) => _refresh()),
+              'connect' => widget.onConnect(),
+              _ => _unpair(),
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'downloads', child: Text('Downloads')),
+              const PopupMenuItem(value: 'data', child: Text('Dados e backup')),
+              if (widget.api.paired) const PopupMenuItem(value: 'update', child: Text('Verificar atualização')),
+              widget.api.paired
+                  ? const PopupMenuItem(value: 'unpair', child: Text('Desparear do PC'))
+                  : const PopupMenuItem(value: 'connect', child: Text('Conectar a um PC')),
+            ],
           ),
         ],
       ),
@@ -154,7 +175,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Text(
-                      _library == null ? _error! : '$_error\nMostrando a última biblioteca sincronizada.',
+                      _library == null ? _error! : '$_error\nMostrando os dados do celular; eles vão para o PC quando ele responder.',
                       style: TextStyle(color: Theme.of(context).colorScheme.error),
                     ),
                   ),

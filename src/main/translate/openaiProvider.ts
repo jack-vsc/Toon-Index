@@ -1,11 +1,29 @@
 import { net } from 'electron'
-import { CANCELLED, type ModelOption, type TranslateRequest } from '../../shared/types'
+import { CANCELLED, LOCAL_AI_BASE_URL, type ModelOption, type TranslateRequest } from '../../shared/types'
 import { HttpError, TruncatedError } from './errors'
 
 const MAX_ATTEMPTS = 3
 /** A rate limit (OpenRouter's "temporarily rate-limited upstream") lasts minutes, not seconds. */
 const RATE_LIMIT_ATTEMPTS = 7
 const MAX_OUTPUT_TOKENS = 8192
+/**
+ * A local model answering a few tokens a second would take half an hour to reach 8192 when it gets
+ * stuck repeating itself; a page's answer takes under 2000.
+ */
+const LOCAL_MAX_OUTPUT_TOKENS = 3072
+
+/**
+ * JSON on one line, for the app's own llama.cpp server: left to itself the model indents its answer,
+ * which nearly doubles what it writes (and how long a page takes). A space after ":" and "," stays
+ * allowed: without it the model loses its way.
+ */
+const COMPACT_JSON = String.raw`root ::= object
+value ::= object | array | string | number | "true" | "false" | "null"
+object ::= "{" sp ( string sp ":" sp value ( sp "," sp string sp ":" sp value )* )? sp "}"
+array ::= "[" sp ( value ( sp "," sp value )* )? sp "]"
+string ::= "\"" ( [^"\\\x7F\x00-\x1F] | "\\" ( ["\\/bfnrt] | "u" [0-9a-fA-F]{4} ) )* "\""
+number ::= "-"? [0-9]+ ( "." [0-9]+ )? ( [eE] [-+]? [0-9]+ )?
+sp ::= " "?`
 
 /** Works with any OpenAI-compatible chat completions API (OpenAI, Gemini, OpenRouter, Ollama...). */
 export async function runOpenAI(
@@ -16,12 +34,14 @@ export async function runOpenAI(
   model: string,
   signal: AbortSignal,
   temperature = 0.2,
+  /** A model on this computer: answers without thinking first (Gemma 4, Qwen 3 thinking…), which takes minutes on a small GPU. */
+  local = false,
   /** Ollama on this computer, kept off the graphics card. */
   cpu = false
 ): Promise<string> {
   try {
-    if (cpu && isOllama(baseUrl)) return await requestOllama(prompt, req, baseUrl, model, signal, temperature)
-    return await withRetries(prompt, req, apiKey, baseUrl, model, signal, temperature)
+    if (local && cpu && isOllama(baseUrl)) return await requestOllama(prompt, req, baseUrl, model, signal, temperature)
+    return await withRetries(prompt, req, apiKey, baseUrl, model, signal, temperature, local)
   } catch (err) {
     if (signal.aborted) throw new Error(CANCELLED)
     throw err
@@ -35,12 +55,13 @@ async function withRetries(
   baseUrl: string,
   model: string,
   signal: AbortSignal,
-  temperature: number
+  temperature: number,
+  local: boolean
 ): Promise<string> {
   let jsonMode = true
   for (let attempt = 1; ; attempt++) {
     try {
-      return await request(prompt, req, apiKey, baseUrl, model, jsonMode, signal, temperature)
+      return await request(prompt, req, apiKey, baseUrl, model, jsonMode, signal, temperature, local)
     } catch (err) {
       if (!(err instanceof HttpError)) throw err
       if (jsonMode && err.status === 400 && /response_format|json_object|json mode/i.test(err.body)) {
@@ -75,8 +96,10 @@ async function request(
   model: string,
   jsonMode: boolean,
   signal: AbortSignal,
-  temperature: number
+  temperature: number,
+  local: boolean
 ): Promise<string> {
+  const started = Date.now()
   // Electron's fetch: Node's gives up when the answer takes over five minutes to start, as a local
   // model on a small GPU may for a page of images.
   const response = await net.fetch(`${trimUrl(baseUrl)}/chat/completions`, {
@@ -91,8 +114,9 @@ async function request(
       model,
       temperature,
       // A page needs a few thousand tokens; models stuck repeating themselves stop here instead of later.
-      max_tokens: MAX_OUTPUT_TOKENS,
-      ...(jsonMode && { response_format: { type: 'json_object' } }),
+      max_tokens: local ? LOCAL_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
+      ...(jsonMode && (trimUrl(baseUrl) === LOCAL_AI_BASE_URL ? { grammar: COMPACT_JSON } : { response_format: { type: 'json_object' } })),
+      ...(local && { reasoning_effort: 'none' }),
       messages: [
         {
           role: 'user',
@@ -116,6 +140,12 @@ async function request(
   const data = JSON.parse(body) as {
     error?: { code?: number; message?: string }
     choices?: { message?: { content?: string }; finish_reason?: string }[]
+    usage?: { prompt_tokens?: number; completion_tokens?: number }
+  }
+  // What a page costs on this computer: how long, and how much read and written.
+  if (local && data.usage) {
+    const { prompt_tokens: read, completion_tokens: written } = data.usage
+    console.log(`[translate] ${model}: ${req.images.length} images, ${read} tokens in, ${written} out, ${((Date.now() - started) / 1000).toFixed(1)}s (${data.choices?.[0]?.finish_reason})`)
   }
   // OpenRouter reports some upstream failures inside a 200 response.
   if (data.error) throw new HttpError(Number(data.error.code) || 500, body)
@@ -126,7 +156,7 @@ async function request(
   }
   if (choice?.finish_reason === 'length') {
     throw new TruncatedError(
-      `A resposta da IA foi cortada no limite de ${MAX_OUTPUT_TOKENS} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: ${content.slice(-200)}`,
+      `A resposta da IA foi cortada no limite de ${local ? LOCAL_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: ${content.slice(-200)}`,
       content
     )
   }
@@ -153,8 +183,9 @@ async function requestOllama(prompt: string, req: TranslateRequest, baseUrl: str
     body: JSON.stringify({
       model,
       stream: false,
+      think: false,
       format: 'json',
-      options: { temperature, num_predict: MAX_OUTPUT_TOKENS, num_gpu: 0 },
+      options: { temperature, num_predict: LOCAL_MAX_OUTPUT_TOKENS, num_gpu: 0 },
       messages: [{ role: 'user', content: prompt, images: req.images.map((img) => img.base64) }]
     })
   })
@@ -166,7 +197,7 @@ async function requestOllama(prompt: string, req: TranslateRequest, baseUrl: str
   if (!content) throw new Error(`Resposta vazia do Ollama: ${body.slice(0, 300)}`)
   if (data.done_reason === 'length') {
     throw new TruncatedError(
-      `A resposta da IA foi cortada no limite de ${MAX_OUTPUT_TOKENS} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: ${content.slice(-200)}`,
+      `A resposta da IA foi cortada no limite de ${LOCAL_MAX_OUTPUT_TOKENS} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: ${content.slice(-200)}`,
       content
     )
   }

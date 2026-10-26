@@ -205,6 +205,36 @@ export interface AiMonitorStatus {
 /** What the monitor's buttons stop: one AI, only Ollama's loaded models, or everything. */
 export type AiStopTarget = LocalAiId | 'ollama-models' | 'all'
 
+/** The app's own translation model ("Neste PC"): llama.cpp's server, the build for the card. */
+export type LocalAiEngine = 'cuda' | 'vulkan'
+
+export const LOCAL_AI_PROFILE_ID = 'local'
+export const LOCAL_AI_BASE_URL = 'http://127.0.0.1:47380/v1'
+
+export interface LocalAiProgress {
+  task: string
+  done: number
+  total: number
+}
+
+export interface LocalAiModelStatus {
+  id: string
+  label: string
+  note: string
+  /** Bytes to download. */
+  size: number
+  /** 'ollama': used from Ollama's files; 'in-ollama': Ollama has it, not in use yet. */
+  state: 'downloaded' | 'ollama' | 'in-ollama' | 'missing'
+}
+
+export interface LocalAiState {
+  recommended: LocalAiEngine
+  engines: { id: LocalAiEngine; label: string; size: number; installed: boolean }[]
+  models: LocalAiModelStatus[]
+  progress: LocalAiProgress | null
+  running: { model: string } | null
+}
+
 /** Developer evaluation run (MI_EVAL_* environment variables): sample pages and a reference translation. */
 export interface EvalConfig {
   pdf: string

@@ -12,6 +12,7 @@ por `scripts/manga_vision.py` no Python do `.venv` (GPU NVIDIA quando disponíve
 | `comictextdetector.pt.onnx` | blocos, linhas e máscara do texto | [manga-image-translator](https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx) |
 | `bubble-seg.pt` | contorno dos balões (YOLOv8-seg) | [kitsumed/yolov8m_seg-speech-bubble](https://huggingface.co/kitsumed/yolov8m_seg-speech-bubble/resolve/main/model.pt) |
 | `anime-manga-big-lama.pt` | apagamento (LaMa ajustado para mangá) | [IOPaint](https://github.com/Sanster/models/releases/download/AnimeMangaInpainting/anime-manga-big-lama.pt) |
+| `comic-text-and-bubble-detector.onnx` (opcional) | balões que a segmentação perde (translúcidos, de grito) e texto dentro × fora de balão | [ogkalu/comic-text-and-bubble-detector](https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/main/detector.onnx) |
 
 Dependências Python (além de `torch` com CUDA e `ultralytics`): `onnxruntime-gpu==1.22.0` (a 1.22 é a
 última para CUDA 12), `opencv-python`, `numpy`.

@@ -11,16 +11,23 @@ interface Props {
   onPhone: () => void
   onAi: () => void
   onSettings: () => void
+  onSearch: () => void
 }
 
 /** The app's way around, down the left side as on MangaDex. */
-export function Sidebar({ page, fresh, onPage, onBatch, onPhone, onAi, onSettings }: Props) {
+export function Sidebar({ page, fresh, onPage, onBatch, onPhone, onAi, onSettings, onSearch }: Props) {
   const at = page.kind === 'work' ? 'library' : page.kind
   return (
     <nav className="sidebar">
       <button className="sidebar-brand" onClick={() => onPage({ kind: 'home' })}>
         <span className="logo">漫</span>
         <span>Manga Index</span>
+      </button>
+
+      <button className="sidebar-search" onClick={onSearch} title="Buscar obra (Ctrl+K)">
+        <span className="sidebar-icon">{icons.search}</span>
+        <span>Buscar obra</span>
+        <kbd>Ctrl K</kbd>
       </button>
 
       <Item icon={icons.home} label="Início" active={at === 'home'} onClick={() => onPage({ kind: 'home' })} />
@@ -54,6 +61,12 @@ const svg = (path: ReactNode): ReactNode => (
 )
 
 const icons = {
+  search: svg(
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.3-4.3" />
+    </>
+  ),
   home: svg(<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />),
   library: svg(
     <>

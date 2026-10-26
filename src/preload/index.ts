@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { WebChapterProgress } from '../shared/types'
+import type { LocalAiProgress, WebChapterProgress } from '../shared/types'
 import type { MangaApi } from './api'
 
 const api: MangaApi = {
@@ -16,6 +16,22 @@ const api: MangaApi = {
       ipcRenderer.on('app:free-gpu', listener)
       return () => ipcRenderer.removeListener('app:free-gpu', listener)
     }
+  },
+  localAi: {
+    state: () => ipcRenderer.invoke('localai:state'),
+    installEngine: (engine) => ipcRenderer.invoke('localai:engine', engine),
+    installModel: (id, fromOllama) => ipcRenderer.invoke('localai:model', id, fromOllama),
+    remove: (id) => ipcRenderer.invoke('localai:remove', id),
+    cancel: () => ipcRenderer.invoke('localai:cancel'),
+    onProgress: (callback) => {
+      const listener = (_e: unknown, p: LocalAiProgress | null) => callback(p)
+      ipcRenderer.on('localai:progress', listener)
+      return () => ipcRenderer.removeListener('localai:progress', listener)
+    }
+  },
+  data: {
+    export: () => ipcRenderer.invoke('data:export'),
+    import: () => ipcRenderer.invoke('data:import')
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (input) => ipcRenderer.invoke('settings:save', input),

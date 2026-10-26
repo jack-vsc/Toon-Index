@@ -97,7 +97,11 @@ class LibraryChapter {
     required this.createdAt,
     required this.hasCover,
     this.downloaded = false,
+    this.sourceUrl,
   });
+
+  /// Downloaded by the phone from this page (not in the PC's library): its reading goes to the PC by it.
+  final String? sourceUrl;
 
   final String id;
   final String title;

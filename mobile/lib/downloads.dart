@@ -72,6 +72,14 @@ class Downloads {
     return download(api, entryId, kept: false, onProgress: onProgress);
   }
 
+  /// Keeps a PDF made on the phone (a chapter downloaded from its site).
+  static Future<void> save(String id, List<int> pdf) async {
+    final target = await _file(id, kept: true);
+    final partial = File('${target.path}.part');
+    await partial.writeAsBytes(pdf, flush: true);
+    await partial.rename(target.path);
+  }
+
   static Future<void> remove(String entryId) async {
     final file = await _file(entryId, kept: true);
     if (await file.exists()) await file.delete();

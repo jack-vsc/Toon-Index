@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import { toAppError, type AppError } from '../../../shared/errors'
 import {
   isLocalProfile,
+  LOCAL_AI_BASE_URL,
+  LOCAL_AI_PROFILE_ID,
   type AiDevice,
+  type LocalAiProgress,
+  type LocalAiState,
   type ApiProfile,
   type AppSettings,
   type GpuSharing,
@@ -63,9 +67,13 @@ const PRESETS: Preset[] = [
       name: 'Ollama (local)',
       kind: 'openai',
       baseUrl: 'http://localhost:11434/v1',
-      models: ['qwen3-vl:4b-instruct'],
-      model: 'qwen3-vl:4b-instruct'
+      models: ['gemma4:e4b-it-qat'],
+      model: 'gemma4:e4b-it-qat'
     }
+  },
+  {
+    label: 'LM Studio (local)',
+    profile: { name: 'LM Studio (local)', kind: 'openai', baseUrl: 'http://localhost:1234/v1', models: [], model: '' }
   },
   { label: 'Outra', profile: { name: 'Minha API', kind: 'openai', baseUrl: '', models: [], model: '' } }
 ]
@@ -185,7 +193,7 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <div className="modal">
+      <div className="modal settings-modal">
         <h2>Configurações</h2>
 
         <section>
@@ -417,6 +425,19 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
           </div>
         </section>
 
+        <LocalAiPanel
+          activeModel={settings.activeProfileId === LOCAL_AI_PROFILE_ID ? profile.model : null}
+          onUse={(id, downloaded) => {
+            const local: ApiProfile = { id: LOCAL_AI_PROFILE_ID, name: 'Neste PC', kind: 'openai', baseUrl: LOCAL_AI_BASE_URL, models: downloaded, model: id }
+            setSettings((s) => ({
+              ...s,
+              profiles: [...s.profiles.filter((p) => p.id !== LOCAL_AI_PROFILE_ID), local],
+              activeProfileId: LOCAL_AI_PROFILE_ID
+            }))
+            selectProfile(LOCAL_AI_PROFILE_ID)
+          }}
+        />
+
         <section className="grid-2">
           <div>
             <label className="field-label">Rodar as IAs deste PC em</label>
@@ -445,6 +466,8 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
 
         <BackgroundToggle />
 
+        <DataBackup />
+
         <p className="hint">Páginas ao mesmo tempo, velocidade e intervalo são escolhidos ao abrir cada PDF.</p>
 
         <p className="hint">
@@ -464,6 +487,151 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
         </div>
       </div>
     </div>
+  )
+}
+
+const gb = (bytes: number): string => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1).replace('.', ',')} GB` : `${Math.round(bytes / 1e6)} MB`)
+
+/**
+ * Translating on this computer with nothing else installed: llama.cpp's server for the card and a
+ * Gemma model, downloaded once (or taken from Ollama), then picked as the profile "Neste PC".
+ */
+function LocalAiPanel({ activeModel, onUse }: { activeModel: string | null; onUse: (id: string, downloaded: string[]) => void }) {
+  const [state, setState] = useState<LocalAiState | null>(null)
+  const [progress, setProgress] = useState<LocalAiProgress | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const refresh = () => window.api.localAi.state().then((s) => (setState(s), setProgress(s.progress)))
+  useEffect(() => {
+    void refresh()
+    return window.api.localAi.onProgress(setProgress)
+  }, [])
+  if (!state) return null
+  const engine = state.engines.find((e) => e.id === state.recommended)!
+  const ready = state.models.filter((m) => m.state === 'downloaded' || m.state === 'ollama').map((m) => m.id)
+  const run = async (action: () => Promise<void>) => {
+    setMessage(null)
+    try {
+      await action()
+    } catch (err) {
+      setMessage(cleanIpcError(err))
+    }
+    await refresh()
+  }
+  return (
+    <section className="local-ai">
+      <label className="field-label">IA neste PC, sem instalar nada</label>
+      <p className="hint">
+        Traduz offline com o Gemma, do Google, rodando dentro do app. O motor e o modelo são baixados uma vez; a IA só ocupa a
+        placa enquanto traduz.
+      </p>
+      <div className="local-ai-row">
+        <span>
+          <strong>Motor</strong> · {engine.label}
+        </span>
+        {engine.installed ? (
+          <span className="test-ok">✓ Pronto</span>
+        ) : (
+          <button className="secondary small" disabled={!!progress} onClick={() => run(() => window.api.localAi.installEngine(engine.id))}>
+            Baixar ({gb(engine.size)})
+          </button>
+        )}
+      </div>
+      {state.models.map((m) => (
+        <div className="local-ai-row" key={m.id}>
+          <span>
+            <strong>{m.label}</strong> · {m.note}
+          </span>
+          <span className="local-ai-actions">
+            {m.state === 'missing' && (
+              <button className="secondary small" disabled={!!progress} onClick={() => run(() => window.api.localAi.installModel(m.id, false))}>
+                Baixar ({gb(m.size)})
+              </button>
+            )}
+            {m.state === 'in-ollama' && (
+              <button className="secondary small" disabled={!!progress} onClick={() => run(() => window.api.localAi.installModel(m.id, true))}>
+                Usar o do Ollama (sem baixar)
+              </button>
+            )}
+            {(m.state === 'downloaded' || m.state === 'ollama') &&
+              (activeModel === m.id ? (
+                <span className="test-ok">✓ Em uso</span>
+              ) : (
+                <button className="small" disabled={!engine.installed} onClick={() => onUse(m.id, ready)}>
+                  Usar para traduzir
+                </button>
+              ))}
+            {(m.state === 'downloaded' || m.state === 'ollama') && (
+              <button
+                className="secondary small"
+                title={m.state === 'ollama' ? 'Deixa de usar (os arquivos continuam no Ollama)' : 'Apaga os arquivos do modelo'}
+                onClick={() => run(() => window.api.localAi.remove(m.id))}
+              >
+                {m.state === 'ollama' ? 'Desligar' : 'Apagar'}
+              </button>
+            )}
+          </span>
+        </div>
+      ))}
+      {progress && (
+        <div className="local-ai-progress">
+          <progress value={progress.done} max={progress.total} />
+          <span className="hint">
+            {progress.task} · {gb(progress.done)} de {gb(progress.total)}
+          </span>
+          <button className="secondary small" onClick={() => window.api.localAi.cancel()}>
+            Cancelar
+          </button>
+        </div>
+      )}
+      {activeModel && <p className="hint">Escolhido: salve para traduzir com ele.</p>}
+      {message && <p className="error">{message}</p>}
+    </section>
+  )
+}
+
+/** The works and readings exported to a file, or a backup (the PC's or the phone's) merged back in. */
+function DataBackup() {
+  const [message, setMessage] = useState<string | null>(null)
+  const run = async (action: () => Promise<string | null>): Promise<void> => {
+    try {
+      setMessage(await action())
+    } catch (err) {
+      setMessage(cleanIpcError(err))
+    }
+  }
+  return (
+    <section className="data-backup">
+      <label className="field-label">Backup dos dados</label>
+      <div className="row">
+        <button
+          className="secondary"
+          onClick={() =>
+            run(async () => {
+              const saved = await window.api.data.export()
+              return saved && `Salvo: ${saved.works} obras e ${saved.chapters} capítulos em ${saved.path}`
+            })
+          }
+        >
+          Exportar
+        </button>
+        <button
+          className="secondary"
+          onClick={() =>
+            run(async () => {
+              const merged = await window.api.data.import()
+              return merged && `Restaurado: ${merged.works} obras e ${merged.chapters} capítulos juntados aos que já estavam aqui.`
+            })
+          }
+        >
+          Restaurar
+        </button>
+      </div>
+      <p className="hint">
+        Um arquivo JSON com as obras, onde você parou em cada uma, as listas e as favoritas. O app do celular exporta e restaura o
+        mesmo arquivo; restaurar junta, sem apagar nada.
+      </p>
+      {message && <p className="hint">{message}</p>}
+    </section>
   )
 }
 

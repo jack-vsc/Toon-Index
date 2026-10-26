@@ -3,11 +3,16 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Installs the updates the PC hands out (Android asks once to allow it). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Whether chapters downloaded on the phone may use mobile data (a setting). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <application
         android:label="Manga Index"
         android:usesCleartextTraffic="true"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="true"
+        android:fullBackupContent="@xml/backup"
+        android:dataExtractionRules="@xml/extraction">
         <activity
             android:name=".MainActivity"
             android:exported="true"

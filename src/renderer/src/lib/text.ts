@@ -8,7 +8,10 @@ export function similarText(a: string, b: string): boolean {
   const x = normalizeText(a)
   const y = normalizeText(b)
   if (!x || !y) return false
-  if (x.includes(y) || y.includes(x)) return true
+  // A piece of a cut block is a good part of it; two letters found inside a long text are no copy of it
+  // ("TL" in "STATUS WINDOW TITLE...").
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x]
+  if (long.includes(short)) return short.length >= Math.min(8, long.length * 0.4)
   const grams = (s: string) => {
     const m = new Map<string, number>()
     for (let i = 0; i < s.length - 1; i++) m.set(s.slice(i, i + 2), (m.get(s.slice(i, i + 2)) ?? 0) + 1)

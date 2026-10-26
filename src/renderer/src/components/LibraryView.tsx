@@ -3,7 +3,7 @@ import { CATALOG_SITES, isSameWork, type CatalogMatch, type CatalogResult } from
 import type { ReadingRecord } from '../../../shared/reading'
 import { chapterCount, isDownloaded, languageLabel, type LibraryEntry } from '../../../shared/types'
 import { MAX_SOURCES, sourceFromChapter, unreadUpdates, type UpdatesStatus, type WorkUpdate } from '../../../shared/updates'
-import { displayName, normalizeName, SHELVES, shelfOf, type Shelf, type Work } from '../../../shared/works'
+import { displayName, formatOf, normalizeName, SHELVES, shelfOf, type Shelf, type Work, type WorkFormat } from '../../../shared/works'
 import { HistoryImport } from './HistoryImport'
 
 /** A work with its translated chapters (in reading order) and readings. */
@@ -20,6 +20,8 @@ export interface LibraryData {
   fresh: Map<string, WorkUpdate>
   /** By work id, the cover found on the catalog sites. */
   covers: Record<string, string>
+  /** By work id, the newest chapter out on its sites, for how far along the reading is. */
+  latest: Map<string, number>
 }
 
 interface Actions {
@@ -33,10 +35,10 @@ interface Actions {
 export function useLibrary(entries: LibraryEntry[], works: Work[], reading: ReadingRecord[], updates: UpdatesStatus | null): LibraryData {
   const [covers, setCovers] = useState<Record<string, string>>({})
 
-  // Covers found on the catalog sites; they come as works are looked up there.
+  // Covers found on the catalog sites; they come as works are looked up there (on each check of the sites).
   useEffect(() => {
     window.api.works.covers().then(setCovers)
-  }, [works])
+  }, [works, updates?.running])
 
   const fresh = new Map(unreadUpdates(updates?.updates ?? {}, reading).map((u) => [u.workId, u]))
   const groups = works
@@ -47,7 +49,8 @@ export function useLibrary(entries: LibraryEntry[], works: Work[], reading: Read
     }))
     .filter((g) => g.chapters.length > 0 || g.records.length > 0 || g.work.shelf || g.work.favorite)
     .sort((a, b) => Number(fresh.has(b.work.id)) - Number(fresh.has(a.work.id)) || lastActivity(b) - lastActivity(a))
-  return { groups, fresh, covers }
+  const latest = new Map(Object.values(updates?.updates ?? {}).map((u) => [u.workId, u.latest]))
+  return { groups, fresh, covers, latest }
 }
 
 /** The work's own cover, or its latest translated chapter's. */
@@ -65,14 +68,33 @@ export function nextInLibrary(group: WorkGroup): LibraryEntry | null {
   return group.chapters.filter((e) => e.chapter !== null && e.chapter > upTo).sort((a, b) => a.chapter! - b.chapter!)[0] ?? null
 }
 
-/** "CAP. 90 · NOVEL · 5 TRAD.", in the sites' small capitals. */
-function metaLine(group: WorkGroup): string {
+/** How far the reading is: the last chapter read, out of the newest one out when that is known. */
+function progressOf(group: WorkGroup, latest: number | undefined): { upTo: number | null; share: number | null } {
   const read = group.records.filter((r) => r.status === 'read').map((r) => r.chapter)
-  const shelf = group.work.shelf && group.work.shelf !== 'reading' ? SHELVES[group.work.shelf].toUpperCase() : null
-  const parts = [read.length ? `CAP. ${Math.max(...read)}` : shelf ?? (group.records.length ? 'LENDO' : 'NÃO LIDO')]
-  if (shelf && read.length) parts.unshift(shelf)
-  if (group.work.format === 'novel') parts.push('NOVEL')
-  if (group.chapters.length) parts.push(chapterCount(group.chapters, true))
+  const upTo = read.length ? Math.max(...read) : null
+  const newest = newestChapter(group, latest)
+  return {
+    upTo,
+    share: upTo !== null && newest > 0 ? Math.min(1, upTo / newest) : null
+  }
+}
+
+/** The newest chapter known: out on its sites, translated, or read (a site may be behind the reading). */
+function newestChapter(group: WorkGroup, latest: number | undefined): number {
+  return Math.max(latest ?? 0, ...group.chapters.map((c) => c.chapter ?? 0), ...group.records.map((r) => r.chapter))
+}
+
+/** "Cap. 45 · 45% lido", "Concluído · Cap. 222", "Não lido · 5 trad." under a cover. */
+function metaLine(group: WorkGroup, latest: number | undefined): string {
+  const { upTo, share } = progressOf(group, latest)
+  const shelf = group.work.shelf && group.work.shelf !== 'reading' ? SHELVES[group.work.shelf] : null
+  const parts: string[] = []
+  if (shelf) parts.push(shelf)
+  if (upTo !== null) parts.push(`Cap. ${upTo}`)
+  else if (!shelf) parts.push(group.records.length ? 'Lendo' : 'Não lido')
+  if (share !== null && share < 1 && group.work.shelf !== 'done') parts.push(`${Math.round(share * 100)}% lido`)
+  if (group.work.format === 'novel') parts.push('Novel')
+  if (group.chapters.length && upTo === null) parts.push(chapterCount(group.chapters, true).toLowerCase())
   return parts.join(' · ')
 }
 
@@ -80,108 +102,205 @@ function Cover({ src, className }: { src: string | null; className: string }) {
   return <div className={className}>{src ? <img src={src} alt="" /> : <span>📚</span>}</div>
 }
 
-/** The library as a wall of covers; a cover opens the work's page. */
-export function LibraryView({ data, updates, onPick, onWorksChanged }: { data: LibraryData; updates: UpdatesStatus | null; onPick: (workId: string) => void; onWorksChanged: () => void }) {
+/**
+ * The library as a wall of covers, like the scans' collections: the lists on the left with their
+ * counts, then the covers of the one chosen, searched and sorted; a cover opens the work's page.
+ */
+export function LibraryView({
+  data,
+  updates,
+  onPick,
+  onWorksChanged
+}: {
+  data: LibraryData
+  updates: UpdatesStatus | null
+  onPick: (workId: string) => void
+  onWorksChanged: () => void
+}) {
   const [search, setSearch] = useState('')
   const [importing, setImporting] = useState(false)
   const [help, setHelp] = useState(false)
-  const [filter, setFilter] = useState<LibraryFilter>(savedFilter)
+  const [filter, setFilter] = useState<LibraryFilter>(() => saved('library-filter', isFilter, 'all'))
+  const [sort, setSort] = useState<LibrarySort>(() => saved('library-sort', (v): v is LibrarySort => v in SORTS, 'recent'))
+  const [format, setFormat] = useState<WorkFormat | 'all'>('all')
   const query = normalizeName(search)
   const inFilter = (g: WorkGroup, f: LibraryFilter) =>
     f === 'all' ? true : f === 'favorite' ? !!g.work.favorite : shelfOf(g.work, g.records.length > 0) === f
-  const groups = data.groups
-    .filter((g) => inFilter(g, filter) && (!query || g.work.names.some((n) => normalizeName(n).includes(query))))
-    .sort((a, b) => Number(!!b.work.favorite) - Number(!!a.work.favorite))
-  const pick = (f: LibraryFilter) => {
-    setFilter(f)
-    try {
-      localStorage.setItem('library-filter', f)
-    } catch {
-      // Not kept: the library opens on every work next time.
+  const listed = data.groups.filter((g) => inFilter(g, filter))
+  const formats = new Set(listed.map((g) => formatOf(g.work)))
+  const groups = listed
+    .filter((g) => (format === 'all' || formatOf(g.work) === format) && (!query || g.work.names.some((n) => normalizeName(n).includes(query))))
+    .sort(SORTS[sort].compare(data))
+  const remember =
+    <T extends string>(key: string, set: (v: T) => void) =>
+    (value: T) => {
+      set(value)
+      try {
+        localStorage.setItem(key, value)
+      } catch {
+        // Not kept: the library opens as it always does next time.
+      }
     }
-  }
-  const filters: [LibraryFilter, string][] = [['all', 'Todas'], ['favorite', '★ Favoritas'], ...(Object.entries(SHELVES) as [Shelf, string][])]
+  const pickFilter = remember<LibraryFilter>('library-filter', setFilter)
+  const pickSort = remember<LibrarySort>('library-sort', setSort)
+  const navItem = ([f, label]: [LibraryFilter, string]) => (
+    <button key={f} className={`library-nav-item ${filter === f ? 'active' : ''}`} onClick={() => pickFilter(f)}>
+      <span>{label}</span>
+      <span className="library-nav-count">{data.groups.filter((g) => inFilter(g, f)).length || ''}</span>
+    </button>
+  )
+  const title = filter === 'all' ? 'Todas as obras' : filter === 'favorite' ? 'Favoritas' : SHELVES[filter]
 
   return (
-    <div className="page">
-      <div className="page-head">
+    <div className="page library-page">
+      <aside className="library-nav">
         <h1>Biblioteca</h1>
-        <span className="mono muted">{data.groups.length} OBRAS</span>
-      </div>
-      <div className="library-toolbar">
-        <input type="search" placeholder="Buscar obra por qualquer nome…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button className="secondary small" onClick={() => setImporting(true)}>
+        {navItem(['all', 'Todas'])}
+        {navItem(['favorite', 'Favoritas'])}
+        <div className="library-nav-label">Status</div>
+        {(Object.entries(SHELVES) as [Shelf, string][]).map(navItem)}
+        <div className="library-nav-label">Mais</div>
+        <button className="library-nav-item" onClick={() => setImporting(true)}>
           Importar histórico
         </button>
-        <button className="secondary small" onClick={() => setHelp(!help)}>
+        <button className={`library-nav-item ${help ? 'active' : ''}`} onClick={() => setHelp(!help)}>
           Extensão do navegador
         </button>
-        <CheckButton updates={updates} />
-      </div>
-      <div className="shelf-chips">
-        {filters.map(([f, label]) => {
-          const count = data.groups.filter((g) => inFilter(g, f)).length
-          if (!count && f !== 'all' && f !== filter) return null
-          return (
-            <button key={f} className={`chip ${filter === f ? 'active' : ''}`} onClick={() => pick(f)}>
-              {label} <span className="mono">{count}</span>
-            </button>
-          )
-        })}
-      </div>
-      {help && <ExtensionHelp onClose={() => setHelp(false)} />}
-      {importing && <HistoryImport onClose={() => setImporting(false)} onImported={onWorksChanged} />}
+        <CheckButton updates={updates} className="library-nav-item" />
+      </aside>
 
-      {data.groups.length === 0 && (
-        <p className="hint center">Os capítulos que você traduzir ficam aqui, junto com onde você parou em cada obra lida no navegador.</p>
-      )}
-      {data.groups.length > 0 && groups.length === 0 && (
-        <p className="hint center">{query ? 'Nenhuma obra com esse nome.' : 'Nenhuma obra nesta lista ainda: escolha a lista na página de cada obra.'}</p>
-      )}
+      <div className="library-main">
+        <div className="library-head">
+          <h2>
+            {title} <span className="library-count">{listed.length}</span>
+          </h2>
+          <input type="search" placeholder="Buscar por qualquer nome…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <select value={sort} onChange={(e) => pickSort(e.target.value as LibrarySort)} title="Ordem">
+            {(Object.entries(SORTS) as [LibrarySort, Sort][]).map(([key, s]) => (
+              <option key={key} value={key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {formats.size > 1 && (
+          <div className="format-tabs">
+            {FORMAT_TABS.map(([f, label]) => (
+              <button key={f} className={format === f ? 'active' : ''} onClick={() => setFormat(f)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {help && <ExtensionHelp onClose={() => setHelp(false)} />}
+        {importing && <HistoryImport onClose={() => setImporting(false)} onImported={onWorksChanged} />}
 
-      <div className="poster-grid">
-        {groups.map((g) => (
-          <PosterCard key={g.work.id} group={g} cover={coverOf(g, data.covers)} update={data.fresh.get(g.work.id) ?? null} onPick={() => onPick(g.work.id)} />
-        ))}
+        {data.groups.length === 0 && (
+          <p className="hint center">Os capítulos que você traduzir ficam aqui, junto com onde você parou em cada obra lida no navegador.</p>
+        )}
+        {data.groups.length > 0 && groups.length === 0 && (
+          <p className="hint center">
+            {query ? 'Nenhuma obra com esse nome.' : 'Nenhuma obra nesta lista ainda: escolha a lista na página de cada obra.'}
+          </p>
+        )}
+
+        <div className="poster-grid">
+          {groups.map((g) => (
+            <PosterCard key={g.work.id} group={g} data={data} onPick={() => onPick(g.work.id)} />
+          ))}
+        </div>
       </div>
     </div>
   )
 }
 
 type LibraryFilter = 'all' | 'favorite' | Shelf
+type LibrarySort = 'recent' | 'updated' | 'progress' | 'title'
 
-function savedFilter(): LibraryFilter {
-  try {
-    const saved = localStorage.getItem('library-filter')
-    return saved === 'favorite' || (saved && saved in SHELVES) ? (saved as LibraryFilter) : 'all'
-  } catch {
-    return 'all'
+const FORMAT_TABS: [WorkFormat | 'all', string][] = [
+  ['all', 'Tudo'],
+  ['comic', 'Mangá'],
+  ['novel', 'Novel']
+]
+
+interface Sort {
+  label: string
+  compare: (data: LibraryData) => (a: WorkGroup, b: WorkGroup) => number
+}
+
+const byFavorite = (a: WorkGroup, b: WorkGroup) => Number(!!b.work.favorite) - Number(!!a.work.favorite)
+
+const SORTS: Record<LibrarySort, Sort> = {
+  recent: {
+    label: 'Lidas por último',
+    compare: () => (a, b) => byFavorite(a, b) || lastActivity(b) - lastActivity(a)
+  },
+  updated: {
+    label: 'Com capítulo novo',
+    compare: (data) => (a, b) => Number(data.fresh.has(b.work.id)) - Number(data.fresh.has(a.work.id)) || lastActivity(b) - lastActivity(a)
+  },
+  progress: {
+    label: 'Mais adiantadas',
+    compare: (data) => (a, b) => (progressOf(b, data.latest.get(b.work.id)).share ?? -1) - (progressOf(a, data.latest.get(a.work.id)).share ?? -1)
+  },
+  title: {
+    label: 'A–Z',
+    compare: () => (a, b) => displayName(a.work.names[0]).localeCompare(displayName(b.work.names[0]), 'pt-BR')
   }
 }
 
-function CheckButton({ updates }: { updates: UpdatesStatus | null }) {
+const isFilter = (v: string): v is LibraryFilter => v === 'all' || v === 'favorite' || v in SHELVES
+
+function saved<T extends string>(key: string, valid: (v: string) => v is T, fallback: T): T {
+  try {
+    const value = localStorage.getItem(key)
+    return value && valid(value) ? value : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function CheckButton({ updates, className = 'secondary small' }: { updates: UpdatesStatus | null; className?: string }) {
   return (
     <button
-      className="secondary small"
+      className={className}
       disabled={updates?.running}
       onClick={() => window.api.updates.check()}
-      title={updates?.lastRun ? `Última checagem: ${new Date(updates.lastRun).toLocaleString('pt-BR')} (a cada 2 horas)` : 'Checa os sites de cada obra a cada 2 horas'}
+      title={
+        updates?.lastRun
+          ? `Última checagem: ${new Date(updates.lastRun).toLocaleString('pt-BR')} (a cada 2 horas)`
+          : 'Checa os sites de cada obra a cada 2 horas'
+      }
     >
       {updates?.running ? 'Checando sites…' : 'Checar capítulos novos'}
     </button>
   )
 }
 
-function PosterCard({ group, cover, update, onPick }: { group: WorkGroup; cover: string | null; update: WorkUpdate | null; onPick: () => void }) {
+/** A work's cover with its name under it, a heart when it is a favorite and how far it was read. */
+function PosterCard({ group, data, onPick }: { group: WorkGroup; data: LibraryData; onPick: () => void }) {
+  const cover = coverOf(group, data.covers)
+  const update = data.fresh.get(group.work.id)
+  const latest = data.latest.get(group.work.id)
+  const { share } = progressOf(group, latest)
   return (
     <button className="poster-card" onClick={onPick} title={group.work.names.map(displayName).join('\n')}>
       <div className="poster">
-        {cover ? <img src={cover} alt="" /> : <span>📚</span>}
-        {update && <span className="poster-badge mono">NOVO · {update.latest}</span>}
-        {group.work.favorite && <span className="poster-fav" title="Favorita">★</span>}
+        {cover ? <img src={cover} alt="" loading="lazy" /> : <span className="poster-empty">{displayName(group.work.names[0])}</span>}
+        {update && <span className="poster-badge">Novo · {update.latest}</span>}
+        {group.work.favorite && (
+          <span className="poster-fav" title="Favorita">
+            ♥
+          </span>
+        )}
       </div>
+      {share !== null && (
+        <div className="poster-progress">
+          <span style={{ width: `${share * 100}%` }} />
+        </div>
+      )}
       <div className="poster-title">{displayName(group.work.names[0])}</div>
-      <div className="poster-meta mono">{metaLine(group)}</div>
+      <div className="poster-meta">{metaLine(group, latest)}</div>
     </button>
   )
 }
@@ -205,13 +324,22 @@ export function HomeFeed({
   const recent = [...data.groups].sort((a, b) => lastActivity(b) - lastActivity(a))
   const current = recent.find((g) => readingStatus(g.records)?.continueUrl) ?? recent[0]
   const fresh = [...data.fresh.values()]
-    .map((u) => ({ update: u, group: data.groups.find((g) => g.work.id === u.workId) }))
+    .map((u) => ({
+      update: u,
+      group: data.groups.find((g) => g.work.id === u.workId)
+    }))
     .filter((f): f is { update: WorkUpdate; group: WorkGroup } => !!f.group)
 
   return (
     <div className="page">
       {current && (
-        <Hero group={current} cover={coverOf(current, data.covers)} update={data.fresh.get(current.work.id) ?? null} onPick={() => onPick(current.work.id)} onOpen={onOpen} />
+        <Hero
+          group={current}
+          cover={coverOf(current, data.covers)}
+          update={data.fresh.get(current.work.id) ?? null}
+          onPick={() => onPick(current.work.id)}
+          onOpen={onOpen}
+        />
       )}
 
       <section className="home-section">
@@ -263,7 +391,7 @@ export function HomeFeed({
           </div>
           <div className="poster-row">
             {recent.slice(0, 12).map((g) => (
-              <PosterCard key={g.work.id} group={g} cover={coverOf(g, data.covers)} update={data.fresh.get(g.work.id) ?? null} onPick={() => onPick(g.work.id)} />
+              <PosterCard key={g.work.id} group={g} data={data} onPick={() => onPick(g.work.id)} />
             ))}
           </div>
         </section>
@@ -330,7 +458,13 @@ export function WorkPage({
   onDownload,
   onDelete,
   onWorksChanged
-}: { group: WorkGroup; data: LibraryData; updates: UpdatesStatus | null; others: Work[]; onBack: () => void } & Actions) {
+}: {
+  group: WorkGroup
+  data: LibraryData
+  updates: UpdatesStatus | null
+  others: Work[]
+  onBack: () => void
+} & Actions) {
   const { work, chapters, records } = group
   const [editing, setEditing] = useState(false)
   const cover = coverOf(group, data.covers)
@@ -344,102 +478,135 @@ export function WorkPage({
     onWorksChanged()
   }
 
+  const latest = data.latest.get(work.id)
+  const { upTo, share } = progressOf(group, latest)
+  const newest = newestChapter(group, latest) || null
+  const [chapterQuery, setChapterQuery] = useState('')
+  const [oldestFirst, setOldestFirst] = useState(false)
+  const shownRows = rows.filter((r) => !chapterQuery.trim() || String(r.chapter).startsWith(chapterQuery.trim().replace(',', '.')))
+  if (oldestFirst) shownRows.reverse()
+  const shelf = shelfOf(work, records.length > 0)
+
   return (
     <div className="page work-page">
+      <nav className="crumbs">
+        <button className="link" onClick={onBack}>
+          ← Biblioteca
+        </button>
+        <span>/</span>
+        <span className="crumbs-now">{displayName(work.names[0])}</span>
+      </nav>
       <section className="work-hero">
         {cover && <div className="hero-bg" style={{ backgroundImage: `url(${cover})` }} />}
         <Cover src={cover} className="poster work-poster" />
         <div className="hero-text">
-          <button className="link back" onClick={onBack}>
-            ← Biblioteca
-          </button>
-          <h1>{displayName(work.names[0])}</h1>
-          {aliases.length > 0 && <div className="work-aliases">{aliases.map(displayName).join(' · ')}</div>}
           <div className="tags">
-            <span className="tag">{work.format === 'novel' ? 'NOVEL' : 'MANGÁ'}</span>
+            <span className="tag">{work.format === 'novel' ? 'Novel' : 'Mangá'}</span>
+            {shelf && <span className="tag tag-status">{SHELVES[shelf]}</span>}
             {(work.catalog?.sites ?? []).map((s) => (
               <span key={s} className="tag">
-                {CATALOG_SITES[s]?.toUpperCase() ?? s}
+                {CATALOG_SITES[s] ?? s}
               </span>
             ))}
-            {(work.sources ?? []).map((s) => (
-              <a key={s} className="tag link-tag" href={s} target="_blank" rel="noreferrer">
-                {siteOf(s).toUpperCase()} ↗
-              </a>
-            ))}
           </div>
-          {status && <p className="hero-status">{status.text}</p>}
-          <div className="shelf-row">
+          <h1>{displayName(work.names[0])}</h1>
+          {aliases.length > 0 && <div className="work-aliases">{aliases.map(displayName).join(' · ')}</div>}
+          <div className="work-stats">
+            {newest !== null && (
+              <span>
+                <strong>{newest}</strong> capítulos
+              </span>
+            )}
+            {chapters.length > 0 && (
+              <span>
+                <strong>{chapters.length}</strong> neste PC
+              </span>
+            )}
+            {status && <span>{status.text}</span>}
+          </div>
+          <div className="row work-actions">
+            <ContinueButtons inApp={inApp} continueUrl={status?.continueUrl} onOpen={onOpen} />
+            {update && (
+              <button className="secondary" onClick={() => window.open(update.url)} title={`Saiu no ${update.site}`}>
+                Último · Cap. {update.latest}
+              </button>
+            )}
+            <button className={`secondary fav-button ${work.favorite ? 'on' : ''}`} onClick={() => setShelf({ favorite: !work.favorite })}>
+              {work.favorite ? '♥ Favorita' : '♡ Favoritar'}
+            </button>
             <select
+              className="pill-select"
               value={work.shelf ?? ''}
               title="A lista de leitura da obra"
               onChange={(e) => setShelf({ shelf: (e.target.value || null) as Shelf | null })}
             >
               <option value="">{records.length ? 'Lendo (automático)' : 'Em nenhuma lista'}</option>
-              {(Object.entries(SHELVES) as [Shelf, string][]).map(([shelf, label]) => (
-                <option key={shelf} value={shelf}>
+              {(Object.entries(SHELVES) as [Shelf, string][]).map(([key, label]) => (
+                <option key={key} value={key}>
                   {label}
                 </option>
               ))}
             </select>
-            <button className={`secondary small fav-button ${work.favorite ? 'on' : ''}`} onClick={() => setShelf({ favorite: !work.favorite })}>
-              {work.favorite ? '★ Favorita' : '☆ Favoritar'}
-            </button>
-            <select
-              value={work.auto ?? ''}
-              title={
-                work.sources?.length
-                  ? 'O que fazer quando sair um capítulo novo num dos sites da obra (checados a cada 2 horas)'
-                  : 'Adicione um site da obra em "Editar obra" para os capítulos novos serem achados'
-              }
-              onChange={async (e) => {
-                await window.api.works.setAuto(work.id, (e.target.value || null) as 'translate' | 'download' | null)
-                onWorksChanged()
-              }}
-            >
-              <option value="">Capítulo novo: só avisar</option>
-              <option value="translate">Capítulo novo: traduzir sozinho</option>
-              <option value="download">Capítulo novo: baixar sozinho (já em PT)</option>
-            </select>
-          </div>
-          <div className="row">
-            <ContinueButtons inApp={inApp} continueUrl={status?.continueUrl} onOpen={onOpen} />
-            {update && (
-              <button className="secondary" onClick={() => window.open(update.url)}>
-                🆕 Ler o cap. {update.latest} ({update.site})
-              </button>
-            )}
             <button className="secondary" onClick={() => setEditing(!editing)}>
               {editing ? 'Fechar edição' : 'Editar obra'}
             </button>
           </div>
+          {share !== null && newest !== null && (
+            <div className="work-progress">
+              <div className="poster-progress">
+                <span style={{ width: `${share * 100}%` }} />
+              </div>
+              <span>
+                {upTo} de {newest} lidos
+              </span>
+            </div>
+          )}
         </div>
       </section>
 
       {editing && (
-        <WorkEditor work={work} others={others} records={records} checks={updates?.checks ?? {}} onDone={() => (setEditing(false), onWorksChanged())} />
+        <WorkEditor
+          work={work}
+          others={others}
+          records={records}
+          checks={updates?.checks ?? {}}
+          onDone={() => (setEditing(false), onWorksChanged())}
+        />
       )}
 
-      {rows.length > 0 && (
-        <section className="home-section">
-          <div className="section-head">
-            <h2>Capítulos</h2>
-            <span className="mono muted">{rows.length}</span>
+      <div className="work-columns">
+        <section className="chapter-panel">
+          <div className="chapter-panel-head">
+            <h2>
+              Capítulos <span className="library-count">{rows.length}</span>
+            </h2>
+            <input type="search" inputMode="decimal" placeholder="Nº do capítulo" value={chapterQuery} onChange={(e) => setChapterQuery(e.target.value)} />
+            <button className="secondary small" onClick={() => setOldestFirst(!oldestFirst)}>
+              {oldestFirst ? '↑ Antigos' : '↓ Recentes'}
+            </button>
           </div>
+          {rows.length === 0 && <p className="hint">Nenhum capítulo lido ou traduzido ainda.</p>}
           <div className="chapter-rows">
-            {rows.map(({ chapter, record, entry }) => (
+            {shownRows.map(({ chapter, record, entry }) => (
               <div key={chapter} className={`chapter-row ${record?.status === 'read' ? 'read' : ''}`}>
-                <span className="chapter-num">Cap. {chapter}</span>
-                <span className={`chapter-state ${record?.status ?? ''}`}>
-                  {record ? (record.status === 'read' ? '✓ lido' : record.progress !== null ? `${Math.round(record.progress * 100)}%` : 'lendo') : ''}
-                </span>
-                <span className="mono muted chapter-where">
-                  {record ? `${(siteOf(record.url) || sourceLabel(record.source)).toUpperCase()} · ${timeAgo(record.updatedAt)}` : ''}
+                <span className="chapter-num">{chapter}</span>
+                <span className="chapter-text">
+                  <span className="chapter-title">
+                    Capítulo {chapter}
+                    {record?.status === 'read' && <span className="badge ok">lido</span>}
+                    {record?.status === 'reading' && (
+                      <span className="badge">{record.progress !== null ? `${Math.round(record.progress * 100)}%` : 'lendo'}</span>
+                    )}
+                    {entry && <span className="badge">{isDownloaded(entry) ? 'baixado' : 'traduzido'}</span>}
+                  </span>
+                  <span className="chapter-where">
+                    {record ? `${siteOf(record.url) || sourceLabel(record.source)} · ${timeAgo(record.updatedAt)}` : entry ? timeAgo(entry.createdAt) : ''}
+                  </span>
                 </span>
                 <span className="chapter-actions">
                   {entry && (
                     <button className="small" onClick={() => onOpen(entry)}>
-                      {isDownloaded(entry) ? 'Ler baixado' : 'Ler traduzido'}
+                      Ler
                     </button>
                   )}
                   {record?.url && (
@@ -452,7 +619,55 @@ export function WorkPage({
             ))}
           </div>
         </section>
-      )}
+
+        <aside className="info-card">
+          <h3>Informações</h3>
+          <dl>
+            <dt>Formato</dt>
+            <dd>{work.format === 'novel' ? 'Novel' : 'Mangá'}</dd>
+            <dt>Lista</dt>
+            <dd>{shelf ? SHELVES[shelf] : 'Nenhuma'}</dd>
+            {newest !== null && (
+              <>
+                <dt>Capítulos</dt>
+                <dd>{newest}</dd>
+              </>
+            )}
+            <dt>Capítulo novo</dt>
+            <dd>
+              <select
+                className="pill-select"
+                value={work.auto ?? ''}
+                title={
+                  work.sources?.length
+                    ? 'O que fazer quando sair um capítulo novo num dos sites da obra (checados a cada 2 horas)'
+                    : 'Adicione um site da obra em "Editar obra" para os capítulos novos serem achados'
+                }
+                onChange={async (e) => {
+                  await window.api.works.setAuto(work.id, (e.target.value || null) as 'translate' | 'download' | null)
+                  onWorksChanged()
+                }}
+              >
+                <option value="">Só avisar</option>
+                <option value="translate">Traduzir sozinho</option>
+                <option value="download">Baixar sozinho (já em PT)</option>
+              </select>
+            </dd>
+          </dl>
+          {(work.sources ?? []).length > 0 && (
+            <>
+              <h4>Sites</h4>
+              <div className="tags">
+                {(work.sources ?? []).map((s) => (
+                  <a key={s} className="tag link-tag" href={s} target="_blank" rel="noreferrer">
+                    {siteOf(s)} ↗
+                  </a>
+                ))}
+              </div>
+            </>
+          )}
+        </aside>
+      </div>
 
       {chapters.length > 0 && (
         <section className="home-section">
@@ -460,7 +675,15 @@ export function WorkPage({
             <h2>{chapters.every(isDownloaded) ? 'Baixados neste PC' : chapters.some(isDownloaded) ? 'Neste PC' : 'Traduzidos neste PC'}</h2>
             <span className="mono muted">{chapterRange(chapters).replace(/^ · /, '').toUpperCase()}</span>
           </div>
-          <TranslatedGrid chapters={chapters} records={records} others={others} onOpen={onOpen} onDownload={onDownload} onDelete={onDelete} onWorksChanged={onWorksChanged} />
+          <TranslatedGrid
+            chapters={chapters}
+            records={records}
+            others={others}
+            onOpen={onOpen}
+            onDownload={onDownload}
+            onDelete={onDelete}
+            onWorksChanged={onWorksChanged}
+          />
         </section>
       )}
     </div>
@@ -473,12 +696,27 @@ function chapterRows(records: ReadingRecord[], chapters: LibraryEntry[]): { chap
   for (const r of records) rows.set(r.chapter, { chapter: r.chapter, record: r })
   for (const e of chapters) {
     if (e.chapter === null) continue
-    rows.set(e.chapter, { ...(rows.get(e.chapter) ?? { chapter: e.chapter }), entry: e })
+    rows.set(e.chapter, {
+      ...(rows.get(e.chapter) ?? { chapter: e.chapter }),
+      entry: e
+    })
   }
   return [...rows.values()].sort((a, b) => b.chapter - a.chapter)
 }
 
-function TranslatedGrid({ chapters, records, others, onOpen, onDownload, onDelete, onWorksChanged }: { chapters: LibraryEntry[]; records: ReadingRecord[]; others: Work[] } & Actions) {
+function TranslatedGrid({
+  chapters,
+  records,
+  others,
+  onOpen,
+  onDownload,
+  onDelete,
+  onWorksChanged
+}: {
+  chapters: LibraryEntry[]
+  records: ReadingRecord[]
+  others: Work[]
+} & Actions) {
   const readChapters = new Set(records.filter((r) => r.status === 'read').map((r) => r.chapter))
   return (
     <div className="library-grid">
@@ -498,8 +736,10 @@ function TranslatedGrid({ chapters, records, others, onOpen, onDownload, onDelet
                 : `${languageLabel(entry.sourceLanguage)} → ${languageLabel(entry.targetLanguage)}`}
             </span>
             <span>
-              {entry.translatedPages === entry.pageCount ? `${entry.pageCount} páginas` : `${entry.translatedPages} de ${entry.pageCount} páginas traduzidas`} ·{' '}
-              {new Date(entry.createdAt).toLocaleDateString('pt-BR')}
+              {entry.translatedPages === entry.pageCount
+                ? `${entry.pageCount} páginas`
+                : `${entry.translatedPages} de ${entry.pageCount} páginas traduzidas`}{' '}
+              · {new Date(entry.createdAt).toLocaleDateString('pt-BR')}
             </span>
           </div>
           <div className="library-actions">
@@ -550,9 +790,9 @@ export function ExtensionHelp({ onClose }: { onClose: () => void }) {
   return (
     <div className="work-editor">
       <p>
-        Com a extensão, o app marca sozinho os capítulos que você lê em qualquer site: <strong>lido</strong> quando você chega
-        ao fim das páginas (ou abre o capítulo seguinte), <strong>em andamento</strong> com a posição quando para no meio. Com o
-        app fechado, a extensão guarda as leituras e envia quando ele abrir.
+        Com a extensão, o app marca sozinho os capítulos que você lê em qualquer site: <strong>lido</strong> quando você chega ao fim das páginas (ou
+        abre o capítulo seguinte), <strong>em andamento</strong> com a posição quando para no meio. Com o app fechado, a extensão guarda as leituras e
+        envia quando ele abrir.
       </p>
       <ol className="steps">
         <li>
@@ -574,7 +814,15 @@ export function ExtensionHelp({ onClose }: { onClose: () => void }) {
 }
 
 /** Goes on reading: in the app when the chapter is in the library (offline too), else on the site. */
-function ContinueButtons({ inApp, continueUrl, onOpen }: { inApp: LibraryEntry | null; continueUrl?: string; onOpen: (entry: LibraryEntry) => void }) {
+function ContinueButtons({
+  inApp,
+  continueUrl,
+  onOpen
+}: {
+  inApp: LibraryEntry | null
+  continueUrl?: string
+  onOpen: (entry: LibraryEntry) => void
+}) {
   return (
     <>
       {inApp && (
@@ -596,9 +844,7 @@ function readingStatus(records: ReadingRecord[]): { text: string; continueUrl: s
   if (!records.length) return null
   const read = records.filter((r) => r.status === 'read').map((r) => r.chapter)
   const upTo = read.length ? Math.max(...read) : null
-  const current = records
-    .filter((r) => r.status === 'reading' && (upTo === null || r.chapter > upTo))
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+  const current = records.filter((r) => r.status === 'reading' && (upTo === null || r.chapter > upTo)).sort((a, b) => b.updatedAt - a.updatedAt)[0]
   const last = [...records].sort((a, b) => b.updatedAt - a.updatedAt)[0]
   const parts: string[] = []
   if (upTo !== null) parts.push(`Lido até o cap. ${upTo}`)
@@ -623,7 +869,12 @@ function siteOf(url: string): string {
 }
 
 function sourceLabel(source: ReadingRecord['source']): string {
-  return { browser: 'navegador', history: 'histórico', app: 'lido no app', manual: 'marcado à mão' }[source]
+  return {
+    browser: 'navegador',
+    history: 'histórico',
+    app: 'lido no app',
+    manual: 'marcado à mão'
+  }[source]
 }
 
 function timeAgo(at: number): string {
@@ -710,8 +961,8 @@ function WorkEditor({
       <label className="field-label">Nomes da obra, um por linha (o primeiro é o principal)</label>
       <textarea rows={Math.min(8, Math.max(3, work.names.length + 1))} value={text} onChange={(e) => setText(e.target.value)} />
       <p className="hint">
-        Capítulos novos com qualquer um desses nomes, ou com o começo deles (nomes cortados), entram nesta obra, seja no app ou
-        lidos no navegador. Adicione os nomes usados em outros sites e idiomas.
+        Capítulos novos com qualquer um desses nomes, ou com o começo deles (nomes cortados), entram nesta obra, seja no app ou lidos no navegador.
+        Adicione os nomes usados em outros sites e idiomas.
       </p>
       {error && <p className="error">{error}</p>}
       <div className="row">
@@ -902,5 +1153,73 @@ function CatalogSearch({ work, others, onLinked }: { work: Work; others: Work[];
         </div>
       )}
     </>
+  )
+}
+
+/**
+ * The search on top of every page of the scans (Ctrl+K): the library's works by any of their names,
+ * and the name looked up on the sites to translate or download its chapters.
+ */
+export function QuickSearch({
+  data,
+  onPick,
+  onSites,
+  onClose
+}: {
+  data: LibraryData
+  onPick: (workId: string) => void
+  onSites: (query: string) => void
+  onClose: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const [at, setAt] = useState(0)
+  const query = normalizeName(search)
+  const found = query ? data.groups.filter((g) => g.work.names.some((n) => normalizeName(n).includes(query))).slice(0, 8) : []
+  // The last choice is the sites' search, when something was typed.
+  const choices = found.length + (search.trim() ? 1 : 0)
+  const choose = (i: number) => {
+    if (i < found.length) onPick(found[i].work.id)
+    else if (search.trim()) onSites(search.trim())
+  }
+
+  return (
+    <div className="modal-backdrop quick-backdrop" onMouseDown={onClose}>
+      <div className="quick-search" onMouseDown={(e) => e.stopPropagation()}>
+        <input
+          type="search"
+          autoFocus
+          placeholder="Buscar obra por qualquer nome…"
+          value={search}
+          onChange={(e) => (setSearch(e.target.value), setAt(0))}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onClose()
+            else if (e.key === 'ArrowDown') setAt((i) => Math.min(choices - 1, i + 1))
+            else if (e.key === 'ArrowUp') setAt((i) => Math.max(0, i - 1))
+            else if (e.key === 'Enter') choose(at)
+            else return
+            e.preventDefault()
+          }}
+        />
+        {found.map((g, i) => (
+          <button key={g.work.id} className={`quick-result ${i === at ? 'active' : ''}`} onMouseEnter={() => setAt(i)} onClick={() => choose(i)}>
+            <Cover src={coverOf(g, data.covers)} className="thumb" />
+            <span className="quick-text">
+              <strong>{displayName(g.work.names[0])}</strong>
+              <span>{metaLine(g, data.latest.get(g.work.id))}</span>
+            </span>
+          </button>
+        ))}
+        {search.trim() && (
+          <button className={`quick-result quick-sites ${at === found.length ? 'active' : ''}`} onMouseEnter={() => setAt(found.length)} onClick={() => choose(found.length)}>
+            <span className="quick-icon">⌕</span>
+            <span className="quick-text">
+              <strong>Buscar “{search.trim()}” nos sites</strong>
+              <span>MangaDex e mgeko: traduzir ou baixar capítulos</span>
+            </span>
+          </button>
+        )}
+        {!search.trim() && <p className="hint">Digite o nome da obra. ↑ ↓ para escolher, Enter para abrir.</p>}
+      </div>
+    </div>
   )
 }

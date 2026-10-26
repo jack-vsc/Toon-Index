@@ -108,6 +108,13 @@ export function readInApp(entryId: string, progress: number, at = Date.now()): v
   startedReading(meta.workId)
 }
 
+/** Readings from another copy of the data (a backup file, the phone), merged as any reading is. */
+export function mergeRecords(incoming: ReadingRecord[]): void {
+  if (!incoming.length) return
+  saveReading(incoming.reduce(upsert, listReading()))
+  for (const workId of new Set(incoming.map((r) => r.workId))) startedReading(workId)
+}
+
 /** "Read up to chapter N" set by hand (read somewhere the app could not see, like the phone). */
 export function markRead(workId: string, chapter: number): void {
   saveReading(

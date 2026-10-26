@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CATALOG_SITES, type CatalogResult, type CatalogSite } from '../../../shared/catalog'
 import type { ReadingRecord } from '../../../shared/reading'
 import type { ChapterLink } from '../../../shared/updates'
@@ -7,6 +7,8 @@ import { displayName, findWork, type Work } from '../../../shared/works'
 interface Props {
   works: Work[]
   reading: ReadingRecord[]
+  /** A name to look up on the sites as soon as it opens (from the quick search). */
+  initialQuery?: string
   onClose: () => void
 }
 
@@ -27,8 +29,8 @@ const siteName = (source: Source): string => (source.site === 'link' ? new URL(s
  * is given (signing in there first when the site asks); the chapters join the queue the app works through
  * one at a time.
  */
-export function BatchDialog({ works, reading, onClose }: Props) {
-  const [query, setQuery] = useState('')
+export function BatchDialog({ works, reading, initialQuery, onClose }: Props) {
+  const [query, setQuery] = useState(initialQuery ?? '')
   const [results, setResults] = useState<CatalogResult[] | null>(null)
   const [picked, setPicked] = useState<Source | null>(null)
   const [link, setLink] = useState('')
@@ -45,6 +47,10 @@ export function BatchDialog({ works, reading, onClose }: Props) {
   const lastRead = known
     ? Math.max(0, ...reading.filter((r) => r.workId === known.id && r.status === 'read').map((r) => r.chapter))
     : 0
+
+  useEffect(() => {
+    if (initialQuery) void search()
+  }, [])
 
   async function search() {
     if (!query.trim()) return

@@ -9,7 +9,7 @@ import type { EvalConfig } from '../shared/types'
  * translated by hand), MI_EVAL_OUT (where comparison sheets go), MI_EVAL_PAGES ("2-4,7") and
  * MI_EVAL_DETECT=1 (only mark the detected text, no model calls), MI_EVAL_SFX=1 (translate sound
  * effects whatever the saved settings say) and MI_EVAL_MODEL="<base url>|<model>" (translate with
- * another OpenAI-compatible model, e.g. a local Ollama one).
+ * another OpenAI-compatible model, e.g. a local Ollama one; "local|gemma-4-e4b" is the app's own).
  */
 function evalConfig(): EvalConfig | null {
   const pdf = process.env.MI_EVAL_PDF

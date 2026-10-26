@@ -4,6 +4,8 @@ Models (in models/pretrained, loaded once):
 - comictextdetector.pt.onnx: text blocks, text lines and a pixel mask of the lettering (manga-image-translator).
 - bubble-seg.pt: YOLOv8 segmentation of speech bubbles (kitsumed/yolov8m_seg-speech-bubble).
 - anime-manga-big-lama.pt: LaMa fine-tuned on manga, TorchScript (IOPaint).
+- comic-text-and-bubble-detector.onnx (optional): RT-DETR-v2 boxes of bubbles, text in bubbles and text
+  outside them (ogkalu/comic-text-and-bubble-detector).
 
 Protocol: one JSON request per line on stdin, one JSON answer per line on stdout, matched by "id".
   {"id": 1, "cmd": "detect", "image": "page.png", "mask": "out-mask.png"}
@@ -39,6 +41,11 @@ TEXT_TILE_ASPECTS = (1.5, 2.2, 3.0)
 TEXT_TILE_OVERLAP = 0.5
 TILE_OVERLAP = 0.3
 LAMA_MAX_SIDE = 1024
+KINDS_MODEL = "comic-text-and-bubble-detector.onnx"
+KINDS_SIZE = 640
+KINDS_CONF = 0.4
+KINDS_TILE_ASPECT = 1.4
+KIND_BUBBLE, KIND_TEXT_IN, KIND_TEXT_OUT = 0, 1, 2
 
 
 def log(*args):
@@ -61,6 +68,10 @@ class Vision:
         self.ctd = ort.InferenceSession(str(MODELS / "comictextdetector.pt.onnx"), providers=providers)
         self.bubble = YOLO(str(MODELS / "bubble-seg.pt"))
         self.lama = torch.jit.load(str(MODELS / "anime-manga-big-lama.pt"), map_location=self.device).eval()
+        # Optional: boxes only, but it finds the bubbles the segmentation misses (translucent, spiky) and
+        # tells lettering inside a bubble from lettering outside it.
+        kinds = MODELS / KINDS_MODEL
+        self.kinds = ort.InferenceSession(str(kinds), providers=providers) if kinds.exists() else None
         # The first runs on the GPU pick their kernels (seconds); do it before the first page arrives.
         # On the processor there is nothing to pick, and the run itself takes minutes.
         if self.device == "cuda":
@@ -97,6 +108,15 @@ class Vision:
                 bubbles.append((poly, conf * (0.5 if cut else 1)))
         boxes = nms_boxes(boxes, 0.3)
         bubbles = dedupe_polys(bubbles, W, H)
+        kinds = self.kinds_page(img) if self.kinds else []
+        # Bubbles only the box detector saw: the ellipse inside the box keeps to the bubble (a rectangle
+        # takes in the artwork around a round or spiky one).
+        for kind, conf, box in kinds:
+            if kind != KIND_BUBBLE or any(iou(box, poly_box(p))[1] > 0.5 for p, _ in bubbles):
+                continue
+            x0, y0, x1, y1 = box
+            centre, axes = (int((x0 + x1) / 2), int((y0 + y1) / 2)), (max(1, int((x1 - x0) / 2)), max(1, int((y1 - y0) / 2)))
+            bubbles.append((cv2.ellipse2Poly(centre, axes, 0, 0, 360, 10).astype(np.float32), conf * 0.9))
 
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         regions = [refine_bubble(gray, Region.from_polygon(poly, W, H), mask) for poly, _ in bubbles]
@@ -107,11 +127,16 @@ class Vision:
             if area and all(regions[k].overlap(regions[j]) < 0.7 * area for j in kept_idx):
                 kept_idx.append(k)
         kept_idx.sort()
+        # The outline as detected, before growing over the flat area around it (which can run over
+        # lettering next to the bubble): where lettering crosses it.
+        drawn = [Region.from_polygon(bubbles[k][0], W, H) for k in kept_idx]
         bubbles = [(regions[k].outline(), bubbles[k][1]) for k in kept_idx]
         regions = [regions[k] for k in kept_idx]
 
         blocks = []
-        for x0, y0, x1, y1, conf in boxes:
+        queue = [(b, True) for b in boxes]
+        while queue:
+            (x0, y0, x1, y1, conf), may_split = queue.pop(0)
             x0, y0, x1, y1 = clip_box(x0, y0, x1, y1, W, H)
             if x1 - x0 < 3 or y1 - y0 < 3:
                 continue
@@ -128,6 +153,17 @@ class Vision:
                 inside = region.inside(tight)
                 if (region.at(cx, cy) or inside > 0.5 * area) and inside > best:
                     best, bubble = inside, i
+            # Lettering the box detector reads as outside any bubble (an aside across a bubble's outline)
+            # is not that bubble's.
+            if bubble >= 0 and text_kind(tight, kinds) == KIND_TEXT_OUT:
+                bubble = -1
+            # Lettering across a bubble's outline may be two: a watermark running into the bubble, its lines
+            # side by side with the words. The parts in and out become boxes of their own; the model, which
+            # reads them, lists both in one block when they are one sentence (an aside across the outline).
+            parts = split_at_outline(mask, drawn[bubble], tight) if may_split and 0 <= bubble < len(drawn) else None
+            if parts:
+                queue[:0] = [([*p, conf], False) for p in parts]
+                continue
             blocks.append(
                 {
                     "box": [int(v) for v in tight],
@@ -164,6 +200,26 @@ class Vision:
             for k, ((poly, conf), region) in enumerate(zip(bubbles, regions))
         ]
         return blocks, out_bubbles, mask
+
+    def kinds_page(self, img):
+        """The box detector over the page, in windows (it was trained on pages resized to 640x640, tall
+        strips cut up): [(kind, conf, [x0, y0, x1, y1])]."""
+        H, W = img.shape[:2]
+        found = []
+        for y0, y1 in tiles(W, H, KINDS_TILE_ASPECT):
+            tile = img[y0:y1]
+            x = cv2.resize(tile, (KINDS_SIZE, KINDS_SIZE), interpolation=cv2.INTER_AREA).astype(np.float32).transpose(2, 0, 1)[None] / 255
+            size = np.array([[tile.shape[1], tile.shape[0]]], np.int64)
+            labels, boxes, scores = self.kinds.run(None, {"images": x, "orig_target_sizes": size})
+            for kind, box, conf in zip(labels[0], boxes[0], scores[0]):
+                if conf >= KINDS_CONF:
+                    x0, by0, x1, by1 = clip_box(box[0], box[1] + y0, box[2], box[3] + y0, W, H)
+                    found.append((int(kind), float(conf), [x0, by0, x1, by1]))
+        kept = []
+        for f in sorted(found, key=lambda f: -f[1]):
+            if all(f[0] != k[0] or (iou(f[2], k[2])[0] < 0.5 and iou(f[2], k[2])[1] < 0.8) for k in kept):
+                kept.append(f)
+        return kept
 
     def ctd_tile(self, img):
         h, w = img.shape[:2]
@@ -522,6 +578,45 @@ def iou(a, b):
     aa = (a[2] - a[0]) * (a[3] - a[1])
     bb = (b[2] - b[0]) * (b[3] - b[1])
     return inter / (aa + bb - inter), inter / max(1e-6, min(aa, bb))
+
+
+def split_at_outline(text, region, box):
+    """The boxes of the lettering inside the bubble and outside it, when both parts are sizeable; else None."""
+    x0, y0, x1, y1 = box
+    ink = text[y0:y1, x0:x1] > 0
+    total = int(ink.sum())
+    if total < 100:
+        return None
+    inside = np.zeros_like(ink)
+    wx0, wy0, wx1, wy1 = region.window()
+    ix0, iy0, ix1, iy1 = max(x0, wx0), max(y0, wy0), min(x1, wx1), min(y1, wy1)
+    if ix1 > ix0 and iy1 > iy0:
+        inside[iy0 - y0:iy1 - y0, ix0 - x0:ix1 - x0] = region.mask[iy0 - wy0:iy1 - wy0, ix0 - wx0:ix1 - wx0] > 0
+    # Letters just touching the outline don't count: a part is clearly on its side of it.
+    core_in = cv2.erode(inside.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+    core_out = cv2.erode((~inside).astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+    if (ink & core_in).sum() < 0.2 * total or (ink & core_out).sum() < 0.2 * total:
+        return None
+    parts = []
+    for side in (inside, ~inside):
+        ys, xs = np.nonzero(ink & side)
+        parts.append([x0 + int(xs.min()), y0 + int(ys.min()), x0 + int(xs.max()) + 1, y0 + int(ys.max()) + 1])
+    return parts
+
+
+def poly_box(poly):
+    return [float(poly[:, 0].min()), float(poly[:, 1].min()), float(poly[:, 0].max()), float(poly[:, 1].max())]
+
+
+def text_kind(box, kinds):
+    """KIND_TEXT_IN / KIND_TEXT_OUT for the box detector's text that covers most of `box`, else None."""
+    best, kind = 0.6, None
+    for k, _, b in kinds:
+        if k in (KIND_TEXT_IN, KIND_TEXT_OUT):
+            cover = iou(box, b)[1]
+            if cover > best:
+                best, kind = cover, k
+    return kind
 
 
 def nms_boxes(boxes, thresh):

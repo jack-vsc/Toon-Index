@@ -1,4 +1,4 @@
-import { normalizeName } from './works'
+import { normalizeName, sameName } from './works'
 
 /**
  * The sites works are looked up on: MangaDex (its public API) and mgeko (its pages). They give a work
@@ -38,6 +38,30 @@ export interface CatalogResult {
 export function isSameWork(names: string[], match: Pick<CatalogMatch, 'title' | 'altNames'>): boolean {
   const known = new Set(names.map(normalizeName).filter(Boolean))
   return [match.title, ...match.altNames].some((n) => known.has(normalizeName(n)))
+}
+
+/**
+ * A match with a name all but the same as one of the work's ("The Max Level Hero Has Returned" and
+ * "The Max-Leveled Hero Has Returned!"), or one the work's name was cut short of: close enough for its
+ * cover, not for taking its names and pages. A subtitle after it is another work ("Solo Leveling: Ragnarok").
+ */
+export function isLikelySameWork(names: string[], match: Pick<CatalogMatch, 'title' | 'altNames'>): boolean {
+  const theirs = [match.title, ...match.altNames]
+  return names.some((k) => theirs.some((n) => sameName(k, n) || (normalizeName(k).length >= 6 && dice(normalizeName(k), normalizeName(n)) >= 0.85)))
+}
+
+/** Dice coefficient on letter pairs. */
+function dice(a: string, b: string): number {
+  const pairs = (s: string) => {
+    const m = new Map<string, number>()
+    for (let i = 0; i < s.length - 1; i++) m.set(s.slice(i, i + 2), (m.get(s.slice(i, i + 2)) ?? 0) + 1)
+    return m
+  }
+  const pa = pairs(a)
+  const pb = pairs(b)
+  let common = 0
+  for (const [p, n] of pa) common += Math.min(n, pb.get(p) ?? 0)
+  return (2 * common) / Math.max(1, a.length - 1 + b.length - 1)
 }
 
 /**

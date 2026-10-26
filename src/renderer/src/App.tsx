@@ -6,7 +6,7 @@ import type { RemoteJob, RemoteQueue } from '../../shared/remoteJobs'
 import type { UpdatesStatus, WorkUpdate } from '../../shared/updates'
 import { displayName, type Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
-import { HomeFeed, LibraryView, useLibrary, WorkPage } from './components/LibraryView'
+import { HomeFeed, LibraryView, QuickSearch, useLibrary, WorkPage } from './components/LibraryView'
 import { Sidebar, type Page } from './components/Sidebar'
 import { ProgressView, statusText } from './components/ProgressView'
 import { Reader, type ReaderPage } from './components/Reader'
@@ -66,6 +66,8 @@ export default function App() {
   const [remoteJob, setRemoteJob] = useState<RemoteJob | null>(null)
   const [queue, setQueue] = useState<RemoteQueue | null>(null)
   const [batchOpen, setBatchOpen] = useState(false)
+  const [batchQuery, setBatchQuery] = useState<string | undefined>()
+  const [searchOpen, setSearchOpen] = useState(false)
   /** Reading with nothing around the pages (the window full screen too). */
   const [immersive, setImmersive] = useState(false)
   /** Where the home view is: the first page, the library, or a work's page. */
@@ -436,6 +438,18 @@ export default function App() {
     goTo({ kind: 'work', id: openEntry.workId })
   }
 
+  // Ctrl+K: the quick search, from the home pages and while reading.
+  useEffect(() => {
+    if (view !== 'home' && view !== 'result') return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'k') return
+      e.preventDefault()
+      setSearchOpen(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [view])
+
   // Shortcuts while reading: N and P for the next and previous chapters, F for full screen.
   useEffect(() => {
     if (view !== 'result') return
@@ -495,6 +509,7 @@ export default function App() {
           onPhone={() => setPhoneOpen(true)}
           onAi={() => setAiMonitorOpen(true)}
           onSettings={() => setSettingsOpen(true)}
+          onSearch={() => setSearchOpen(true)}
         />
       )}
       <div className="main-col">
@@ -554,10 +569,15 @@ export default function App() {
                   Por página
                 </button>
               </div>
-              <label className="zoom">
-                Zoom
-                <input type="range" min={30} max={100} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
-              </label>
+              <div className="zoom-steps" title="Largura das páginas">
+                <button className="secondary small" onClick={() => setZoom((z) => Math.max(30, z - 10))} disabled={zoom <= 30}>
+                  −
+                </button>
+                <span>{zoom}%</span>
+                <button className="secondary small" onClick={() => setZoom((z) => Math.min(100, z + 10))} disabled={zoom >= 100}>
+                  +
+                </button>
+              </div>
               {view === 'result' && (
                 <button className="icon" title="Tela cheia (F; Esc para sair)" onClick={() => setImmersive(true)}>
                   ⛶
@@ -747,6 +767,20 @@ export default function App() {
                 }
               />
             )}
+            {showReader && view === 'result' && openEntry && (
+              // The chapters around this one, always at hand at the bottom of the page.
+              <div className="reader-pill">
+                <button disabled={!prevEntry} onClick={() => prevEntry && openFromLibrary(prevEntry)} title="Capítulo anterior (P)">
+                  ‹
+                </button>
+                <button onClick={openWorkPage} title="A página da obra">
+                  ☰ Cap. {openEntry.chapter ?? '?'}
+                </button>
+                <button disabled={!nextEntry} onClick={() => nextEntry && openFromLibrary(nextEntry)} title="Próximo capítulo (N)">
+                  ›
+                </button>
+              </div>
+            )}
             {showReader && immersive && (
               <button className="immersive-exit" onClick={() => setImmersive(false)} title="Sair da tela cheia (Esc)">
                 ✕
@@ -760,7 +794,25 @@ export default function App() {
         <SettingsDialog initial={settings} onClose={() => setSettingsOpen(false)} onSaved={setSettings} />
       )}
       {aiMonitorOpen && <AiMonitor onClose={() => setAiMonitorOpen(false)} />}
-      {batchOpen && <BatchDialog works={works} reading={reading} onClose={() => setBatchOpen(false)} />}
+      {batchOpen && (
+        <BatchDialog works={works} reading={reading} initialQuery={batchQuery} onClose={() => (setBatchOpen(false), setBatchQuery(undefined))} />
+      )}
+      {searchOpen && (
+        <QuickSearch
+          data={libraryData}
+          onClose={() => setSearchOpen(false)}
+          onPick={(id) => {
+            setSearchOpen(false)
+            if (view !== 'home') goHome()
+            goTo({ kind: 'work', id })
+          }}
+          onSites={(query) => {
+            setSearchOpen(false)
+            setBatchQuery(query)
+            setBatchOpen(true)
+          }}
+        />
+      )}
       {phoneOpen && <PhoneDialog onClose={() => setPhoneOpen(false)} />}
     </div>
   )

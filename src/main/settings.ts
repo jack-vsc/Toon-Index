@@ -5,6 +5,8 @@ import {
   AUTO_LANGUAGE,
   DEFAULT_SETTINGS,
   LANGUAGES,
+  LOCAL_AI_BASE_URL,
+  LOCAL_AI_PROFILE_ID,
   type ApiProfile,
   type AppSettings,
   type PublicSettings,
@@ -142,7 +144,10 @@ export function getPublicSettings(): PublicSettings {
   return { ...settings, hasKey, keyHint }
 }
 
-/** Profile of an evaluation run against another model, MI_EVAL_MODEL="<base url>|<model>" (a local server needs no key). */
+/**
+ * Profile of an evaluation run against another model, MI_EVAL_MODEL="<base url>|<model>" (a local server
+ * needs no key); "local|<model id>" runs the app's own model ("Neste PC") the way users get it.
+ */
 const EVAL_PROFILE = 'eval'
 
 export function getSettings(): AppSettings {
@@ -151,8 +156,10 @@ export function getSettings(): AppSettings {
   if (process.env.MI_EVAL_SFX === '1') settings = { ...settings, translateSfx: true }
   const [baseUrl, model] = (process.env.MI_EVAL_MODEL ?? '').split('|')
   if (baseUrl && model) {
-    const profile: ApiProfile = { id: EVAL_PROFILE, name: 'Avaliação', kind: 'openai', baseUrl, models: [model], model }
-    settings = { ...settings, profiles: [...settings.profiles, profile], activeProfileId: EVAL_PROFILE, concurrency: 1 }
+    const own = baseUrl === 'local'
+    const id = own ? LOCAL_AI_PROFILE_ID : EVAL_PROFILE
+    const profile: ApiProfile = { id, name: 'Avaliação', kind: 'openai', baseUrl: own ? LOCAL_AI_BASE_URL : baseUrl, models: [model], model }
+    settings = { ...settings, profiles: [...settings.profiles.filter((p) => p.id !== id), profile], activeProfileId: id, concurrency: 1 }
   }
   return settings
 }

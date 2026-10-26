@@ -1,6 +1,12 @@
 package com.jack.manga_index
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
@@ -8,7 +14,9 @@ import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * Hands what is shared to the app (a chapter's link from the browser, a PDF from the file manager)
@@ -52,11 +60,54 @@ class MainActivity : FlutterActivity() {
                 } catch (e: Exception) {
                     result.error("install", e.message, null)
                 }
+                // "wifi", "cellular" or "none": downloads on the phone may be kept to Wi-Fi.
+                "network" -> {
+                    val manager = getSystemService(ConnectivityManager::class.java)
+                    val caps = manager?.getNetworkCapabilities(manager.activeNetwork)
+                    result.success(
+                        when {
+                            caps == null -> "none"
+                            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) && !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "cellular"
+                            else -> "wifi"
+                        }
+                    )
+                }
+                // A page downloaded on the phone (WebP, PNG, JPEG…) as a JPEG with its size, for the PDF.
+                "toJpeg" -> {
+                    val bytes = call.argument<ByteArray>("bytes")!!
+                    images.execute {
+                        val answer = try {
+                            toJpeg(bytes)
+                        } catch (e: Throwable) {
+                            null
+                        }
+                        runOnUiThread { result.success(answer) }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
         val tiles = PdfTiles()
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "manga_index/pdf").setMethodCallHandler(tiles::handle)
+    }
+
+    private val images = Executors.newSingleThreadExecutor()
+
+    /** Null when the bytes are not a picture Android can open. */
+    private fun toJpeg(bytes: ByteArray): Map<String, Any>? {
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        // Transparent pictures go on white, as on the site's page.
+        val bitmap = if (decoded.hasAlpha()) {
+            Bitmap.createBitmap(decoded.width, decoded.height, Bitmap.Config.ARGB_8888).also {
+                Canvas(it).apply { drawColor(Color.WHITE); drawBitmap(decoded, 0f, 0f, null) }
+                decoded.recycle()
+            }
+        } else decoded
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        val answer = mapOf("bytes" to out.toByteArray(), "width" to bitmap.width, "height" to bitmap.height)
+        bitmap.recycle()
+        return answer
     }
 
     // Shared while the app was already open.

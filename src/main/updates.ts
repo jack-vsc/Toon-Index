@@ -7,7 +7,7 @@ import { displayName, type Work } from '../shared/works'
 import { listLibrary, listWorks, saveWorkSources } from './library'
 import { addBatch, listRemoteJobs } from './remoteJobs'
 import { listReading } from './reading'
-import { autoLink, mangadexLatest } from './catalog'
+import { autoCovers, autoLink, mangadexLatest } from './catalog'
 import { hiddenWindow, isChallenged, open, sleep } from './webChapter'
 
 /** The sites are checked this often while the app is open; more would only burden them. */
@@ -115,6 +115,10 @@ export async function checkNow(): Promise<void> {
   try {
     // Works not looked up yet on the catalog sites get their names, cover and pages there first.
     await autoLink(win).catch((err: Error) => console.warn('[catalog] auto link failed:', err.message))
+    // And every work still without a cover gets one from MangaDex when it is there under a close name.
+    await autoCovers(win)
+      .then((n) => n && console.log(`[catalog] ${n} covers found`))
+      .catch((err: Error) => console.warn('[catalog] covers failed:', err.message))
     const sources = [...new Set(listWorks().flatMap((w) => w.sources ?? []))]
     for (const [i, source] of sources.entries()) {
       if (i > 0) await sleep(BETWEEN_SITES_MS)

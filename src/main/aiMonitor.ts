@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import { createInterface } from 'node:readline'
 import type { AiMonitorStatus, AiStopTarget, GpuStatus, LocalAiId, LocalAiStatus } from '../shared/types'
 import { stopVision, visionPid } from './vision'
+import { stopLocalServer } from './localAi'
 
 /**
  * What the local AIs are doing on the GPU. nvidia-smi gives the card's totals quickly; memory per
@@ -187,6 +188,8 @@ export async function stopAi(target: AiStopTarget): Promise<void> {
     }
   }
   if (target === 'ollama-models' || target === 'ollama' || target === 'all') {
+    // The app's own model server ("Neste PC") leaves the card the same way.
+    stopLocalServer()
     const models = (await ollamaModels()) ?? []
     await Promise.all(
       models.map((m) =>

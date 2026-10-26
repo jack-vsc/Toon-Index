@@ -170,16 +170,19 @@ function check(job: { cancelled: boolean }): void {
  */
 export function open(win: BrowserWindow, url: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('O site demorou demais para abrir.')), LOAD_TIMEOUT_MS)
+    const timer = setTimeout(() => done(new Error('O site demorou demais para abrir.')), LOAD_TIMEOUT_MS)
+    // Off once settled: a window that loads page after page (long chapter lists) would pile them up.
+    const failed = (_e: Electron.Event, code: number, description: string, _url: string, isMainFrame: boolean): void => {
+      // -3 is a navigation replaced by another (redirects).
+      if (isMainFrame && code !== -3) done(new Error(`Não foi possível abrir o link (${description}).`))
+    }
     const done = (err?: Error): void => {
       clearTimeout(timer)
+      win.webContents.off('did-fail-load', failed)
       if (err) reject(err)
       else resolve()
     }
-    win.webContents.on('did-fail-load', (_e, code, description, _url, isMainFrame) => {
-      // -3 is a navigation replaced by another (redirects).
-      if (isMainFrame && code !== -3) done(new Error(`Não foi possível abrir o link (${description}).`))
-    })
+    win.webContents.on('did-fail-load', failed)
     win.webContents.once('dom-ready', () => {
       const finished = new Promise<void>((r) => win.webContents.once('did-finish-load', () => r()))
       Promise.race([finished, sleep(5_000)]).then(() => done())

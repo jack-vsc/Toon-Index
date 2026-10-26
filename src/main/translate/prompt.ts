@@ -34,7 +34,7 @@ ${intro}
 ${source}
 Translate every piece of readable text into ${settings.targetLanguage}.
 ${sfx}
-Scanlation watermarks, credits and website URLs written over the artwork (such as "YOU CAN FIND ALL CHAPTERS ON OUR WEBSITE: ...") are blocks of kind "watermark" with an empty translation: they are erased, not translated.
+Scanlation watermarks, credits and website URLs written over the artwork (such as "YOU CAN FIND ALL CHAPTERS ON OUR WEBSITE: ...") are blocks of kind "watermark" with an empty translation: they are erased, not translated. A watermark sometimes runs into a bubble, its lines side by side with a character's words: then give two blocks listing the same boxes, the watermark, and the words alone (their original and translation without any of the watermark).
 
 Return EVERY text block, including small bubbles, one-word bubbles and short interjections: a missed bubble stays untranslated.
 
@@ -139,12 +139,16 @@ export function parseBlocks(
       : Array.isArray(json)
         ? json
         : []
+  if (!boxedOnly) realignIds(entries, req)
   // A bubble in the overlap of two slices is sometimes returned for both, the second time on whatever
   // box lies near it there; the copy on more letters is the real one.
   const seen = new Map<string, { image: number; block: TextBlock; glyphs: number }>()
   for (const entry of entries) {
     const picked = entry && typeof entry === 'object' ? pickRegions((entry as Record<string, unknown>).ids, req) : []
     if (boxedOnly && !picked.length) continue
+    // A translation stuck repeating itself ("E A E E E E…") is no answer: its boxes are asked about
+    // again on their own, and the text would take the overlay minutes to lay out.
+    if (looping((entry as Record<string, unknown>).translation)) continue
     const placed = toBlock(entry, picked, req)
     // Boxes the block's position left out (not next to its text) are asked about again on their own.
     for (const r of placed ? placed.kept : picked) answered.add(r.id)
@@ -169,6 +173,70 @@ export function parseBlocks(
     result[placed.image].push(placed.block)
   }
   return { blocks: result, answered, skipped }
+}
+
+/**
+ * Small models now and then lose count of the boxes partway through a page: from one block on, each
+ * text comes with the number of the box after (or before) its own, and every bubble gets its
+ * neighbour's words. The detector measured how many letters each box holds; when the texts from some
+ * block on fit the boxes one number off far better than the ones given, those blocks move over.
+ */
+export function realignIds(entries: unknown[], req: TranslateRequest): void {
+  // Boxes of a stray mark or two are skipped when counting: the model loses count over real ones.
+  const order = req.regions.filter((r) => r.glyphs >= MIN_COUNTED_GLYPHS).sort((a, b) => a.id - b.id)
+  const at = new Map(order.map((r, i) => [r.id, i]))
+  const rows = entries
+    .map((entry) => (entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null))
+    .filter((e): e is Record<string, unknown> => !!e && typeof e.original === 'string' && Array.isArray(e.ids))
+    .map((e) => ({
+      entry: e,
+      places: (e.ids as unknown[]).map((id) => at.get(Number(id))).filter((p): p is number => p !== undefined),
+      letters: letterCount(e.original as string)
+    }))
+    .filter((r) => r.letters >= 4 && r.places.length > 0)
+  if (rows.length < 3) return
+  // How far a text's length is from what the boxes hold (by ratio, so long and short count alike).
+  const cost = (row: (typeof rows)[number], shift: number): number => {
+    const places = row.places.map((p) => p + shift)
+    if (places.some((p) => p < 0 || p >= order.length)) return Infinity
+    const glyphs = places.reduce((n, p) => n + order[p].glyphs, 0)
+    return Math.min(3, Math.abs(Math.log((row.letters + 4) / (glyphs + 4))))
+  }
+  const given = rows.map((r) => cost(r, 0))
+  // A run of blocks that each clearly don't fit the boxes given and fit the next ones better. It ends
+  // where the count is right again: a block that fits its own boxes stays (a bubble split over two
+  // boxes fits either, so only clear misfits tell).
+  let best = { from: -1, to: -1, shift: 0, saved: 0, before: 0, after: 0 }
+  for (const shift of [1, -1]) {
+    const moved = rows.map((r) => cost(r, shift))
+    for (let from = 0; from < rows.length; from++) {
+      let before = 0
+      let after = 0
+      for (let to = from + 1; to <= rows.length && given[to - 1] >= MISFIT && moved[to - 1] < given[to - 1]; to++) {
+        before += given[to - 1]
+        after += moved[to - 1]
+        if (to - from >= 2 && before - after > best.saved) best = { from, to, shift, saved: before - after, before, after }
+      }
+    }
+  }
+  // Clearly better: the texts fit the moved boxes twice as well.
+  if (best.from < 0 || best.saved < 1.5 || best.after > 0.5 * best.before) return
+  for (const row of rows.slice(best.from, best.to)) row.entry.ids = row.places.map((p) => order[p + best.shift].id)
+  console.warn(`[translate] box numbers off by ${best.shift} for blocks ${best.from + 1}-${best.to} of ${rows.length}: moved`)
+}
+
+const MIN_COUNTED_GLYPHS = 3
+/** Text and boxes this far apart in length (log of the ratio: about 1.65 times) don't go together. */
+const MISFIT = 0.5
+
+function letterCount(text: string): number {
+  return text.replace(/[^\p{L}\p{N}]/gu, '').length
+}
+
+/** A word or a few repeated back to back many times over, or far more text than any bubble holds. */
+export function looping(translation: unknown): boolean {
+  if (typeof translation !== 'string') return false
+  return /((?:\S+\s+){1,3}?)\1{9,}/u.test(translation + ' ') || translation.length > 1200
 }
 
 function toBlock(

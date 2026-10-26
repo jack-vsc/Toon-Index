@@ -7,6 +7,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import 'api.dart';
 import 'models.dart';
+import 'site_download.dart';
 
 /// Reads chapters on their sites inside the app. The page runs the PC extension's tracker
 /// (assets/reading_tracker.js), so the chapter is marked read or in progress the same way.
@@ -94,7 +95,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (data['type'] != 'reading') return;
     try {
       final result = await widget.api.reportBrowserReading(data['report'] as Map<String, dynamic>);
-      if (mounted) setState(() => (_status = result ?? _status, _offline = result == null));
+      if (mounted) setState(() => (_status = result ?? _status, _offline = result?['offline'] == true));
     } on ApiException {
       if (mounted) setState(() => _offline = true);
     }
@@ -110,6 +111,27 @@ class _BrowserScreenState extends State<BrowserScreen> {
     } on ApiException catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
+  }
+
+  /// Downloads the chapter open (already in Portuguese) where the settings say.
+  Future<void> _download() async {
+    final url = await _web.currentUrl();
+    if (url == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final status = _status;
+    final title = await _web.getTitle();
+    if (!mounted) return;
+    final message = await SiteDownloads.request(
+      context,
+      widget.api,
+      SiteChapter(
+        url: url,
+        work: displayName(status?['work'] as String? ?? '').isNotEmpty ? displayName(status!['work'] as String) : (title ?? Uri.parse(url).host),
+        workId: status?['workId'] as String?,
+        chapter: (status?['chapter'] as num?)?.toDouble(),
+      ),
+    );
+    if (message != null) messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// "✓ cap. 54" or "cap. 54 · 40%" for the chapter open, as the PC counted it.
@@ -179,6 +201,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     await _web.reload();
                   case 'translate':
                     await _translate();
+                  case 'download':
+                    await _download();
                   case 'external':
                     final url = await _web.currentUrl();
                     if (url != null) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
@@ -188,6 +212,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 const PopupMenuItem(value: 'forward', child: Text('Avançar')),
                 const PopupMenuItem(value: 'reload', child: Text('Recarregar')),
                 if (_started) const PopupMenuItem(value: 'translate', child: Text('Traduzir este capítulo no PC')),
+                if (_started) const PopupMenuItem(value: 'download', child: Text('Baixar este capítulo (já em português)')),
                 if (_started) const PopupMenuItem(value: 'external', child: Text('Abrir no navegador do celular')),
               ],
             ),

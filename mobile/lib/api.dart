@@ -4,12 +4,16 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'local_data.dart';
 import 'models.dart';
 
 /// Where the PC app is and the token this phone got when it paired. The PC has several addresses
 /// (home Wi-Fi, Tailscale); the one that answered last is tried first.
 class Connection {
   Connection({required this.hosts, required this.port, required this.token, this.lastHost});
+
+  /// Not paired with any PC: the app works on its own data.
+  Connection.none() : this(hosts: const [], port: 0, token: '');
 
   final List<String> hosts;
   final int port;
@@ -67,6 +71,9 @@ class Api {
 
   final Connection connection;
 
+  /// Paired with a PC (else everything stays on the phone).
+  bool get paired => connection.hosts.isNotEmpty;
+
   /// The address that answered last, for covers and PDFs.
   String get base => 'http://${connection.ordered.first}:${connection.port}';
 
@@ -90,24 +97,62 @@ class Api {
         // Not reachable at this address; try the next one.
       }
     }
-    throw ApiException('Não foi possível falar com o PC. Ele está ligado, com o Manga Index aberto? Fora de casa, o Tailscale precisa estar ativo.');
+    throw ApiException(paired
+        ? 'Não foi possível falar com o PC. Ele está ligado, com o Manga Index aberto? Fora de casa, o Tailscale precisa estar ativo.'
+        : 'Este celular não está conectado a um PC. Conecte pelo menu ⋮ para traduzir.');
   }
 
+  /// Syncs with the PC: what changed here goes first, then the PC's library (merged with it)
+  /// becomes the phone's copy. Without the PC, the phone's copy.
   Future<Library> library() async {
-    // Readings made while away go first, so the library that comes back already has them.
+    if (!paired) return LocalData.library();
     await flushPending();
     final response = await _send((url) => http.get(url('/api/library'), headers: authHeaders));
     // The PC sends UTF-8 without saying so; response.body would read it as Latin-1.
-    final text = utf8.decode(response.bodyBytes);
-    await Store.saveLibrary(text);
-    return Library.fromJson(jsonDecode(text) as Map<String, dynamic>);
+    await LocalData.replace(utf8.decode(response.bodyBytes));
+    return LocalData.library();
   }
 
-  Future<void> markRead(String workId, double chapter) =>
-      _post('/api/reading/mark', {'workId': workId, 'chapter': chapter});
+  /// "Read up to chapter N", set by hand: on the phone at once, on the PC now or once it answers.
+  Future<void> markRead(String workId, double chapter) async {
+    final at = DateTime.now().millisecondsSinceEpoch;
+    await LocalData.applyMark(workId, chapter, at);
+    await _queueMark({'kind': 'mark', 'workId': workId, 'name': await LocalData.nameOf(workId), 'chapter': chapter, 'at': at});
+  }
 
-  Future<void> forget(String workId, double? chapter) =>
-      _post('/api/reading/forget', {'workId': workId, 'chapter': chapter});
+  Future<void> forget(String workId, double? chapter) async {
+    await LocalData.applyForget(workId, chapter);
+    await _queueMark({
+      'kind': 'forget',
+      'workId': workId,
+      'name': await LocalData.nameOf(workId),
+      'chapter': chapter,
+      'at': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> _queueMark(Map<String, dynamic> mark) async {
+    await Store.addPending(mark, Store.pendingMarks, 'at');
+    await _flushQuietly();
+  }
+
+  Future<void> _flushQuietly() async {
+    if (!paired) return;
+    try {
+      await flushPending();
+    } on ApiException {
+      // Stays queued.
+    }
+  }
+
+  /// A backup file (this phone's, another's or the PC's) merged into the phone's data and sent to the PC.
+  Future<(int, int)> importData(Map<String, dynamic> file) async {
+    final counts = await LocalData.merge(file);
+    await Store.addPending({'works': file['works'], 'reading': file['reading'], 'at': DateTime.now().millisecondsSinceEpoch},
+        Store.pendingMerges, 'at');
+    await _flushQuietly();
+    return counts;
+  }
 
   /// The chapters asked of the PC, newest first.
   Future<List<RemoteJob>> jobs() async {
@@ -140,30 +185,38 @@ class Api {
 
   Future<void> cancelJob(String id) => _post('/api/translate/cancel', {'id': id});
 
+  /// Asks the PC to download a chapter already in Portuguese into its library, as it is.
+  Future<void> downloadOnPc(String url, {required String work, required double chapter, required String site}) =>
+      _post('/api/download', {'url': url, 'work': work, 'chapter': chapter, 'site': site});
+
   /// How far into a library chapter the phone's reader got (1: to the end). Kept on the phone when
   /// the PC cannot be reached, and sent with the next request that gets through.
   Future<void> reportAppReading(String entryId, double progress) async {
-    await Store.addPending({'entryId': entryId, 'progress': progress, 'at': DateTime.now().millisecondsSinceEpoch});
-    try {
-      await flushPending();
-    } on ApiException {
-      // Stays queued.
-    }
+    final at = DateTime.now().millisecondsSinceEpoch;
+    await LocalData.applyAppReading(entryId, progress, at);
+    await Store.addPending({'entryId': entryId, 'progress': progress, 'at': at});
+    await _flushQuietly();
   }
 
   /// Puts a work on a reading list (null: none) and among the favorites or not, now or once the PC
   /// can be reached.
   Future<void> setShelf(String workId, {required String? shelf, required bool favorite}) async {
-    await Store.addPending({'workId': workId, 'shelf': shelf, 'favorite': favorite, 'at': DateTime.now().millisecondsSinceEpoch},
-        Store.pendingShelves, 'workId');
-    try {
-      await flushPending();
-    } on ApiException {
-      // Stays queued.
-    }
+    await LocalData.applyShelf(workId, shelf, favorite);
+    await Store.addPending(
+        {'workId': workId, 'name': await LocalData.nameOf(workId), 'shelf': shelf, 'favorite': favorite, 'at': DateTime.now().millisecondsSinceEpoch},
+        Store.pendingShelves,
+        'workId');
+    await _flushQuietly();
   }
 
   Future<void> flushPending() async {
+    if (!paired) return;
+    // Imported files first: the works they bring are the ones the rest may name.
+    final merges = await Store.loadPending(Store.pendingMerges);
+    for (final m in merges) {
+      await _post('/api/merge', {'works': m['works'], 'reading': m['reading']});
+    }
+    if (merges.isNotEmpty) await Store.removePending(merges, Store.pendingMerges);
     final shelves = await Store.loadPending(Store.pendingShelves);
     for (final s in shelves) {
       await _post('/api/works/shelf', s);
@@ -179,12 +232,21 @@ class Api {
       await _post('/api/reading', reports);
       await Store.removePending(reports, Store.pendingReports);
     }
+    // After the readings: a chapter forgotten here must not come back with one sent above.
+    final marks = await Store.loadPending(Store.pendingMarks);
+    for (final m in marks) {
+      await _post(m['kind'] == 'forget' ? '/api/reading/forget' : '/api/reading/mark', m);
+    }
+    if (marks.isNotEmpty) await Store.removePending(marks, Store.pendingMarks);
   }
 
   /// A chapter page read in the app's browser (what the PC's extension sends): the PC answers with
   /// the work and whether the chapter counts as read. Null when the PC could not be reached (the
   /// report waits on the phone) or the page is not a chapter.
   Future<Map<String, dynamic>?> reportBrowserReading(Map<String, dynamic> report) async {
+    // Counted on the phone at once; what the PC says replaces it when it answers.
+    final local = await LocalData.applyReport(report);
+    if (!paired) return local == null ? null : {...local, 'offline': true};
     try {
       final response = await _send((url) => http.post(url('/api/reading'),
           headers: {...authHeaders, 'Content-Type': 'application/json'}, body: jsonEncode(report)));
@@ -195,7 +257,7 @@ class Api {
       rethrow;
     } on ApiException {
       await Store.addPending(report, Store.pendingReports, 'url');
-      return null;
+      return local == null ? null : {...local, 'offline': true};
     }
   }
 
@@ -255,8 +317,8 @@ class Store {
 
   static Future<void> forgetConnection() async {
     final prefs = await SharedPreferences.getInstance();
+    // The phone's data stays: the app goes on without the PC.
     await prefs.remove(_connection);
-    await prefs.remove(_library);
   }
 
   static Future<Library?> loadLibrary() async {
@@ -297,4 +359,10 @@ class Store {
       (await SharedPreferences.getInstance()).setInt('band:$entryId', band);
 
   static const pendingShelves = 'pendingShelves';
+
+  /// Chapters marked read or forgotten by hand.
+  static const pendingMarks = 'pendingMarks';
+
+  /// Backup files imported on the phone, for the PC to merge too.
+  static const pendingMerges = 'pendingMerges';
 }

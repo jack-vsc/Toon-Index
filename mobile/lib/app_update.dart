@@ -18,20 +18,36 @@ class AppUpdate {
   static Future<void> offer(BuildContext context, Api api) async {
     if (_offered) return;
     _offered = true;
+    await _check(context, api, manual: false);
+  }
+
+  /// "Verificar atualização" in the menu: asked again even after "Depois", and says how it went.
+  static Future<void> check(BuildContext context, Api api) => _check(context, api, manual: true);
+
+  static Future<void> _check(BuildContext context, Api api, {required bool manual}) async {
+    final messenger = ScaffoldMessenger.of(context);
     final int mine;
     final Map<String, dynamic> release;
     try {
       mine = await _channel.invokeMethod<int>('build') ?? 0;
       final response = await http.get(Uri.parse('${api.base}/api/app'), headers: api.authHeaders).timeout(const Duration(seconds: 8));
-      if (response.statusCode != 200) return;
+      if (response.statusCode != 200) {
+        if (manual) messenger.showSnackBar(const SnackBar(content: Text('O PC não tem uma versão do app para entregar.')));
+        return;
+      }
       release = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     } catch (_) {
       // Away from the PC, or not on Android: asked again next time the app opens.
       _offered = false;
+      if (manual) messenger.showSnackBar(const SnackBar(content: Text('Não foi possível falar com o PC. Ele está ligado e na mesma rede?')));
       return;
     }
     final build = (release['build'] as num?)?.toInt() ?? 0;
-    if (build <= mine || !context.mounted) return;
+    if (build <= mine) {
+      if (manual) messenger.showSnackBar(SnackBar(content: Text('Você já tem a versão mais nova (${release['version']}).')));
+      return;
+    }
+    if (!context.mounted) return;
     final update = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(

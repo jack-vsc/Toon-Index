@@ -140,6 +140,15 @@ export function readWorkCover(workId: string): Buffer | null {
   return existsSync(path) ? readFileSync(path) : null
 }
 
+export function hasWorkCover(workId: string): boolean {
+  return existsSync(workCoverPath(workId))
+}
+
+export function saveWorkCover(workId: string, jpeg: Buffer): void {
+  mkdirSync(join(root(), 'work-covers'), { recursive: true })
+  writeFileSync(workCoverPath(workId), jpeg)
+}
+
 /** By work id, the covers of works that have one, as data URLs for the library. */
 export function workCovers(): Record<string, string> {
   const covers: Record<string, string> = {}
@@ -172,10 +181,7 @@ export function applyCatalog(
     ...(sources.length && { sources }),
     catalog: { checkedAt: Date.now(), sites: [...new Set([...(work.catalog?.sites ?? []), ...found.sites])] }
   }
-  if (found.cover) {
-    mkdirSync(join(root(), 'work-covers'), { recursive: true })
-    writeFileSync(workCoverPath(workId), found.cover)
-  }
+  if (found.cover) saveWorkCover(workId, found.cover)
   const works = all.map((w) => (w.id === workId ? updated : w))
   saveWorks(works)
   return works

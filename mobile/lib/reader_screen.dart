@@ -149,7 +149,19 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _reportTimer = null;
     if (_reached <= _reported) return;
     _reported = _reached;
-    widget.api.reportAppReading(widget.chapter.id, _reached);
+    final source = widget.chapter.sourceUrl;
+    if (source != null) {
+      // As the browser reports a chapter read on its site.
+      widget.api.reportBrowserReading({
+        'url': source,
+        'title': widget.chapter.title,
+        'progress': _reached,
+        'finished': _reached >= 0.999,
+        'at': DateTime.now().millisecondsSinceEpoch,
+      }).catchError((_) => null);
+    } else {
+      widget.api.reportAppReading(widget.chapter.id, _reached);
+    }
   }
 
   /// Draws bands one at a time (Android opens one page of a PDF at a time).
