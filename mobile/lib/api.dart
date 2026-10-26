@@ -161,6 +161,24 @@ class Api {
     return list..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
   }
 
+  /// The PC's queue in the order it will run, and whether it is paused.
+  Future<({List<RemoteJob> jobs, bool paused})> queue() async {
+    final response = await _send((url) => http.get(url('/api/queue'), headers: authHeaders));
+    final body = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    return (jobs: (body['jobs'] as List).map((j) => RemoteJob.fromJson(j as Map<String, dynamic>)).toList(), paused: body['paused'] == true);
+  }
+
+  /// The queued requests run in this order.
+  Future<void> reorderQueue(List<String> ids) => _post('/api/queue/reorder', {'ids': ids});
+
+  /// Every work's queued chapters back in the order of their numbers.
+  Future<void> sortQueue() => _post('/api/queue/sort', {});
+
+  /// The chapters that failed (these, or all of the ranges') go back to the queue.
+  Future<void> retryQueue([List<String>? ids]) => _post('/api/queue/retry', {'ids': ?ids});
+
+  Future<void> pauseQueue(bool paused) => _post('/api/queue/pause', {'paused': paused});
+
   /// Asks the PC to translate the chapter at a site's link.
   Future<void> translateLink(String link) => _post('/api/translate', {'url': link});
 
@@ -207,6 +225,12 @@ class Api {
       });
 
   Future<void> cancelJob(String id) => _post('/api/translate/cancel', {'id': id});
+
+  /// Deletes one version of a chapter from the PC's library.
+  Future<void> deleteChapter(String id) => _post('/api/library/delete', {'id': id});
+
+  /// A chapter that failed goes back to the PC's queue, before the later chapters of its work.
+  Future<void> retryJob(String id) => _post('/api/translate/retry', {'id': id});
 
   /// Asks the PC to download a chapter already in Portuguese into its library, as it is.
   Future<void> downloadOnPc(String url, {required String work, required double chapter, required String site}) =>

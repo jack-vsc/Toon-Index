@@ -43,12 +43,16 @@ import { devicesStatus, newPairingCode, revokeDevice, setPhonesEnabled } from '.
 import type { RemoteJob } from '../shared/remoteJobs'
 import {
   addBatch,
+  cancelRemoteJob,
   clearBatch,
+  retryBatch,
   listRemoteJobs,
   onRemoteJobsChanged,
   pauseRemoteJobs,
   remoteQueue,
+  reorderQueue,
   requeueInterrupted,
+  sortQueue,
   takeRemoteJob,
   updateRemoteJob
 } from './remoteJobs'
@@ -214,6 +218,10 @@ function registerIpc(): void {
     return queue
   })
   ipcMain.handle('remote:clear-batch', () => clearBatch())
+  ipcMain.handle('remote:retry-batch', (_e, ids?: string[]) => retryBatch(ids))
+  ipcMain.handle('remote:reorder', (_e, ids: string[]) => reorderQueue(ids))
+  ipcMain.handle('remote:sort', () => sortQueue())
+  ipcMain.handle('remote:cancel', (_e, id: string) => (cancelRemoteJob(id), remoteQueue()))
   ipcMain.handle('remote:take', () => takeRemoteJob())
   ipcMain.handle('remote:update', (_e, id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>) =>
     updateRemoteJob(id, patch)

@@ -9,6 +9,7 @@ import 'downloads_screen.dart';
 import 'models.dart';
 import 'batch_screen.dart';
 import 'reader_screen.dart';
+import 'queue_screen.dart';
 import 'search_screen.dart';
 import 'theme.dart';
 import 'translate_screen.dart';
@@ -149,6 +150,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           PopupMenuButton<String>(
             onSelected: (action) => switch (action) {
               'batch' => _batch(),
+              'queue' => Navigator.push(context, MaterialPageRoute(builder: (_) => QueueScreen(api: widget.api))),
               'update' => AppUpdate.check(context, widget.api),
               'downloads' => Navigator.push(context, MaterialPageRoute(builder: (_) => DownloadsScreen(api: widget.api))),
               'data' => Navigator.push(context, MaterialPageRoute(builder: (_) => DataScreen(api: widget.api))).then((_) => _refresh()),
@@ -157,6 +159,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             },
             itemBuilder: (_) => [
               if (widget.api.paired) const PopupMenuItem(value: 'batch', child: Text('Vários capítulos')),
+              if (widget.api.paired) const PopupMenuItem(value: 'queue', child: Text('Fila do PC')),
               const PopupMenuItem(value: 'downloads', child: Text('Downloads')),
               const PopupMenuItem(value: 'data', child: Text('Dados e backup')),
               if (widget.api.paired) const PopupMenuItem(value: 'update', child: Text('Verificar atualização')),

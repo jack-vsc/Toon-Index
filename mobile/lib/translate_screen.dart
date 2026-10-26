@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'models.dart';
+import 'queue_screen.dart';
 import 'reader_screen.dart';
 
 /// Asks the PC to translate a chapter, from a site's link or a PDF on the phone, and follows the
@@ -145,10 +146,24 @@ class _TranslateScreenState extends State<TranslateScreen> {
                 child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ),
             const SizedBox(height: 24),
-            Text('Pedidos', style: Theme.of(context).textTheme.titleMedium),
+            Row(children: [
+              Text('Pedidos', style: Theme.of(context).textTheme.titleMedium),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => QueueScreen(api: widget.api))).then((_) => _refresh()),
+                icon: const Icon(Icons.low_priority, size: 18),
+                label: const Text('Fila do PC'),
+              ),
+            ]),
             if (jobs == null && _error == null) const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
             if (jobs != null && jobs.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('Nenhum pedido ainda.')),
-            for (final job in jobs ?? <RemoteJob>[]) _JobTile(job: job, onOpen: () => _open(job), onCancel: () => _send(() => widget.api.cancelJob(job.id))),
+            for (final job in jobs ?? <RemoteJob>[])
+              _JobTile(
+                job: job,
+                onOpen: () => _open(job),
+                onCancel: () => _send(() => widget.api.cancelJob(job.id)),
+                onRetry: () => _send(() => widget.api.retryJob(job.id)),
+              ),
           ],
         ),
       ),
@@ -157,11 +172,14 @@ class _TranslateScreenState extends State<TranslateScreen> {
 }
 
 class _JobTile extends StatelessWidget {
-  const _JobTile({required this.job, required this.onOpen, required this.onCancel});
+  const _JobTile({required this.job, required this.onOpen, required this.onCancel, required this.onRetry});
 
   final RemoteJob job;
   final VoidCallback onOpen;
   final VoidCallback onCancel;
+
+  /// A link that failed goes back to the queue (a PDF sent is gone from the PC by then).
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -174,10 +192,14 @@ class _JobTile extends StatelessWidget {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: color),
-      title: Text(job.isLink ? (job.url ?? job.name) : job.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+      title: Text(job.label, maxLines: 2, overflow: TextOverflow.ellipsis),
       subtitle: Text(text, style: TextStyle(color: color)),
       onTap: job.status == 'done' && job.entryId != null ? onOpen : null,
-      trailing: job.status == 'queued' ? IconButton(tooltip: 'Tirar da fila', icon: const Icon(Icons.close), onPressed: onCancel) : null,
+      trailing: job.status == 'queued'
+          ? IconButton(tooltip: 'Tirar da fila', icon: const Icon(Icons.close), onPressed: onCancel)
+          : job.status == 'failed' && job.isLink
+              ? IconButton(tooltip: 'Tentar de novo', icon: const Icon(Icons.refresh), onPressed: onRetry)
+              : null,
     );
   }
 }

@@ -20,6 +20,7 @@ import 'package:manga_index/library_screen.dart';
 import 'package:manga_index/models.dart';
 import 'package:manga_index/reader_screen.dart';
 import 'package:manga_index/batch_screen.dart';
+import 'package:manga_index/queue_screen.dart';
 import 'package:manga_index/search_screen.dart';
 import 'package:manga_index/site_download.dart';
 import 'package:manga_index/theme.dart';
@@ -127,6 +128,33 @@ class FakePaths extends PathProviderPlatform with MockPlatformInterfaceMixin {
 }
 
 /// The sites' answers for "Vários capítulos", instead of asking a PC.
+/// A PC's queue in the middle of a range, instead of asking a PC.
+class FakeQueueApi extends Api {
+  FakeQueueApi() : super(Connection(hosts: ['127.0.0.1'], port: 1, token: 'test'));
+
+  static Map<String, dynamic> _job(String id, String status, num chapter, {String? message, bool download = false}) => {
+        'id': id,
+        'kind': 'link',
+        'name': 'Solo Spell Caster Chapter $chapter',
+        'url': 'https://mangadex.org/chapter/$id',
+        'status': status,
+        'message': ?message,
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        'batch': {'work': download ? 'Omniscient Reader' : 'Solo Spell Caster', 'chapter': chapter, 'site': 'mangadex.org', 'download': download},
+      };
+
+  @override
+  Future<({List<RemoteJob> jobs, bool paused})> queue() async => (
+        jobs: [
+          _job('a', 'running', 36, message: 'Traduzindo'),
+          for (final n in [37, 38, 39, 40, 41]) _job('q$n', 'queued', n),
+          _job('d1', 'queued', 120, download: true),
+          _job('f1', 'failed', 35, message: 'Não foi possível baixar a página 16 do MangaDex (HTTP 502).'),
+        ].map(RemoteJob.fromJson).toList(),
+        paused: false,
+      );
+}
+
 class FakeBatchApi extends Api {
   FakeBatchApi({required int port, required this.thumb}) : super(Connection(hosts: ['127.0.0.1'], port: port, token: 'test'));
 
@@ -173,6 +201,12 @@ void main() {
         [chapter('c53', 53, 13), chapter('c54', 54, 14), chapter('c55', 55, 14), chapter('c56', 56, 15)]);
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await shoot(tester, WorkScreen(view: view, api: api), 'p2-work');
+  }, skip: out == null);
+
+  testWidgets('queue', (tester) async {
+    tester.view.physicalSize = phone * ratio;
+    tester.view.devicePixelRatio = ratio;
+    await shoot(tester, QueueScreen(api: FakeQueueApi()), 'm6-queue');
   }, skip: out == null);
 
   testWidgets('reader', (tester) async {
@@ -375,7 +409,19 @@ void main() {
               'pageCount': 14,
               'translatedPages': 14,
               'createdAt': now - 86400000 * 20,
+              'source': 'https://mangadex.org/chapter/x$n',
             },
+          // The same chapter from another site: a second version of it.
+          {
+            'id': 'c57b',
+            'title': 'cap 57',
+            'workId': ids.length > 3 ? ids[3] : 'w3',
+            'chapter': 57,
+            'pageCount': 14,
+            'translatedPages': 14,
+            'createdAt': now - 86400000 * 2,
+            'source': 'https://www.mgeko.cc/reader/en/x-chapter-57/',
+          },
         ],
         'updates': [
           {'workId': ids.first, 'latest': 184, 'url': 'https://mgeko.cc/x/chapter-184/', 'site': 'mgeko.cc', 'checkedAt': now},
@@ -403,6 +449,7 @@ void main() {
     testWidgets('work page', (tester) async {
       tester.view.physicalSize = phone * ratio;
       tester.view.devicePixelRatio = ratio;
+      SharedPreferences.setMockInitialValues({});
       Downloads.root = Directory.systemTemp.createTempSync('mi-work');
       Directory('${Downloads.root!.path}/chapters').createSync();
       final view = library.views.firstWhere((v) => v.work.name.startsWith('The Mythical'));

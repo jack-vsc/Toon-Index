@@ -4,15 +4,15 @@ import { join } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
-import { addWorkSource, hasWorkCover, listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover, setWorkShelf } from './library'
+import { addWorkSource, deleteFromLibrary, hasWorkCover, listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover, setWorkShelf } from './library'
 import { displayName, findWork, SHELVES, type Shelf } from '../shared/works'
 import { unreadUpdates, type ChapterLink } from '../shared/updates'
 import { CATALOG_SITES, type CatalogSite } from '../shared/catalog'
 import { chapterList, searchCatalogToChoose } from './catalog'
 import { updatesStatus } from './updates'
 import { bookmarkPage, continueList, pageInfo } from './extensionApi'
-import { addBatch, addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs } from './remoteJobs'
-import { finishedInApp, forgetReading, listReading, markRead, readInApp, reportReading } from './reading'
+import { addBatch, addLinkJob, addPdfJob, cancelRemoteJob, listRemoteJobs, pauseRemoteJobs, remoteQueue, reorderQueue, retryBatch, sortQueue } from './remoteJobs'
+import { finishedInApp, forgetReading, libraryChangedElsewhere, listReading, markRead, readInApp, reportReading } from './reading'
 import { mergeData, resolveWork } from './dataSync'
 
 /** The browser extension (extension/background.js) and the phone app reach the app here. */
@@ -132,6 +132,17 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   }
   // Chapters to translate on the PC: a site's link, or a PDF sent as the request's body.
   if (req.method === 'GET' && path === '/api/translate') return send(res, 200, listRemoteJobs())
+  // The queue as it will run, and changing it from the phone as from the PC's queue window.
+  if (req.method === 'GET' && path === '/api/queue') return send(res, 200, remoteQueue())
+  if (req.method === 'POST' && path.startsWith('/api/queue/')) {
+    const { ids, paused } = (await readBody(req)) as { ids?: unknown; paused?: unknown }
+    const list = Array.isArray(ids) && ids.every((i) => typeof i === 'string') ? (ids as string[]) : undefined
+    if (path === '/api/queue/reorder' && list) return send(res, 200, reorderQueue(list))
+    if (path === '/api/queue/sort') return send(res, 200, sortQueue())
+    if (path === '/api/queue/retry') return send(res, 200, retryBatch(list))
+    if (path === '/api/queue/pause' && typeof paused === 'boolean') return send(res, 200, pauseRemoteJobs(paused))
+    return send(res, 400, { error: 'Pedido da fila inválido.' })
+  }
   if (req.method === 'POST' && path === '/api/translate') {
     const { url: link } = (await readBody(req)) as { url?: unknown }
     if (typeof link !== 'string') return send(res, 400, { error: 'Falta o link.' })
@@ -201,6 +212,11 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     if (typeof id === 'string') cancelRemoteJob(id)
     return send(res, 200, { ok: true })
   }
+  if (req.method === 'POST' && path === '/api/translate/retry') {
+    const { id } = (await readBody(req)) as { id?: unknown }
+    if (typeof id === 'string') retryBatch([id])
+    return send(res, 200, { ok: true })
+  }
   if (req.method === 'POST' && path === '/api/reading') return send(res, 200, report(await readBody(req)))
   if (req.method === 'POST' && path === '/api/reading/finished') {
     const { entryId } = (await readBody(req)) as { entryId: string }
@@ -243,6 +259,14 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
       return send(res, 400, { error: 'workId e shelf.' })
     }
     setWorkShelf(id, { shelf: shelf as Shelf | null, favorite: favorite === true })
+    return send(res, 200, { ok: true })
+  }
+  if (req.method === 'POST' && path === '/api/library/delete') {
+    // One version of a chapter, deleted from the phone.
+    const { id } = (await readBody(req)) as { id?: unknown }
+    if (typeof id !== 'string' || !/^[a-f0-9-]+$/i.test(id)) return send(res, 400, { error: 'id.' })
+    deleteFromLibrary(id)
+    libraryChangedElsewhere()
     return send(res, 200, { ok: true })
   }
   if (req.method === 'POST' && path === '/api/reading/forget') {

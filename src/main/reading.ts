@@ -24,6 +24,11 @@ export function listReading(): ReadingRecord[] {
   }
 }
 
+/** The library changed from elsewhere (the phone deleted a chapter): the window lists it again. */
+export function libraryChangedElsewhere(): void {
+  for (const listener of listeners) listener()
+}
+
 function saveReading(records: ReadingRecord[]): void {
   mkdirSync(join(app.getPath('userData'), 'library'), { recursive: true })
   writeFileSync(readingPath(), JSON.stringify({ records }, null, 2))

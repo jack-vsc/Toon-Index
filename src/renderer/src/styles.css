@@ -2450,6 +2450,110 @@ details pre {
   color: #ff8a8a;
 }
 
+.queue-dialog {
+  width: min(680px, 94vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.queue-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.queue-head h2,
+.queue-head h3 {
+  margin: 0;
+  margin-right: auto;
+}
+
+.queue-list {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 8px 0;
+}
+
+.queue-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  background: var(--panel);
+}
+
+.queue-list .queue-row:last-child {
+  border-bottom: none;
+}
+
+.queue-row.now {
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  margin-top: 8px;
+}
+
+.queue-row.dragging {
+  opacity: 0.5;
+}
+
+.queue-grip {
+  cursor: grab;
+  color: var(--muted);
+}
+
+.queue-pos {
+  width: 28px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-name .badge {
+  margin-left: 8px;
+}
+
+.queue-state {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-row.failed .queue-state {
+  color: #ff8a8a;
+}
+
+.queue-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.queue-buttons button {
+  padding: 2px 8px;
+}
+
+.batch-bar button.link.batch-failed {
+  color: #ff8a8a;
+  font: inherit;
+}
+
 .chapter-versions {
   display: flex;
   flex-wrap: wrap;

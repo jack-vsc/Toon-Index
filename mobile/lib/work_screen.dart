@@ -74,9 +74,41 @@ class _WorkScreenState extends State<WorkScreen> {
     }
   }
 
+  /// Versions deleted here, gone from the PC's library already.
+  final _deleted = <String>{};
+
+  /// The PC's chapters of the work, every version of each.
+  List<LibraryChapter> get _translated => widget.view.translated.where((c) => !_deleted.contains(c.id)).toList();
+
+  /// One version of each chapter, the newest, to download and read on from.
+  List<LibraryChapter> get _readable => widget.view.readable.where((c) => !_deleted.contains(c.id)).toList();
+
+  Future<void> _deleteVersion(LibraryChapter c) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Apagar a versão de ${c.site}?'),
+        content: Text('O capítulo ${chapterLabel(c.chapter!)} dessa fonte sai da biblioteca do PC (e do celular, se foi baixado).'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Apagar')),
+        ],
+      ),
+    );
+    if (sure != true) return;
+    try {
+      await widget.api.deleteChapter(c.id);
+      await Downloads.remove(c.id);
+      setState(() => _deleted.add(c.id));
+      await _refreshDownloads();
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   /// Every chapter not on the phone yet, one after another, to read without internet (on a plane, say).
   Future<void> _downloadAll() async {
-    for (final c in widget.view.translated.where((c) => !_downloaded.contains(c.id)).toList()) {
+    for (final c in _readable.where((c) => !_downloaded.contains(c.id)).toList()) {
       if (!mounted) return;
       await _download(c);
     }
@@ -109,8 +141,10 @@ class _WorkScreenState extends State<WorkScreen> {
     await widget.api.setShelf(widget.view.work.id, shelf: _shelf, favorite: _favorite);
   }
 
-  void _read(LibraryChapter c) =>
-      Navigator.push(context, MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: c, chapters: widget.view.translated)));
+  void _read(LibraryChapter c) => Navigator.push(
+      context,
+      // Reading on goes to the next chapter's newest version; this one stays the one opened.
+      MaterialPageRoute(builder: (_) => ReaderScreen(api: widget.api, chapter: c, chapters: _readable.map((r) => r.chapter == c.chapter ? c : r).toList())));
 
   Future<void> _markRead() async {
     final chapter = double.tryParse(_chapter.text.trim().replaceAll(',', '.'));
@@ -133,19 +167,23 @@ class _WorkScreenState extends State<WorkScreen> {
   Widget build(BuildContext context) {
     final view = widget.view;
     final aliases = view.work.names.skip(1).map(displayName).toList();
-    final missing = view.translated.where((c) => !_downloaded.contains(c.id)).toList();
+    final missing = _readable.where((c) => !_downloaded.contains(c.id)).toList();
     final newest = view.newest;
     final share = view.share;
     final next = view.nextInLibrary;
     final continueUrl = view.continueUrl;
     final shelf = _shelf ?? (view.records.isNotEmpty ? 'reading' : null);
-    // Every chapter read or translated, the reading and the translation of each side by side.
-    final rows = <double, ({ReadingRecord? record, LibraryChapter? entry})>{};
+    // Every chapter read or translated, the reading and the translations of each side by side (one per
+    // site it was saved from, newest first).
+    final rows = <double, ({ReadingRecord? record, List<LibraryChapter> versions})>{};
     for (final r in view.records) {
-      rows[r.chapter] = (record: r, entry: null);
+      rows[r.chapter] = (record: r, versions: []);
     }
-    for (final c in view.translated.where((c) => c.chapter != null)) {
-      rows[c.chapter!] = (record: rows[c.chapter!]?.record, entry: c);
+    for (final c in _translated.where((c) => c.chapter != null)) {
+      rows.putIfAbsent(c.chapter!, () => (record: null, versions: [])).versions.add(c);
+    }
+    for (final row in rows.values) {
+      row.versions.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     }
     final query = _chapterQuery.trim().replaceAll(',', '.');
     final numbers = rows.keys.where((n) => query.isEmpty || chapterLabel(n).startsWith(query)).toList()
@@ -160,8 +198,8 @@ class _WorkScreenState extends State<WorkScreen> {
           _Header(view: view, api: widget.api, aliases: aliases, shelf: shelf),
           Wrap(spacing: 14, runSpacing: 4, children: [
             if (newest != null) Text.rich(TextSpan(children: [TextSpan(text: chapterLabel(newest), style: const TextStyle(fontWeight: FontWeight.w800)), const TextSpan(text: ' capítulos')])),
-            if (view.translated.isNotEmpty)
-              Text.rich(TextSpan(children: [TextSpan(text: '${view.translated.length}', style: const TextStyle(fontWeight: FontWeight.w800)), const TextSpan(text: ' no PC')])),
+            if (_readable.isNotEmpty)
+              Text.rich(TextSpan(children: [TextSpan(text: '${_readable.length}', style: const TextStyle(fontWeight: FontWeight.w800)), const TextSpan(text: ' no PC')])),
           ]),
           const SizedBox(height: 4),
           Text(statusText(view), style: const TextStyle(color: muted, fontSize: 13)),
@@ -230,7 +268,7 @@ class _WorkScreenState extends State<WorkScreen> {
               ),
             ]),
             if (rows.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('Nenhum capítulo lido ou traduzido ainda.', style: TextStyle(color: muted))),
-            for (final n in numbers) _chapterRow(n, rows[n]!.record, rows[n]!.entry),
+            for (final n in numbers) _chapterRow(n, rows[n]!.record, rows[n]!.versions),
             if (missing.isNotEmpty) ...[
               const SizedBox(height: 6),
               TextButton.icon(
@@ -292,13 +330,15 @@ class _WorkScreenState extends State<WorkScreen> {
     );
   }
 
-  /// A chapter as on the scans' title pages: its number big, its state, and reading it.
-  Widget _chapterRow(double n, ReadingRecord? record, LibraryChapter? entry) {
+  /// A chapter as on the scans' title pages: its number big, its state, and reading it; saved from more
+  /// than one site, each version to read or delete.
+  Widget _chapterRow(double n, ReadingRecord? record, List<LibraryChapter> versions) {
+    final entry = versions.firstOrNull;
     final read = record?.read == true;
     final where = record != null
         ? [if (record.url.isNotEmpty) Uri.tryParse(record.url)?.host.replaceFirst(RegExp(r'^www\.'), '') ?? '', timeAgo(record.updatedAt)].where((s) => s.isNotEmpty).join(' · ')
         : entry != null
-            ? timeAgo(entry.createdAt)
+            ? '${entry.site} · ${timeAgo(entry.createdAt)}'
             : '';
     return InkWell(
       onTap: entry != null ? () => _read(entry) : record != null && record.url.isNotEmpty ? () => _browse(record.url) : null,
@@ -316,9 +356,26 @@ class _WorkScreenState extends State<WorkScreen> {
                 Text('Capítulo ${chapterLabel(n)}', style: const TextStyle(fontWeight: FontWeight.w600)),
                 if (read) Tag('lido', color: readGreen.withValues(alpha: 0.16), textColor: readGreen),
                 if (record != null && !read) Tag(record.progress != null ? '${(record.progress! * 100).round()}%' : 'lendo', color: accent.withValues(alpha: 0.16), textColor: accentSoft),
-                if (entry != null) Tag(entry.downloaded ? 'baixado' : 'traduzido', color: accent.withValues(alpha: 0.16), textColor: accentSoft),
+                if (versions.length == 1) Tag(entry!.downloaded ? 'baixado' : 'traduzido', color: accent.withValues(alpha: 0.16), textColor: accentSoft),
+                if (versions.length > 1) Tag('${versions.length} versões', color: accent.withValues(alpha: 0.16), textColor: accentSoft),
               ]),
               if (where.isNotEmpty) Text(where, style: const TextStyle(color: muted, fontSize: 12)),
+              if (versions.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Wrap(spacing: 6, runSpacing: 6, children: [
+                    for (final v in versions)
+                      InputChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text('${v.site} · ${v.downloaded ? 'baixado' : 'traduzido'}', style: const TextStyle(fontSize: 12)),
+                        tooltip: 'Ler esta versão',
+                        onPressed: () => _read(v),
+                        deleteIcon: const Icon(Icons.close, size: 16),
+                        deleteButtonTooltipMessage: 'Apagar esta versão',
+                        onDeleted: () => _deleteVersion(v),
+                      ),
+                  ]),
+                ),
             ]),
           ),
           if (entry != null) _downloadButton(entry),

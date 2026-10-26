@@ -103,10 +103,20 @@ class LibraryChapter {
     required this.hasCover,
     this.downloaded = false,
     this.sourceUrl,
+    this.source,
   });
 
   /// Downloaded by the phone from this page (not in the PC's library): its reading goes to the PC by it.
   final String? sourceUrl;
+
+  /// The page the PC took it from: a chapter saved from two sites is two versions of it.
+  final String? source;
+
+  /// The site it came from ("mgeko.cc"), or "arquivo" for a PDF.
+  String get site {
+    final host = Uri.tryParse(source ?? sourceUrl ?? '')?.host ?? '';
+    return host.isEmpty ? 'arquivo' : host.replaceFirst(RegExp(r'^www\.'), '');
+  }
 
   final String id;
   final String title;
@@ -130,6 +140,7 @@ class LibraryChapter {
         createdAt: (j['createdAt'] as num).toInt(),
         hasCover: j['hasCover'] == true,
         downloaded: j['model'] == 'baixado sem tradução',
+        source: j['source'] as String?,
       );
 }
 
@@ -245,6 +256,21 @@ class WorkView {
   String? get shelf => work.shelf ?? (records.isNotEmpty ? 'reading' : null);
 
   /// The library chapter to go on with: the one left midway, or the first after the last one read.
+  /// One version of each chapter, the newest (a chapter saved from two sites is two), for reading on
+  /// from chapter to chapter.
+  List<LibraryChapter> get readable {
+    final newest = <double, LibraryChapter>{};
+    final rest = <LibraryChapter>[];
+    for (final c in translated) {
+      if (c.chapter == null) {
+        rest.add(c);
+      } else if ((newest[c.chapter!]?.createdAt ?? -1) < c.createdAt) {
+        newest[c.chapter!] = c;
+      }
+    }
+    return [...newest.values, ...rest]..sort((a, b) => (a.chapter ?? double.infinity).compareTo(b.chapter ?? double.infinity));
+  }
+
   LibraryChapter? get nextInLibrary {
     final upTo = readUpTo ?? double.negativeInfinity;
     final now = current;
@@ -252,7 +278,7 @@ class WorkView {
       final same = translated.where((c) => c.chapter == now.chapter).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
       if (same.isNotEmpty) return same.first;
     }
-    return translated.where((c) => c.chapter != null && c.chapter! > upTo).firstOrNull;
+    return readable.where((c) => c.chapter != null && c.chapter! > upTo).firstOrNull;
   }
 
   /// The newest chapter known: out on its sites, translated, or read (a site may be behind the reading).
@@ -283,8 +309,8 @@ class WorkView {
 
   /// "5 TRADUZIDOS · 3 BAIXADOS".
   String get chapterCount {
-    final downloaded = translated.where((c) => c.downloaded).length;
-    final done = translated.length - downloaded;
+    final downloaded = readable.where((c) => c.downloaded).length;
+    final done = readable.length - downloaded;
     return [if (done > 0) '$done TRADUZIDOS', if (downloaded > 0) '$downloaded BAIXADOS'].join(' · ');
   }
 
@@ -329,7 +355,18 @@ class RemoteJob {
     required this.message,
     required this.entryId,
     required this.updatedAt,
+    this.work,
+    this.chapter,
+    this.downloadOnly = false,
   });
+
+  /// For a chapter of a range ("Vários capítulos"): its work and number, and whether it is only downloaded.
+  final String? work;
+  final double? chapter;
+  final bool downloadOnly;
+
+  /// "Cap. 36 · Solo Spell Caster", or the link or file asked for.
+  String get label => work != null && chapter != null ? 'Cap. ${chapterLabel(chapter!)} · $work' : (isLink ? (url ?? name) : name);
 
   final String id;
   final bool isLink;
@@ -353,6 +390,9 @@ class RemoteJob {
         message: j['message'] as String?,
         entryId: j['entryId'] as String?,
         updatedAt: (j['updatedAt'] as num).toInt(),
+        work: (j['batch'] as Map<String, dynamic>?)?['work'] as String?,
+        chapter: ((j['batch'] as Map<String, dynamic>?)?['chapter'] as num?)?.toDouble(),
+        downloadOnly: (j['batch'] as Map<String, dynamic>?)?['download'] == true,
       );
 }
 

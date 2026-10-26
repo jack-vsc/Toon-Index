@@ -15,6 +15,7 @@ import { SetupView, type SetupChoice } from './components/SetupView'
 import { AiMonitor } from './components/AiMonitor'
 import { PhoneDialog } from './components/PhoneDialog'
 import { BatchDialog } from './components/BatchDialog'
+import { QueueDialog } from './components/QueueDialog'
 import { runPhased } from './lib/gpuSharing'
 import { WebLinkInput } from './components/WebLinkInput'
 import { canvasToBlob, renderPage, thumbnailCanvas } from './lib/pdf'
@@ -68,6 +69,7 @@ export default function App() {
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchQuery, setBatchQuery] = useState<string | undefined>()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [queueOpen, setQueueOpen] = useState(false)
   /** Reading with nothing around the pages (the window full screen too). */
   const [immersive, setImmersive] = useState(false)
   /** Where the home view is: the first page, the library, or a work's page. */
@@ -723,7 +725,8 @@ export default function App() {
               </span>
             </div>
           )}
-          {queue && <BatchBar queue={queue} running={remoteJob} onOpen={inBackground ? showJob : undefined} />}
+          {queue && <BatchBar queue={queue} running={remoteJob} onOpen={inBackground ? showJob : undefined} onQueue={() => setQueueOpen(true)} />}
+          {queue && queueOpen && <QueueDialog queue={queue} running={remoteJob} onClose={() => setQueueOpen(false)} />}
 
           {message && (
             <div className="banner" onClick={() => setMessage(null)}>
@@ -993,11 +996,11 @@ class Paused extends Error {}
  * The ranges of chapters being translated: which one now, how many wait, and pausing (the chapter
  * running goes back to the queue and the GPU is freed) or dropping the rest.
  */
-function BatchBar({ queue, running, onOpen }: { queue: RemoteQueue; running: RemoteJob | null; onOpen?: () => void }) {
+function BatchBar({ queue, running, onOpen, onQueue }: { queue: RemoteQueue; running: RemoteJob | null; onOpen?: () => void; onQueue: () => void }) {
   const waiting = queue.jobs.filter((j) => j.batch && j.status === 'queued')
   const failed = queue.jobs.filter((j) => j.batch && j.status === 'failed' && Date.now() - j.updatedAt < 86_400_000)
   const now = running?.batch ? running : null
-  if (!now && !waiting.length) return null
+  if (!now && !waiting.length && !failed.length) return null
   return (
     <div className={`banner batch-bar ${queue.paused ? 'paused' : ''}`}>
       <span>
@@ -1005,8 +1008,24 @@ function BatchBar({ queue, running, onOpen }: { queue: RemoteQueue; running: Rem
           ? `⏸ Lote pausado: ${waiting.length} ${waiting.length === 1 ? 'capítulo' : 'capítulos'} na fila`
           : now
             ? `📚 ${now.batch?.download ? 'Baixando' : 'Traduzindo'} ${now.name} · mais ${waiting.length} na fila`
-            : `📚 ${waiting.length} na fila: começa assim que o app estiver livre na tela inicial`}
-        {failed.length > 0 && ` · ${failed.length} falharam: ${failed.map((f) => f.batch!.chapter).join(', ')}`}
+            : waiting.length
+              ? `📚 ${waiting.length} na fila: começa assim que o app estiver livre`
+              : '📚 Lote terminado'}
+        {failed.length > 0 && (
+          <>
+            {` · ${failed.length} ${failed.length === 1 ? 'falhou' : 'falharam'}: `}
+            {failed
+              .sort((a, b) => a.batch!.chapter - b.batch!.chapter)
+              .map((f, i) => (
+                <span key={f.id}>
+                  {i > 0 && ', '}
+                  <button className="link batch-failed" title={`${f.message ?? 'Falhou'}. Clique para tentar de novo.`} onClick={() => window.api.remote.retryBatch([f.id])}>
+                    {f.batch!.chapter}
+                  </button>
+                </span>
+              ))}
+          </>
+        )}
       </span>
       <span className="batch-bar-buttons">
         {onOpen && now && (
@@ -1014,17 +1033,29 @@ function BatchBar({ queue, running, onOpen }: { queue: RemoteQueue; running: Rem
             Abrir
           </button>
         )}
-        <button className="small" onClick={() => window.api.remote.pause(!queue.paused)}>
-          {queue.paused ? 'Continuar' : 'Pausar'}
-        </button>
-        <button
-          className="secondary small"
-          onClick={() => {
-            if (confirm(`Tirar da fila os ${waiting.length} capítulos que faltam?`)) void window.api.remote.clearBatch()
-          }}
-        >
-          Cancelar o resto
-        </button>
+        {failed.length > 0 && (
+          <button className="small" title="Voltam para a fila na ordem dos capítulos, antes dos seguintes" onClick={() => window.api.remote.retryBatch()}>
+            Tentar de novo ({failed.length})
+          </button>
+        )}
+        {(now || waiting.length > 0) && (
+          <>
+            <button className="secondary small" title="Ver a fila e mudar a ordem" onClick={onQueue}>
+              Fila
+            </button>
+            <button className={failed.length ? 'secondary small' : 'small'} onClick={() => window.api.remote.pause(!queue.paused)}>
+              {queue.paused ? 'Continuar' : 'Pausar'}
+            </button>
+            <button
+              className="secondary small"
+              onClick={() => {
+                if (confirm(`Tirar da fila os ${waiting.length} capítulos que faltam?`)) void window.api.remote.clearBatch()
+              }}
+            >
+              Cancelar o resto
+            </button>
+          </>
+        )}
       </span>
     </div>
   )

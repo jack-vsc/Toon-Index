@@ -107,6 +107,10 @@ const api: MangaApi = {
     pause: (paused) => ipcRenderer.invoke('remote:pause', paused),
     batch: (work, site, chapters, download, source) => ipcRenderer.invoke('remote:batch', work, site, chapters, download, source),
     clearBatch: () => ipcRenderer.invoke('remote:clear-batch'),
+    retryBatch: (ids) => ipcRenderer.invoke('remote:retry-batch', ids),
+    reorder: (ids) => ipcRenderer.invoke('remote:reorder', ids),
+    sort: () => ipcRenderer.invoke('remote:sort'),
+    cancel: (id) => ipcRenderer.invoke('remote:cancel', id),
     update: (id, patch) => ipcRenderer.invoke('remote:update', id, patch),
     onChanged: (callback) => {
       const listener = () => callback()

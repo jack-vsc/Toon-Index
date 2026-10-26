@@ -64,7 +64,17 @@ class Vision:
         on_gpu = torch.cuda.is_available() and os.environ.get("MI_VISION_DEVICE") != "cpu"
         self.device = "cuda" if on_gpu else "cpu"
         t = time.time()
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if self.device == "cuda" else ["CPUExecutionProvider"]
+        # onnxruntime keeps the GPU memory a run took and grows it in powers of two; on a 6 GB card that
+        # and PyTorch's cache together fill it after a few pages. Each run asks for what it needs and
+        # gives it back after.
+        providers = (
+            [("CUDAExecutionProvider", {"arena_extend_strategy": "kSameAsRequested"}), "CPUExecutionProvider"]
+            if self.device == "cuda"
+            else ["CPUExecutionProvider"]
+        )
+        self.run_options = ort.RunOptions()
+        if self.device == "cuda":
+            self.run_options.add_run_config_entry("memory.enable_memory_arena_shrinkage", "gpu:0")
         self.ctd = ort.InferenceSession(str(MODELS / "comictextdetector.pt.onnx"), providers=providers)
         self.bubble = YOLO(str(MODELS / "bubble-seg.pt"))
         self.lama = torch.jit.load(str(MODELS / "anime-manga-big-lama.pt"), map_location=self.device).eval()
@@ -210,7 +220,7 @@ class Vision:
             tile = img[y0:y1]
             x = cv2.resize(tile, (KINDS_SIZE, KINDS_SIZE), interpolation=cv2.INTER_AREA).astype(np.float32).transpose(2, 0, 1)[None] / 255
             size = np.array([[tile.shape[1], tile.shape[0]]], np.int64)
-            labels, boxes, scores = self.kinds.run(None, {"images": x, "orig_target_sizes": size})
+            labels, boxes, scores = self.kinds.run(None, {"images": x, "orig_target_sizes": size}, self.run_options)
             for kind, box, conf in zip(labels[0], boxes[0], scores[0]):
                 if conf >= KINDS_CONF:
                     x0, by0, x1, by1 = clip_box(box[0], box[1] + y0, box[2], box[3] + y0, W, H)
@@ -228,7 +238,7 @@ class Vision:
         canvas = np.zeros((CTD_SIZE, CTD_SIZE, 3), np.uint8)
         canvas[:nh, :nw] = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR if r > 1 else cv2.INTER_AREA)
         x = canvas.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
-        blk, seg, det = self.ctd.run(None, {"images": x})
+        blk, seg, det = self.ctd.run(None, {"images": x}, self.run_options)
 
         pred = blk[0]
         pred = pred[pred[:, 4] > CTD_CONF]
@@ -315,6 +325,11 @@ class Vision:
         if scale < 1:
             res = cv2.resize(res, (w, h), interpolation=cv2.INTER_CUBIC)
         return res
+
+    def release(self):
+        """Gives the GPU memory PyTorch keeps for later back to the system (the next page takes it again)."""
+        if self.device == "cuda":
+            self.torch.cuda.empty_cache()
 
 
 def tiles(W, H, aspect, overlap=TILE_OVERLAP):
@@ -685,10 +700,14 @@ def serve():
             req = json.loads(line)
             t = time.time()
             res = handle(vision, req)
-            log(f"[vision] {req.get('cmd')} {time.time() - t:.2f}s")
+            peak = vision.torch.cuda.max_memory_reserved() // 2**20 if vision.device == "cuda" else 0
+            log(f"[vision] {req.get('cmd')} {time.time() - t:.2f}s, GPU peak {peak} MB")
         except Exception as err:  # the app shows the message and falls back
             traceback.print_exc(file=sys.stderr)
             res = {"error": f"{type(err).__name__}: {err}"}
+        vision.release()
+        if vision.device == "cuda":
+            vision.torch.cuda.reset_peak_memory_stats()
         res["id"] = req.get("id")
         print(json.dumps(res), flush=True)
 

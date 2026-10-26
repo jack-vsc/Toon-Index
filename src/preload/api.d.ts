@@ -148,6 +148,14 @@ export interface MangaApi {
     batch(work: string, site: string, chapters: ChapterLink[], download: boolean, source?: string): Promise<RemoteQueue>
     /** Takes the queued chapters of those ranges off the queue. */
     clearBatch(): Promise<RemoteQueue>
+    /** The ranges' chapters that failed (all, or these) go back to the queue, ahead of later chapters. */
+    retryBatch(ids?: string[]): Promise<RemoteQueue>
+    /** The queued requests run in this order (the ones left out after them). */
+    reorder(ids: string[]): Promise<RemoteQueue>
+    /** Every work's queued chapters back in the order of their numbers. */
+    sort(): Promise<RemoteQueue>
+    /** Takes one queued request off the queue. */
+    cancel(id: string): Promise<RemoteQueue>
     /** Returns a function that stops listening. */
     onChanged(callback: () => void): () => void
   }

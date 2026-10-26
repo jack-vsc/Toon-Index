@@ -63,13 +63,67 @@ export function addBatch(work: string, site: string, chapters: { chapter: number
     status: 'queued',
     batch: { work: clean, chapter: c.chapter, site, ...(download && { download }) }
   }))
-  save([...listRemoteJobs(), ...added])
+  save(inChapterOrder([...listRemoteJobs(), ...added], clean))
   return remoteQueue()
 }
 
 /** Takes every queued chapter of the ranges asked for on the PC off the queue. */
 export function clearBatch(): RemoteQueue {
   save(listRemoteJobs().filter((j) => !(j.batch && j.status === 'queued')))
+  return remoteQueue()
+}
+
+/**
+ * Chapters that failed go back to the queue: every one of the ranges, or the ones in `ids` (a link the
+ * phone sent too; a PDF it sent is gone by then). They keep their place, and the queue takes a work's
+ * chapters in order, so they come next.
+ */
+export function retryBatch(ids?: string[]): RemoteQueue {
+  const again = (j: RemoteJob) => j.status === 'failed' && j.kind === 'link' && (ids ? ids.includes(j.id) : !!j.batch)
+  let jobs = listRemoteJobs()
+  const works = new Set(jobs.filter((j) => again(j) && j.batch).map((j) => j.batch!.work))
+  jobs = jobs.map((j) => (again(j) ? { ...j, status: 'queued', message: undefined, updatedAt: Date.now() } : j))
+  for (const work of works) jobs = inChapterOrder(jobs, work)
+  save(jobs)
+  return remoteQueue()
+}
+
+/**
+ * The queue runs in the order of the list. When a range is added or a chapter tried again, the work's
+ * queued chapters are put together in the order of their numbers, where the work first comes in the
+ * queue (an earlier range added later goes first); the queue window moves them by hand after.
+ */
+function inChapterOrder(jobs: RemoteJob[], work: string): RemoteJob[] {
+  const key = work.toLowerCase()
+  const ofWork = (j: RemoteJob) => j.batch?.work.toLowerCase() === key
+  const queued = jobs.filter((j) => j.status === 'queued')
+  const first = queued.findIndex(ofWork)
+  if (first < 0) return jobs
+  const block = queued.filter(ofWork).sort((a, b) => a.batch!.chapter - b.batch!.chapter)
+  const rest = queued.filter((j) => !ofWork(j))
+  const before = queued.slice(0, first).filter((j) => !ofWork(j)).length
+  return withQueued(jobs, [...rest.slice(0, before), ...block, ...rest.slice(before)])
+}
+
+/** The list with its queued requests, in the places they hold, replaced by `queued` in that order. */
+function withQueued(jobs: RemoteJob[], queued: RemoteJob[]): RemoteJob[] {
+  let k = 0
+  return jobs.map((j) => (j.status === 'queued' ? queued[k++] : j))
+}
+
+/** The queued requests in this order (`ids`; the ones left out keep their order after them). */
+export function reorderQueue(ids: string[]): RemoteQueue {
+  const jobs = listRemoteJobs()
+  const queued = jobs.filter((j) => j.status === 'queued')
+  save(withQueued(jobs, [...ids.flatMap((id) => queued.filter((j) => j.id === id)), ...queued.filter((j) => !ids.includes(j.id))]))
+  return remoteQueue()
+}
+
+/** Every work's queued chapters back in the order of their numbers. */
+export function sortQueue(): RemoteQueue {
+  let jobs = listRemoteJobs()
+  for (const work of new Set(jobs.filter((j) => j.status === 'queued' && j.batch).map((j) => j.batch!.work))) jobs = inChapterOrder(jobs, work)
+  save(jobs)
   return remoteQueue()
 }
 
