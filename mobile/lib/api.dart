@@ -179,6 +179,9 @@ class Api {
 
   Future<void> pauseQueue(bool paused) => _post('/api/queue/pause', {'paused': paused});
 
+  /// The PC checks the works' sites for new chapters now, instead of at its next round.
+  Future<void> checkUpdates() => _post('/api/updates/check', {});
+
   /// The PC's translation settings: its defaults, its APIs and languages, to choose a request's options from.
   Future<PcTranslateSettings> translateSettings() async {
     final response = await _send((url) => http.get(url('/api/translate/options'), headers: authHeaders));

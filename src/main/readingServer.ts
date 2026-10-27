@@ -9,7 +9,7 @@ import { displayName, findWork, SHELVES, type Shelf } from '../shared/works'
 import { unreadUpdates, type ChapterLink } from '../shared/updates'
 import { CATALOG_SITES, type CatalogSite } from '../shared/catalog'
 import { chapterList, searchCatalogToChoose } from './catalog'
-import { updatesStatus } from './updates'
+import { checkNow, updatesStatus } from './updates'
 import { bookmarkPage, continueList, pageInfo } from './extensionApi'
 import {
   addBatch,
@@ -116,7 +116,13 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     // The newest chapter out on each work's sites too, for how far along the reading is.
     const out = updatesStatus().updates
     const works = listWorks().map((w) => ({ ...w, hasCover: hasWorkCover(w.id), latest: out[w.id]?.latest ?? null }))
-    return send(res, 200, { works, reading: listReading(), chapters, updates: newChapters(), ntfyTopic: updatesStatus().ntfyTopic })
+    const { ntfyTopic, lastRun, running } = updatesStatus()
+    return send(res, 200, { works, reading: listReading(), chapters, updates: newChapters(), ntfyTopic, lastCheck: lastRun, checking: running })
+  }
+  if (req.method === 'POST' && path === '/api/updates/check') {
+    // Takes minutes, one site after another: the phone sees the result on its next sync.
+    void checkNow()
+    return send(res, 200, { ok: true })
   }
   // The newest phone app (scripts/phone-release.mjs): phones on an older build offer to update.
   if (req.method === 'GET' && path === '/api/app') {

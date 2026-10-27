@@ -462,6 +462,7 @@ void main() {
           {'workId': ids.first, 'latest': 184, 'url': 'https://mgeko.cc/x/chapter-184/', 'site': 'mgeko.cc', 'checkedAt': now},
           {'workId': ids[1], 'latest': 262, 'url': 'https://mangadex.org/chapter/x', 'site': 'mangadex.org', 'checkedAt': now},
         ],
+        'lastCheck': now - 3600000,
       });
     });
 
@@ -476,6 +477,9 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       final api = FakeLibraryApi(library);
       await shoot(tester, LibraryScreen(api: api, onUnpaired: () {}, onConnect: () {}), 'm1-home');
+      await tester.tap(find.text('Novidades').last);
+      await settle(tester);
+      await capture(tester, 'm8-updates');
       await tester.tap(find.text('Biblioteca').last);
       await settle(tester);
       await capture(tester, 'm2-collection');

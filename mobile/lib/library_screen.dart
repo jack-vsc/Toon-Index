@@ -108,7 +108,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     widget.onUnpaired();
   }
 
-  /// The tab shown: 0 the start (where the reading is, new chapters), 1 the collection.
+  /// The tab shown: 0 the start (where the reading is, new chapters), 1 every new chapter, 2 the collection.
   int _tab = 0;
 
   /// The collection's order: a key of [_sorts].
@@ -133,7 +133,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final fresh = views.where((v) => v.update != null).length;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_tab == 0 ? 'Manga Index' : 'Biblioteca', style: const TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(const ['Manga Index', 'Novidades', 'Biblioteca'][_tab], style: const TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(tooltip: 'Buscar obra', icon: const Icon(Icons.search), onPressed: _search),
           if (_library?.ntfyTopic != null)
@@ -177,8 +177,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
         destinations: [
           const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Início'),
           NavigationDestination(
-            icon: Badge(isLabelVisible: fresh > 0, label: Text('$fresh'), child: const Icon(Icons.collections_bookmark_outlined)),
-            selectedIcon: const Icon(Icons.collections_bookmark),
+            icon: Badge(isLabelVisible: fresh > 0, label: Text('$fresh'), child: const Icon(Icons.notifications_outlined)),
+            selectedIcon: Badge(isLabelVisible: fresh > 0, label: Text('$fresh'), child: const Icon(Icons.notifications)),
+            label: 'Novidades',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.collections_bookmark_outlined),
+            selectedIcon: Icon(Icons.collections_bookmark),
             label: 'Biblioteca',
           ),
         ],
@@ -193,7 +198,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               label: const Text('Traduzir no PC'),
             )
           : null,
-      body: RefreshIndicator(onRefresh: _refresh, child: _tab == 0 ? _home(views) : _collection(views)),
+      body: RefreshIndicator(onRefresh: _refresh, child: switch (_tab) { 0 => _home(views), 1 => _updates(views), _ => _collection(views) }),
     );
   }
 
@@ -216,7 +221,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// The start: the work being read, big; new chapters; the works read lately in a row.
   Widget _home(List<WorkView> views) {
-    final fresh = views.where((v) => v.update != null).toList();
+    final fresh = freshViews(views);
     final recent = [...views]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
     final current = recent.where((v) => v.continueUrl != null || v.nextInLibrary != null).firstOrNull;
     final heading = Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800);
@@ -225,15 +230,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (current != null) _Hero(view: current, api: widget.api, onOpen: () => _openWork(current), onBrowse: _browse, onRead: (c) => _read(current, c)),
       if (fresh.isNotEmpty) ...[
         const SizedBox(height: 22),
-        Text('Capítulos novos', style: heading),
+        Row(children: [
+          Expanded(child: Text('Capítulos novos', style: heading)),
+          if (fresh.length > _homeUpdates) TextButton(onPressed: () => setState(() => _tab = 1), child: Text('Ver todos (${fresh.length}) →')),
+        ]),
         const SizedBox(height: 8),
-        for (final view in fresh) _UpdateRow(view: view, api: widget.api, onOpen: () => _openWork(view), onBrowse: _browse),
+        for (final view in fresh.take(_homeUpdates)) _UpdateRow(view: view, api: widget.api, onOpen: () => _openWork(view), onBrowse: _browse),
       ],
       if (recent.isNotEmpty) ...[
         const SizedBox(height: 22),
         Row(children: [
           Expanded(child: Text('Lidos recentemente', style: heading)),
-          TextButton(onPressed: () => setState(() => _tab = 1), child: const Text('Ver tudo →')),
+          TextButton(onPressed: () => setState(() => _tab = 2), child: const Text('Ver tudo →')),
         ]),
         const SizedBox(height: 4),
         SizedBox(
@@ -251,6 +259,65 @@ class _LibraryScreenState extends State<LibraryScreen> {
         OutlinedButton.icon(onPressed: _batch, icon: const Icon(Icons.library_add), label: const Text('Traduzir ou baixar vários capítulos')),
       ],
     ]);
+  }
+
+  /// How many new chapters the start shows; the rest are on their own tab.
+  static const _homeUpdates = 5;
+
+  /// Every work with a chapter out past the last one read: the app's notices.
+  Widget _updates(List<WorkView> views) {
+    final fresh = freshViews(views);
+    final library = _library;
+    final checked = library?.lastCheck != null ? 'Última checagem ${timeAgo(library!.lastCheck!)}' : 'Ainda não checado';
+    return ListView(padding: const EdgeInsets.fromLTRB(14, 4, 14, 32), children: [
+      ..._notices(views),
+      Row(children: [
+        Expanded(
+          child: Text(
+            library?.checking == true ? 'O PC está checando os sites agora…' : '$checked · a cada 2 horas',
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
+        ),
+        if (widget.api.paired)
+          TextButton.icon(
+            onPressed: library?.checking == true ? null : _checkUpdates,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Checar agora'),
+          ),
+      ]),
+      const Text('Obras com capítulo novo depois do último que você leu. A obra sai daqui quando você lê o capítulo.',
+          style: TextStyle(color: muted, fontSize: 12)),
+      const SizedBox(height: 12),
+      if (library != null && fresh.isEmpty)
+        const Padding(padding: EdgeInsets.all(40), child: Text('Nenhum capítulo novo por enquanto.', textAlign: TextAlign.center)),
+      for (final view in fresh)
+        _UpdateRow(
+          view: view,
+          api: widget.api,
+          onOpen: () => _openWork(view),
+          onBrowse: _browse,
+          onTranslate: widget.api.paired ? () => _translate(view) : null,
+        ),
+    ]);
+  }
+
+  Future<void> _checkUpdates() async {
+    try {
+      await widget.api.checkUpdates();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('O PC está checando os sites. Leva alguns minutos: puxe a lista para baixo para ver.')),
+      );
+      await _refresh();
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// The chapters still to read, looked up for the PC to translate.
+  Future<void> _translate(WorkView view) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => BatchScreen(api: widget.api, query: view.work.name)));
+    _refresh();
   }
 
   /// The collection, as on the scans: the lists with their counts, the order, and the covers.
@@ -418,16 +485,21 @@ class _Hero extends StatelessWidget {
 
 /// A new chapter out, as in MangaDex's latest updates.
 class _UpdateRow extends StatelessWidget {
-  const _UpdateRow({required this.view, required this.api, required this.onOpen, required this.onBrowse});
+  const _UpdateRow({required this.view, required this.api, required this.onOpen, required this.onBrowse, this.onTranslate});
 
   final WorkView view;
   final Api api;
   final VoidCallback onOpen;
   final Future<void> Function(String url) onBrowse;
 
+  /// The chapters still to read to the PC's queue; null where that is not offered.
+  final VoidCallback? onTranslate;
+
   @override
   Widget build(BuildContext context) {
     final update = view.update!;
+    final upTo = view.readUpTo;
+    final behind = upTo == null ? null : (update.latest.floor() - upTo.floor()).clamp(1, 9999);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: InkWell(
@@ -441,12 +513,20 @@ class _UpdateRow extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(view.work.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+                Row(children: [
+                  if (view.work.favorite) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.star, size: 15, color: accent)),
+                  Expanded(child: Text(view.work.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))),
+                ]),
                 const SizedBox(height: 2),
                 Text('Capítulo ${chapterLabel(update.latest)}', style: const TextStyle(fontSize: 13)),
-                Text(update.site.toUpperCase(), style: monoLabel(size: 10)),
+                if (behind != null)
+                  Text('${behind == 1 ? '1 capítulo' : '$behind capítulos'} depois do ${chapterLabel(upTo!)}',
+                      style: const TextStyle(fontSize: 12, color: muted)),
+                Text([update.site.toUpperCase(), if (update.checkedAt > 0) timeAgo(update.checkedAt)].join(' · '), style: monoLabel(size: 10)),
               ]),
             ),
+            if (onTranslate != null)
+              IconButton(tooltip: 'Traduzir no PC', icon: const Icon(Icons.translate, size: 20), onPressed: onTranslate),
             FilledButton(
               onPressed: () => onBrowse(update.url),
               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
@@ -460,6 +540,10 @@ class _UpdateRow extends StatelessWidget {
 }
 
 int _favoriteFirst(WorkView a, WorkView b) => (b.work.favorite ? 1 : 0) - (a.work.favorite ? 1 : 0);
+
+/// The works with a chapter out past the last one read: favorites first, then the ones checked last.
+List<WorkView> freshViews(List<WorkView> views) => views.where((v) => v.update != null).toList()
+  ..sort((a, b) => _favoriteFirst(a, b) != 0 ? _favoriteFirst(a, b) : b.update!.checkedAt.compareTo(a.update!.checkedAt));
 
 int _newFirst(WorkView a, WorkView b) => (b.update != null ? 1 : 0) - (a.update != null ? 1 : 0);
 

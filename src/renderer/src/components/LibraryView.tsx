@@ -305,6 +305,116 @@ function PosterCard({ group, data, onPick }: { group: WorkGroup; data: LibraryDa
   )
 }
 
+/** How many new chapters the first page shows; the rest are on their own page. */
+const HOME_UPDATES = 6
+
+/** The works with a chapter out past the last one read: favorites first, then the ones checked last. */
+export function freshWorks(data: LibraryData): { update: WorkUpdate; group: WorkGroup }[] {
+  return [...data.fresh.values()]
+    .map((u) => ({ update: u, group: data.groups.find((g) => g.work.id === u.workId) }))
+    .filter((f): f is { update: WorkUpdate; group: WorkGroup } => !!f.group)
+    .sort((a, b) => Number(!!b.group.work.favorite) - Number(!!a.group.work.favorite) || b.update.checkedAt - a.update.checkedAt)
+}
+
+/** A new chapter out: the work, how far behind the reading is, and where to read it. */
+function UpdateRow({
+  update,
+  group,
+  data,
+  onPick,
+  onTranslate
+}: {
+  update: WorkUpdate
+  group: WorkGroup
+  data: LibraryData
+  onPick: () => void
+  onTranslate?: () => void
+}) {
+  const { upTo } = progressOf(group, update.latest)
+  const behind = upTo !== null ? Math.max(1, Math.floor(update.latest) - Math.floor(upTo)) : null
+  return (
+    <div className="update-row">
+      <button className="update-cover" onClick={onPick}>
+        <Cover src={coverOf(group, data.covers)} className="thumb" />
+      </button>
+      <div className="update-text">
+        <button className="update-title" onClick={onPick}>
+          {group.work.favorite ? '★ ' : ''}
+          {displayName(group.work.names[0])}
+        </button>
+        <span>
+          Capítulo {update.latest}
+          {behind !== null && (
+            <span className="muted">
+              {' '}
+              · {behind === 1 ? '1 capítulo' : `${behind} capítulos`} depois do {upTo}, o último lido
+            </span>
+          )}
+        </span>
+        <span className="mono muted">
+          {update.site.toUpperCase()} · {timeAgo(update.checkedAt)}
+        </span>
+      </div>
+      {onTranslate && (
+        <button className="secondary small" onClick={onTranslate} title="Pôr os capítulos que faltam na fila">
+          Traduzir
+        </button>
+      )}
+      <button className="small" onClick={() => window.open(update.url)}>
+        Ler
+      </button>
+    </div>
+  )
+}
+
+/** Every work with a chapter out past the last one read: the app's notices. */
+export function UpdatesView({
+  data,
+  updates,
+  onPick,
+  onTranslate
+}: {
+  data: LibraryData
+  updates: UpdatesStatus | null
+  onPick: (workId: string) => void
+  /** The batch window, with the work's name in it. */
+  onTranslate: (name: string) => void
+}) {
+  const fresh = freshWorks(data)
+  return (
+    <div className="page">
+      <section className="home-section">
+        <div className="section-head">
+          <h2>
+            Novidades <span className="library-count">{fresh.length}</span>
+          </h2>
+          <CheckButton updates={updates} />
+        </div>
+        <p className="hint">
+          Obras com capítulo novo depois do último que você leu. Os sites de cada obra são checados a cada 2 horas
+          {updates?.lastRun ? ` (última vez ${timeAgo(updates.lastRun)})` : ''}; a obra sai daqui quando você lê o capítulo.
+        </p>
+        {fresh.length === 0 ? (
+          <p className="hint center">Nenhum capítulo novo por enquanto.</p>
+        ) : (
+          <div className="update-list">
+            {fresh.map(({ update, group }) => (
+              <UpdateRow
+                key={update.workId}
+                update={update}
+                group={group}
+                data={data}
+                onPick={() => onPick(group.work.id)}
+                onTranslate={() => onTranslate(displayName(group.work.names[0]))}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
 /**
  * The first page: the work being read now, new chapters out, translating, and the works read lately.
  */
@@ -313,22 +423,20 @@ export function HomeFeed({
   updates,
   onPick,
   onOpen,
+  onAllUpdates,
   children
 }: {
   data: LibraryData
   updates: UpdatesStatus | null
   onPick: (workId: string) => void
   onOpen: (entry: LibraryEntry) => void
+  /** To the page with every work that has a new chapter. */
+  onAllUpdates: () => void
   children: ReactNode
 }) {
   const recent = [...data.groups].sort((a, b) => lastActivity(b) - lastActivity(a))
   const current = recent.find((g) => readingStatus(g.records)?.continueUrl) ?? recent[0]
-  const fresh = [...data.fresh.values()]
-    .map((u) => ({
-      update: u,
-      group: data.groups.find((g) => g.work.id === u.workId)
-    }))
-    .filter((f): f is { update: WorkUpdate; group: WorkGroup } => !!f.group)
+  const fresh = freshWorks(data)
 
   return (
     <div className="page">
@@ -345,6 +453,11 @@ export function HomeFeed({
       <section className="home-section">
         <div className="section-head">
           <h2>Capítulos novos</h2>
+          {fresh.length > HOME_UPDATES && (
+            <button className="secondary small" onClick={onAllUpdates}>
+              Ver todos ({fresh.length})
+            </button>
+          )}
           <CheckButton updates={updates} />
         </div>
         {fresh.length === 0 ? (
@@ -354,24 +467,8 @@ export function HomeFeed({
           </p>
         ) : (
           <div className="update-grid">
-            {fresh.map(({ update, group }) => (
-              <div key={update.workId} className="update-row">
-                <button className="update-cover" onClick={() => onPick(group.work.id)}>
-                  <Cover src={coverOf(group, data.covers)} className="thumb" />
-                </button>
-                <div className="update-text">
-                  <button className="update-title" onClick={() => onPick(group.work.id)}>
-                    {displayName(group.work.names[0])}
-                  </button>
-                  <span>Capítulo {update.latest}</span>
-                  <span className="mono muted">
-                    {update.site.toUpperCase()} · {timeAgo(update.checkedAt)}
-                  </span>
-                </div>
-                <button className="small" onClick={() => window.open(update.url)}>
-                  Ler
-                </button>
-              </div>
+            {fresh.slice(0, HOME_UPDATES).map(({ update, group }) => (
+              <UpdateRow key={update.workId} update={update} group={group} data={data} onPick={() => onPick(group.work.id)} />
             ))}
           </div>
         )}

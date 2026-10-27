@@ -16,7 +16,7 @@ import type { RemoteJob, RemoteQueue } from '../../shared/remoteJobs'
 import type { UpdatesStatus, WorkUpdate } from '../../shared/updates'
 import { displayName, type Work } from '../../shared/works'
 import { DropZone } from './components/DropZone'
-import { HomeFeed, LibraryView, QuickSearch, useLibrary, WorkPage } from './components/LibraryView'
+import { freshWorks, HomeFeed, LibraryView, QuickSearch, UpdatesView, useLibrary, WorkPage } from './components/LibraryView'
 import { Sidebar, type Page } from './components/Sidebar'
 import { ProgressView, statusText } from './components/ProgressView'
 import { Reader, type ReaderPage } from './components/Reader'
@@ -573,7 +573,7 @@ export default function App() {
       {view === 'home' && (
         <Sidebar
           page={page}
-          fresh={libraryData.fresh.size}
+          fresh={freshWorks(libraryData).length}
           onPage={goTo}
           onBatch={() => setBatchOpen(true)}
           onPhone={() => setPhoneOpen(true)}
@@ -757,7 +757,13 @@ export default function App() {
               </div>
             )}
             {view === 'home' && page.kind === 'home' && (
-              <HomeFeed data={libraryData} updates={updates} onPick={(id) => goTo({ kind: 'work', id })} onOpen={openFromLibrary}>
+              <HomeFeed
+                data={libraryData}
+                updates={updates}
+                onPick={(id) => goTo({ kind: 'work', id })}
+                onOpen={openFromLibrary}
+                onAllUpdates={() => goTo({ kind: 'updates' })}
+              >
               <div className="translate-box">
                 <p className="subtitle">
                   Envie o PDF do capítulo ou o link dele num site. Cada página é lida pela IA, o texto é traduzido e escrito por cima do original.
@@ -779,6 +785,14 @@ export default function App() {
                 </div>
               </div>
               </HomeFeed>
+            )}
+            {view === 'home' && page.kind === 'updates' && (
+              <UpdatesView
+                data={libraryData}
+                updates={updates}
+                onPick={(id) => goTo({ kind: 'work', id })}
+                onTranslate={(name) => (setBatchQuery(name), setBatchOpen(true))}
+              />
             )}
             {view === 'home' && page.kind === 'library' && (
               <LibraryView data={libraryData} updates={updates} onPick={(id) => goTo({ kind: 'work', id })} onWorksChanged={refreshLibrary} />

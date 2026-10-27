@@ -1738,6 +1738,13 @@ details pre {
   gap: 10px;
 }
 
+.update-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  max-width: 860px;
+}
+
 .update-row {
   display: flex;
   align-items: center;

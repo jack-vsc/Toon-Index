@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react'
 
-export type Page = { kind: 'home' } | { kind: 'library' } | { kind: 'work'; id: string }
+export type Page = { kind: 'home' } | { kind: 'library' } | { kind: 'updates' } | { kind: 'work'; id: string }
 
 interface Props {
   page: Page
-  /** New chapters out, shown on the library's entry. */
+  /** Works with a new chapter out, shown on the notices' entry. */
   fresh: number
   onPage: (page: Page) => void
   onBatch: () => void
@@ -31,7 +31,8 @@ export function Sidebar({ page, fresh, onPage, onBatch, onPhone, onAi, onSetting
       </button>
 
       <Item icon={icons.home} label="Início" active={at === 'home'} onClick={() => onPage({ kind: 'home' })} />
-      <Item icon={icons.library} label="Biblioteca" active={at === 'library'} badge={fresh || undefined} onClick={() => onPage({ kind: 'library' })} />
+      <Item icon={icons.bell} label="Novidades" active={at === 'updates'} badge={fresh || undefined} onClick={() => onPage({ kind: 'updates' })} />
+      <Item icon={icons.library} label="Biblioteca" active={at === 'library'} onClick={() => onPage({ kind: 'library' })} />
 
       <div className="sidebar-group mono">Traduzir</div>
       <Item icon={icons.batch} label="Vários capítulos" onClick={onBatch} />
@@ -68,6 +69,12 @@ const icons = {
     </>
   ),
   home: svg(<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />),
+  bell: svg(
+    <>
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
+    </>
+  ),
   library: svg(
     <>
       <path d="M4 19V5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2" />

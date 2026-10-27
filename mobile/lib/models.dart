@@ -146,23 +146,27 @@ class LibraryChapter {
 
 /// A chapter the PC found on one of a work's sites, past the last one read.
 class ChapterUpdate {
-  ChapterUpdate({required this.workId, required this.latest, required this.url, required this.site});
+  ChapterUpdate({required this.workId, required this.latest, required this.url, required this.site, this.checkedAt = 0});
 
   final String workId;
   final double latest;
   final String url;
   final String site;
 
+  /// When the PC last looked at that site.
+  final int checkedAt;
+
   factory ChapterUpdate.fromJson(Map<String, dynamic> j) => ChapterUpdate(
         workId: j['workId'] as String,
         latest: (j['latest'] as num).toDouble(),
         url: j['url'] as String,
         site: j['site'] as String,
+        checkedAt: (j['checkedAt'] as num?)?.toInt() ?? 0,
       );
 }
 
 class Library {
-  Library({required this.works, required this.reading, required this.chapters, this.updates = const [], this.ntfyTopic});
+  Library({required this.works, required this.reading, required this.chapters, this.updates = const [], this.ntfyTopic, this.lastCheck, this.checking = false});
 
   final List<Work> works;
   final List<ReadingRecord> reading;
@@ -172,6 +176,10 @@ class Library {
   /// The ntfy.sh topic the PC sends new chapters to, while that is on.
   final String? ntfyTopic;
 
+  /// When the PC last checked the works' sites, and whether it is checking now.
+  final int? lastCheck;
+  final bool checking;
+
   factory Library.fromJson(Map<String, dynamic> j) => Library(
         works: (j['works'] as List).map((w) => Work.fromJson(w as Map<String, dynamic>)).toList(),
         reading: (j['reading'] as List).map((r) => ReadingRecord.fromJson(r as Map<String, dynamic>)).toList(),
@@ -179,6 +187,8 @@ class Library {
         // PCs from before new-chapter checks send neither.
         updates: ((j['updates'] as List?) ?? []).map((u) => ChapterUpdate.fromJson(u as Map<String, dynamic>)).toList(),
         ntfyTopic: j['ntfyTopic'] as String?,
+        lastCheck: (j['lastCheck'] as num?)?.toInt(),
+        checking: j['checking'] == true,
       );
 
   /// With the reading lists and favorites set on this phone and not yet sent to the PC.
@@ -194,6 +204,8 @@ class Library {
       chapters: chapters,
       updates: updates,
       ntfyTopic: ntfyTopic,
+      lastCheck: lastCheck,
+      checking: checking,
     );
   }
 
