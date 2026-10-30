@@ -59,13 +59,20 @@ async function withRetries(
   local: boolean
 ): Promise<string> {
   let jsonMode = true
+  // Newer models (Claude's among them) take no temperature: it is left out once the API says so.
+  let withTemperature: number | null = temperature
   for (let attempt = 1; ; attempt++) {
     try {
-      return await request(prompt, req, apiKey, baseUrl, model, jsonMode, signal, temperature, local)
+      return await request(prompt, req, apiKey, baseUrl, model, jsonMode, signal, withTemperature, local)
     } catch (err) {
       if (!(err instanceof HttpError)) throw err
       if (jsonMode && err.status === 400 && /response_format|json_object|json mode/i.test(err.body)) {
         jsonMode = false
+        attempt--
+        continue
+      }
+      if (withTemperature !== null && err.status === 400 && /temperature/i.test(err.body)) {
+        withTemperature = null
         attempt--
         continue
       }
@@ -96,7 +103,7 @@ async function request(
   model: string,
   jsonMode: boolean,
   signal: AbortSignal,
-  temperature: number,
+  temperature: number | null,
   local: boolean
 ): Promise<string> {
   const started = Date.now()
@@ -112,7 +119,7 @@ async function request(
     },
     body: JSON.stringify({
       model,
-      temperature,
+      ...(temperature !== null && { temperature }),
       // A page needs a few thousand tokens; models stuck repeating themselves stop here instead of later.
       max_tokens: local ? LOCAL_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
       ...(jsonMode && (trimUrl(baseUrl) === LOCAL_AI_BASE_URL ? { grammar: COMPACT_JSON } : { response_format: { type: 'json_object' } })),
