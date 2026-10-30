@@ -126,7 +126,7 @@ export function retryBatch(ids?: string[]): RemoteQueue {
   const again = (j: RemoteJob) => j.status === 'failed' && j.kind === 'link' && (ids ? ids.includes(j.id) : !!j.batch)
   let jobs = listRemoteJobs()
   const works = new Set(jobs.filter((j) => again(j) && j.batch).map((j) => j.batch!.work))
-  jobs = jobs.map((j) => (again(j) ? { ...j, status: 'queued', message: undefined, updatedAt: Date.now() } : j))
+  jobs = jobs.map((j) => (again(j) ? { ...j, status: 'queued', message: undefined, progress: undefined, updatedAt: Date.now() } : j))
   for (const work of works) jobs = inChapterOrder(jobs, work)
   save(jobs)
   return remoteQueue()
@@ -218,9 +218,11 @@ export function takeRemoteJob(): { job: RemoteJob; pdf: Uint8Array | null } | nu
   return { job, pdf }
 }
 
-export function updateRemoteJob(id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>): void {
+export function updateRemoteJob(id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId' | 'progress'>>): void {
   const jobs = listRemoteJobs()
-  save(jobs.map((j) => (j.id === id ? { ...j, ...patch, updatedAt: Date.now() } : j)))
+  // How far it got only means something while it runs.
+  const progress = patch.status && patch.status !== 'running' ? { progress: undefined } : {}
+  save(jobs.map((j) => (j.id === id ? { ...j, ...patch, ...progress, updatedAt: Date.now() } : j)))
   // The PDF is in the library now (or could not be used); the phone's copy is not needed.
   if (patch.status === 'done' || patch.status === 'failed') rmSync(pdfPath(id), { force: true })
 }
@@ -237,5 +239,5 @@ export function cancelRemoteJob(id: string): void {
 export function requeueInterrupted(): void {
   const jobs = listRemoteJobs()
   if (!jobs.some((j) => j.status === 'running')) return
-  save(jobs.map((j) => (j.status === 'running' ? { ...j, status: 'queued', message: undefined } : j)))
+  save(jobs.map((j) => (j.status === 'running' ? { ...j, status: 'queued', message: undefined, progress: undefined } : j)))
 }

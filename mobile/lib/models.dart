@@ -371,7 +371,16 @@ class RemoteJob {
     this.chapter,
     this.downloadOnly = false,
     this.options,
+    this.done,
+    this.total,
   });
+
+  /// While it translates: pages finished out of the chapter's.
+  final int? done;
+  final int? total;
+
+  /// "12/38 páginas · 32%" while it translates.
+  String? get progressText => done != null && total != null && total! > 0 ? '$done/$total páginas · ${(done! * 100 / total!).round()}%' : null;
 
   /// Translated with these instead of the PC's settings.
   final Map<String, dynamic>? options;
@@ -410,6 +419,8 @@ class RemoteJob {
         chapter: ((j['batch'] as Map<String, dynamic>?)?['chapter'] as num?)?.toDouble(),
         downloadOnly: (j['batch'] as Map<String, dynamic>?)?['download'] == true,
         options: j['options'] == null ? null : Map<String, dynamic>.from(j['options'] as Map),
+        done: (j['progress'] as Map?)?['done'] as int?,
+        total: (j['progress'] as Map?)?['total'] as int?,
       );
 }
 

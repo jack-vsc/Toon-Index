@@ -95,13 +95,10 @@ class _QueueScreenState extends State<QueueScreen> {
                       ),
                       const SizedBox(height: 8),
                     ],
-                    for (final j in running)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.autorenew, color: accent),
-                        title: Text(j.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text(j.message ?? 'Agora', style: const TextStyle(color: accentSoft)),
-                      ),
+                    for (final j in running) ...[
+                      _RunningCard(job: j, paused: _paused, onPause: () => _do(() => widget.api.pauseQueue(!_paused))),
+                      const SizedBox(height: 12),
+                    ],
                     Row(children: [
                       Text('Esperando  ${waiting.length}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                       const Spacer(),
@@ -175,6 +172,66 @@ class _QueueScreenState extends State<QueueScreen> {
                   ),
                 ),
             ]),
+    );
+  }
+}
+
+/// The chapter on now, as a download manager shows one: what it is doing, how far, and a bar.
+class _RunningCard extends StatelessWidget {
+  const _RunningCard({required this.job, required this.paused, required this.onPause});
+
+  final RemoteJob job;
+  final bool paused;
+  final VoidCallback onPause;
+
+  @override
+  Widget build(BuildContext context) {
+    final share = job.done != null && job.total != null && job.total! > 0 ? job.done! / job.total! : null;
+    final site = job.url != null ? Uri.tryParse(job.url!)?.host.replaceFirst(RegExp(r'^www\.'), '') : null;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(14), border: Border.all(color: accent)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(99)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(width: 6, height: 6, decoration: const BoxDecoration(color: accent, shape: BoxShape.circle)),
+                  const SizedBox(width: 5),
+                  Text('${job.message ?? 'Começando'}…', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+              const SizedBox(height: 6),
+              Text(job.label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 2),
+              Text(
+                [if (site != null && site.isNotEmpty) site, job.downloadOnly ? 'baixar' : 'traduzir', if (job.options?['visionDevice'] == 'cpu') 'visão na CPU'].join(' · '),
+                style: const TextStyle(color: muted, fontSize: 12),
+              ),
+            ]),
+          ),
+          const SizedBox(width: 10),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(share != null ? '${job.done}/${job.total} pág.' : '—', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+            Text(share != null ? '${(share * 100).round()}%' : 'abrindo', style: const TextStyle(color: muted, fontSize: 12)),
+          ]),
+        ]),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: LinearProgressIndicator(value: share ?? 0, minHeight: 6, color: accent, backgroundColor: Colors.white.withValues(alpha: 0.08)),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: onPause,
+          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+          icon: Icon(paused ? Icons.play_arrow : Icons.pause, size: 18),
+          label: Text(paused ? 'Continuar' : 'Pausar'),
+        ),
+      ]),
     );
   }
 }

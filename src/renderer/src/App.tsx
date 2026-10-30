@@ -465,6 +465,13 @@ export default function App() {
 
   const failed = pages.filter((p) => p.status === 'error').length
   const pending = pages.filter((p) => p.status === 'pending').length
+
+  // How far the queue's chapter is, for its window and the phone's.
+  const finishedPages = pages.filter((p) => p.status === 'done' || p.status === 'error' || p.status === 'skipped').length
+  useEffect(() => {
+    if (!remoteJob || remoteJob.batch?.download || !pages.length) return
+    void window.api.remote.update(remoteJob.id, { progress: { done: finishedPages, total: pages.length } })
+  }, [remoteJob?.id, finishedPages, pages.length])
   const toTranslate = pages.filter((p) => p.status !== 'skipped').length
   const finished = pages.filter((p) => p.status === 'done' || p.status === 'error').length
   const topError = mostCommonError(pages)
@@ -742,7 +749,7 @@ export default function App() {
             </div>
           )}
           {queue && <BatchBar queue={queue} running={remoteJob} onOpen={inBackground ? showJob : undefined} onQueue={() => setQueueOpen(true)} />}
-          {queue && queueOpen && settings && <QueueDialog queue={queue} running={remoteJob} settings={settings} onClose={() => setQueueOpen(false)} />}
+          {queue && queueOpen && settings && <QueueDialog queue={queue} running={queue.jobs.find((j) => j.status === 'running') ?? remoteJob} settings={settings} onClose={() => setQueueOpen(false)} />}
 
           {message && (
             <div className="banner" onClick={() => setMessage(null)}>

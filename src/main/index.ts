@@ -226,7 +226,7 @@ function registerIpc(): void {
   ipcMain.handle('remote:options', (_e, options: unknown) => setQueueOptions(cleanOptions(options)))
   ipcMain.handle('remote:cancel', (_e, id: string) => (cancelRemoteJob(id), remoteQueue()))
   ipcMain.handle('remote:take', () => takeRemoteJob())
-  ipcMain.handle('remote:update', (_e, id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>) =>
+  ipcMain.handle('remote:update', (_e, id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId' | 'progress'>>) =>
     updateRemoteJob(id, patch)
   )
   ipcMain.handle('updates:status', () => updatesStatus())

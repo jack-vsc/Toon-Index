@@ -146,7 +146,7 @@ class FakeQueueApi extends Api {
   @override
   Future<({List<RemoteJob> jobs, bool paused})> queue() async => (
         jobs: [
-          _job('a', 'running', 36, message: 'Traduzindo'),
+          {..._job('a', 'running', 36, message: 'Traduzindo'), 'progress': {'done': 12, 'total': 38}},
           for (final n in [37, 38, 39, 40, 41]) _job('q$n', 'queued', n),
           _job('d1', 'queued', 120, download: true),
           _job('f1', 'failed', 35, message: 'Não foi possível baixar a página 16 do MangaDex (HTTP 502).'),

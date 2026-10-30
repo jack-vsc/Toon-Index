@@ -142,7 +142,7 @@ export interface MangaApi {
     list(): Promise<RemoteJob[]>
     /** The next queued job, now marked running, with the PDF the phone sent (null for a link). */
     take(): Promise<{ job: RemoteJob; pdf: Uint8Array | null } | null>
-    update(id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId'>>): Promise<void>
+    update(id: string, patch: Partial<Pick<RemoteJob, 'status' | 'message' | 'entryId' | 'progress'>>): Promise<void>
     /** Every job, and whether the queue is paused. */
     queue(): Promise<RemoteQueue>
     /** Pauses (nothing new starts) or resumes the queue. */

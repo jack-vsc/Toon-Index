@@ -66,13 +66,7 @@ export function QueueDialog({
 
         {waiting.length > 0 && <QueueOptions waiting={waiting} settings={settings} />}
 
-        {running && (
-          <div className="queue-row now">
-            <span className="queue-pos">▶</span>
-            <JobLabel job={running} />
-            <span className="queue-state">{running.message ?? 'agora'}</span>
-          </div>
-        )}
+        {running && <RunningCard job={running} paused={queue.paused} />}
 
         <div className="queue-list">
           {shown.length === 0 && <p className="hint">Nada esperando na fila.</p>}
@@ -272,6 +266,55 @@ function QueueOptions({ waiting, settings }: { waiting: RemoteJob[]; settings: P
   )
 }
 
+/** The chapter on now, as a download manager shows one: what it is doing, how far, and a bar. */
+function RunningCard({ job, paused }: { job: RemoteJob; paused: boolean }) {
+  const share = job.progress ? percent(job.progress) : null
+  const site = job.url ? hostOf(job.url) : null
+  return (
+    <div className="queue-card">
+      <div className="queue-card-top">
+        <div className="queue-card-text">
+          <span className="queue-pill">{job.message ?? 'Começando'}…</span>
+          <div className="queue-card-title">
+            {job.batch ? (
+              <>
+                Cap. {job.batch.chapter} · {job.batch.work}
+              </>
+            ) : job.kind === 'link' ? (
+              job.url
+            ) : (
+              job.name
+            )}
+          </div>
+          <div className="queue-card-sub">
+            {[site, job.batch?.download ? 'baixar' : 'traduzir', job.options?.visionDevice === 'cpu' && 'visão na CPU'].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+        <div className="queue-card-numbers">
+          <strong>{job.progress ? `${job.progress.done}/${job.progress.total} páginas` : '—'}</strong>
+          <span>{share !== null ? `${share}%` : 'abrindo o capítulo'}</span>
+        </div>
+      </div>
+      <div className="queue-bar">
+        <span style={{ width: `${share ?? 0}%` }} />
+      </div>
+      <div className="queue-card-actions">
+        <button className="secondary small" onClick={() => window.api.remote.pause(!paused)}>
+          {paused ? '▶ Continuar' : '❚❚ Pausar'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const hostOf = (url: string): string | null => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
 function JobLabel({ job }: { job: RemoteJob }) {
   return (
     <span className="queue-name">
@@ -287,3 +330,5 @@ function JobLabel({ job }: { job: RemoteJob }) {
     </span>
   )
 }
+
+const percent = ({ done, total }: { done: number; total: number }): number => (total ? Math.round((done / total) * 100) : 0)

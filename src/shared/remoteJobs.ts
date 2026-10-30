@@ -20,6 +20,8 @@ export interface RemoteJob {
   status: RemoteJobStatus
   /** What is happening now, or why it failed. */
   message?: string
+  /** While it translates: pages finished (translated, failed or skipped) out of the chapter's. */
+  progress?: { done: number; total: number }
   /** The library chapter made from it, once done. */
   entryId?: string
   updatedAt: number
