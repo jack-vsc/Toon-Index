@@ -32,23 +32,43 @@ export function QueueDialog({
   const failed = queue.jobs.filter((j) => j.status === 'failed' && j.kind === 'link' && Date.now() - j.updatedAt < 86_400_000)
   // The order shown while dragging, before it is saved.
   const [order, setOrder] = useState(waiting.map((j) => j.id))
-  const [dragging, setDragging] = useState<string | null>(null)
+  // A work's whole block (its key) or one chapter inside it.
+  const [dragging, setDragging] = useState<{ group: string } | { id: string } | null>(null)
+  // The works opened (or, with a single work, closed) to show their chapters.
+  const [toggled, setToggled] = useState<Set<string>>(new Set())
   const ids = waiting.map((j) => j.id).join('|')
   useEffect(() => {
     if (!dragging) setOrder(waiting.map((j) => j.id))
   }, [ids])
   const byId = new Map(waiting.map((j) => [j.id, j]))
-  const shown = order.map((id) => byId.get(id)).filter((j): j is RemoteJob => !!j)
+  const groups = groupByWork(order.map((id) => byId.get(id)).filter((j): j is RemoteJob => !!j))
+  const flat = (gs: QueueGroup[]) => gs.flatMap((g) => g.jobs.map((j) => j.id))
 
   const save = (next: string[]) => {
     setOrder(next)
     void window.api.remote.reorder(next)
   }
-  const move = (id: string, to: number) => {
-    const next = order.filter((o) => o !== id)
-    next.splice(Math.max(0, Math.min(next.length, to)), 0, id)
-    save(next)
+  const moved = <T,>(list: T[], item: T, to: number): T[] => {
+    const next = list.filter((o) => o !== item)
+    next.splice(Math.max(0, Math.min(next.length, to)), 0, item)
+    return next
   }
+  const moveGroup = (g: QueueGroup, to: number) => save(flat(moved(groups, g, to)))
+  const inGroup = (g: QueueGroup, job: RemoteJob, to: number) => flat(groups.map((o) => (o === g ? { ...g, jobs: moved(g.jobs, job, to) } : o)))
+  const moveInGroup = (g: QueueGroup, job: RemoteJob, to: number) => save(inGroup(g, job, to))
+  // While dragging: shown, saved when let go.
+  const moveLocal = (g: QueueGroup, job: RemoteJob, to: number) => setOrder(inGroup(g, job, to))
+  const removeGroup = async (g: QueueGroup) => {
+    if (g.jobs.length > 1 && !window.confirm(`Tirar os ${g.jobs.length} capítulos de ${g.work} da fila?`)) return
+    for (const j of g.jobs) await window.api.remote.cancel(j.id)
+  }
+  const isOpen = (g: QueueGroup) => (groups.length === 1) !== toggled.has(g.key)
+  const toggle = (g: QueueGroup) =>
+    setToggled((t) => {
+      const next = new Set(t)
+      if (!next.delete(g.key)) next.add(g.key)
+      return next
+    })
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -62,56 +82,129 @@ export function QueueDialog({
             {queue.paused ? 'Continuar' : 'Pausar'}
           </button>
         </div>
-        <p className="hint">Arraste um capítulo, ou use as setas, para mudar a ordem em que serão traduzidos ou baixados.</p>
+        <p className="hint">
+          Os capítulos ficam juntos por obra. Arraste uma obra, ou use as setas, para mover todos os capítulos dela; abra a obra
+          para mudar a ordem dos capítulos.
+        </p>
 
         {waiting.length > 0 && <QueueOptions waiting={waiting} settings={settings} />}
 
         {running && <RunningCard job={running} paused={queue.paused} />}
 
         <div className="queue-list">
-          {shown.length === 0 && <p className="hint">Nada esperando na fila.</p>}
-          {shown.map((job, i) => (
-            <div
-              key={job.id}
-              className={`queue-row ${dragging === job.id ? 'dragging' : ''}`}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.effectAllowed = 'move'
-                setDragging(job.id)
-              }}
-              onDragOver={(e) => {
-                e.preventDefault()
-                if (!dragging || dragging === job.id) return
-                const next = order.filter((o) => o !== dragging)
-                next.splice(next.indexOf(job.id) + (order.indexOf(dragging) < order.indexOf(job.id) ? 1 : 0), 0, dragging)
-                setOrder(next)
-              }}
-              onDragEnd={() => {
-                setDragging(null)
-                save(order)
-              }}
-            >
-              <span className="queue-grip" title="Arraste">
-                ⠿
-              </span>
-              <span className="queue-pos">{i + 1}</span>
-              <JobLabel job={job} />
-              <span className="queue-buttons">
-                <button className="secondary small" title="Para o começo da fila" disabled={i === 0} onClick={() => move(job.id, 0)}>
-                  ⤒
-                </button>
-                <button className="secondary small" title="Subir" disabled={i === 0} onClick={() => move(job.id, i - 1)}>
-                  ↑
-                </button>
-                <button className="secondary small" title="Descer" disabled={i === shown.length - 1} onClick={() => move(job.id, i + 1)}>
-                  ↓
-                </button>
-                <button className="secondary small" title="Tirar da fila" onClick={() => window.api.remote.cancel(job.id)}>
-                  ✕
-                </button>
-              </span>
-            </div>
-          ))}
+          {groups.length === 0 && <p className="hint">Nada esperando na fila.</p>}
+          {groups.map((g, gi) => {
+            const open = g.work !== null && isOpen(g)
+            const draggingThis = dragging && 'group' in dragging && dragging.group === g.key
+            return (
+              <div
+                key={g.key}
+                className={`queue-group ${draggingThis ? 'dragging' : ''}`}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (!dragging || !('group' in dragging) || dragging.group === g.key) return
+                  const from = groups.findIndex((o) => o.key === dragging.group)
+                  setOrder(flat(moved(groups, groups[from], gi)))
+                }}
+              >
+                <div
+                  className={`queue-row queue-group-head ${open ? 'open' : ''}`}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = 'move'
+                    setDragging({ group: g.key })
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null)
+                    save(order)
+                  }}
+                  onClick={() => g.work !== null && toggle(g)}
+                >
+                  <span className="queue-grip" title="Arraste">
+                    ⠿
+                  </span>
+                  <span className="queue-pos">{gi + 1}</span>
+                  {g.work !== null ? (
+                    <span className="queue-name">
+                      <span className="queue-chevron">{open ? '▾' : '▸'}</span>
+                      <strong>{g.work}</strong> <span className="queue-range">{chapterRange(g.jobs)}</span>
+                      <span className="badge">{g.jobs.length === 1 ? '1 capítulo' : `${g.jobs.length} capítulos`}</span>
+                      <KindBadges jobs={g.jobs} />
+                    </span>
+                  ) : (
+                    <JobLabel job={g.jobs[0]} />
+                  )}
+                  <span className="queue-buttons" onClick={(e) => e.stopPropagation()}>
+                    <button className="secondary small" title="Para o começo da fila" disabled={gi === 0} onClick={() => moveGroup(g, 0)}>
+                      ⤒
+                    </button>
+                    <button className="secondary small" title="Subir" disabled={gi === 0} onClick={() => moveGroup(g, gi - 1)}>
+                      ↑
+                    </button>
+                    <button className="secondary small" title="Descer" disabled={gi === groups.length - 1} onClick={() => moveGroup(g, gi + 1)}>
+                      ↓
+                    </button>
+                    <button
+                      className="secondary small"
+                      title={g.jobs.length > 1 ? 'Tirar a obra da fila' : 'Tirar da fila'}
+                      onClick={() => void removeGroup(g)}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                </div>
+                {open &&
+                  g.jobs.map((job, i) => (
+                    <div
+                      key={job.id}
+                      className={`queue-row queue-chapter ${dragging && 'id' in dragging && dragging.id === job.id ? 'dragging' : ''}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.stopPropagation()
+                        e.dataTransfer.effectAllowed = 'move'
+                        setDragging({ id: job.id })
+                      }}
+                      onDragOver={(e) => {
+                        if (!dragging || !('id' in dragging)) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        const from = g.jobs.find((j) => j.id === dragging.id)
+                        if (from && from !== job) moveLocal(g, from, i)
+                      }}
+                      onDragEnd={(e) => {
+                        e.stopPropagation()
+                        setDragging(null)
+                        save(order)
+                      }}
+                    >
+                      <span className="queue-grip" title="Arraste dentro da obra">
+                        ⠿
+                      </span>
+                      <JobLabel job={job} />
+                      <span className="queue-buttons">
+                        <button className="secondary small" title="Primeiro da obra" disabled={i === 0} onClick={() => moveInGroup(g, job, 0)}>
+                          ⤒
+                        </button>
+                        <button className="secondary small" title="Subir" disabled={i === 0} onClick={() => moveInGroup(g, job, i - 1)}>
+                          ↑
+                        </button>
+                        <button
+                          className="secondary small"
+                          title="Descer"
+                          disabled={i === g.jobs.length - 1}
+                          onClick={() => moveInGroup(g, job, i + 1)}
+                        >
+                          ↓
+                        </button>
+                        <button className="secondary small" title="Tirar da fila" onClick={() => window.api.remote.cancel(job.id)}>
+                          ✕
+                        </button>
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )
+          })}
         </div>
 
         {failed.length > 0 && (
@@ -247,7 +340,16 @@ function QueueOptions({ waiting, settings }: { waiting: RemoteJob[]; settings: P
                 ))}
               </select>
             </div>
+            <div>
+              <label className="field-label">Não traduzir as primeiras</label>
+              <input type="number" min={0} max={50} value={draft.skipStart} onChange={(e) => patch({ skipStart: Math.max(0, Number(e.target.value) || 0) })} />
+            </div>
+            <div>
+              <label className="field-label">Não traduzir as últimas</label>
+              <input type="number" min={0} max={50} value={draft.skipEnd} onChange={(e) => patch({ skipEnd: Math.max(0, Number(e.target.value) || 0) })} />
+            </div>
           </div>
+          <p className="hint">Páginas de aviso da scan: continuam no capítulo, só não são traduzidas.</p>
           <label className="checkbox">
             <input type="checkbox" checked={draft.translateSfx} onChange={(e) => patch({ translateSfx: e.target.checked })} />
             Traduzir onomatopeias
@@ -313,6 +415,59 @@ const hostOf = (url: string): string | null => {
   } catch {
     return null
   }
+}
+
+/** A work's chapters waiting (`work` null: a link or PDF the phone sent, on its own). */
+interface QueueGroup {
+  key: string
+  work: string | null
+  jobs: RemoteJob[]
+}
+
+/**
+ * The queue by work, each where its first chapter is: moving a work moves all its chapters, and saving
+ * that order puts them together (chapters moved apart by hand before come back to their work).
+ */
+function groupByWork(jobs: RemoteJob[]): QueueGroup[] {
+  const groups: QueueGroup[] = []
+  const byWork = new Map<string, QueueGroup>()
+  for (const job of jobs) {
+    if (!job.batch) {
+      groups.push({ key: job.id, work: null, jobs: [job] })
+      continue
+    }
+    const key = `work:${job.batch.work.toLowerCase()}`
+    let group = byWork.get(key)
+    if (!group) {
+      group = { key, work: job.batch.work, jobs: [] }
+      byWork.set(key, group)
+      groups.push(group)
+    }
+    group.jobs.push(job)
+  }
+  return groups
+}
+
+/** "Cap. 31–40", or "Cap. 36" for one. */
+function chapterRange(jobs: RemoteJob[]): string {
+  const numbers = jobs.map((j) => j.batch!.chapter)
+  const low = Math.min(...numbers)
+  const high = Math.max(...numbers)
+  return low === high ? `Cap. ${low}` : `Cap. ${low}–${high}`
+}
+
+function KindBadges({ jobs }: { jobs: RemoteJob[] }) {
+  const kinds = new Set(jobs.map((j) => (j.batch?.download ? 'baixar' : 'traduzir')))
+  return (
+    <>
+      {[...kinds].map((k) => (
+        <span key={k} className="badge">
+          {k}
+        </span>
+      ))}
+      {jobs.some((j) => j.options?.visionDevice === 'cpu') && <span className="badge">visão na CPU</span>}
+    </>
+  )
 }
 
 function JobLabel({ job }: { job: RemoteJob }) {

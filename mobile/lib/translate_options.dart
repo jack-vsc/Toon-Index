@@ -111,6 +111,11 @@ class _OptionsSheetState extends State<_OptionsSheet> {
 
   void _set(String key, Object? value) => setState(() => _o[key] = value);
 
+  /// The PC's own number (set there to any) stays in the list.
+  Map<int, String> get _skipChoices => {
+        for (final n in {0, 1, 2, 3, 4, 5, 6, 8, 10, for (final k in ['skipStart', 'skipEnd']) if (_o[k] is num) (_o[k] as num).toInt()}.toList()..sort()) n: n == 0 ? 'Nenhuma' : '$n',
+      };
+
   Widget _pick<T>(String label, String key, Map<T, String> choices) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: DropdownButtonFormField<T>(
@@ -146,6 +151,15 @@ class _OptionsSheetState extends State<_OptionsSheet> {
           _pick('Traduzir para', 'targetLanguage', languages),
           _pick('Uso da GPU', 'gpuSharing', PcTranslateSettings.gpuSharing),
           _pick('Páginas ao mesmo tempo', 'concurrency', {for (final n in [1, 2, 3, 4, 5, 6, 8]) n: '$n'}),
+          Row(children: [
+            Expanded(child: _pick('Não traduzir as primeiras', 'skipStart', _skipChoices)),
+            const SizedBox(width: 12),
+            Expanded(child: _pick('Não traduzir as últimas', 'skipEnd', _skipChoices)),
+          ]),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text('Páginas de aviso da scan: continuam no capítulo, só não são traduzidas.', style: TextStyle(color: muted, fontSize: 12)),
+          ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Traduzir onomatopeias'),

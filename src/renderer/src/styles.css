@@ -2527,8 +2527,33 @@ details pre {
   margin-top: 8px;
 }
 
-.queue-row.dragging {
+.queue-row.dragging,
+.queue-group.dragging {
   opacity: 0.5;
+}
+
+.queue-group-head {
+  cursor: pointer;
+}
+
+.queue-group-head.open {
+  background: var(--panel-2, var(--panel));
+}
+
+.queue-chevron {
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+}
+
+.queue-range {
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.queue-chapter {
+  padding-left: 48px;
+  background: var(--bg);
 }
 
 .queue-grip {

@@ -24,6 +24,9 @@ class _QueueScreenState extends State<QueueScreen> {
   String? _error;
   Timer? _timer;
 
+  /// The works opened (or, with a single work, closed) to show their chapters.
+  final Set<String> _toggled = {};
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +50,36 @@ class _QueueScreenState extends State<QueueScreen> {
     }
   }
 
+  /// The queue in this order of works (and of chapters in them): shown at once, the PC's answer comes with the next refresh.
+  void _save(List<RemoteJob> jobs, List<_Group> groups) {
+    final ids = [for (final g in groups) for (final j in g.jobs) j.id];
+    final waiting = [for (final g in groups) ...g.jobs];
+    setState(() => _jobs = [...jobs.where((j) => j.status != 'queued'), ...waiting]);
+    _do(() => widget.api.reorderQueue(ids));
+  }
+
+  Future<void> _removeGroup(_Group g) async {
+    if (g.jobs.length > 1) {
+      final sure = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Tirar ${g.work} da fila?'),
+          content: Text('Os ${g.jobs.length} capítulos dela saem da fila.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Tirar')),
+          ],
+        ),
+      );
+      if (sure != true) return;
+    }
+    await _do(() async {
+      for (final j in g.jobs) {
+        await widget.api.cancelJob(j.id);
+      }
+    });
+  }
+
   Future<void> _do(Future<void> Function() request) async {
     try {
       await request();
@@ -61,6 +94,7 @@ class _QueueScreenState extends State<QueueScreen> {
     final jobs = _jobs ?? [];
     final running = jobs.where((j) => j.status == 'running').toList();
     final waiting = jobs.where((j) => j.status == 'queued').toList();
+    final groups = _byWork(waiting);
     final failed = jobs.where((j) => j.status == 'failed' && j.isLink && DateTime.now().millisecondsSinceEpoch - j.updatedAt < 86400000).toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Fila do PC'), actions: [
@@ -108,45 +142,92 @@ class _QueueScreenState extends State<QueueScreen> {
                         label: const Text('Ordenar por capítulo'),
                       ),
                     ]),
-                    if (waiting.isNotEmpty) const Text('Segure e arraste para mudar a ordem.', style: TextStyle(color: muted, fontSize: 12)),
+                    if (waiting.isNotEmpty)
+                      const Text('Juntos por obra: arraste a obra para mover todos os capítulos dela; toque para abrir e mudar a ordem deles.',
+                          style: TextStyle(color: muted, fontSize: 12)),
                     if (waiting.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Nada esperando na fila.', style: TextStyle(color: muted))),
                   ]),
                 ),
               ),
               SliverReorderableList(
-                itemCount: waiting.length,
+                itemCount: groups.length,
                 onReorderItem: (from, to) {
-                  final ids = waiting.map((j) => j.id).toList();
-                  ids.insert(to, ids.removeAt(from));
-                  // Shown at once; the PC's answer comes with the next refresh.
-                  setState(() => _jobs = [...jobs.where((j) => j.status != 'queued'), for (final id in ids) waiting.firstWhere((j) => j.id == id)]);
-                  _do(() => widget.api.reorderQueue(ids));
+                  final next = [...groups];
+                  next.insert(to, next.removeAt(from));
+                  _save(jobs, next);
                 },
                 itemBuilder: (context, i) {
-                  final j = waiting[i];
-                  return ReorderableDelayedDragStartListener(
-                    key: ValueKey(j.id),
-                    index: i,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: ListTile(
-                        leading: SizedBox(width: 28, child: Text('${i + 1}', textAlign: TextAlign.end, style: const TextStyle(color: muted))),
-                        title: Text(j.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text(
-                          [j.downloadOnly ? 'baixar' : 'traduzir', if (j.options?['visionDevice'] == 'cpu') 'visão na CPU'].join(' · '),
-                          style: const TextStyle(color: muted, fontSize: 12),
-                        ),
-                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                          IconButton(
-                            tooltip: 'Para o começo da fila',
-                            icon: const Icon(Icons.vertical_align_top),
-                            onPressed: i == 0 ? null : () => _do(() => widget.api.reorderQueue([j.id])),
+                  final g = groups[i];
+                  final open = g.work != null && (groups.length == 1) != _toggled.contains(g.key);
+                  return Material(
+                    key: ValueKey(g.key),
+                    color: Colors.transparent,
+                    child: Column(children: [
+                      ReorderableDelayedDragStartListener(
+                        index: i,
+                        child: ListTile(
+                          onTap: g.work == null ? null : () => setState(() => _toggled.contains(g.key) ? _toggled.remove(g.key) : _toggled.add(g.key)),
+                          leading: SizedBox(width: 28, child: Text('${i + 1}', textAlign: TextAlign.end, style: const TextStyle(color: muted))),
+                          title: Text(g.work ?? g.jobs.first.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                          subtitle: Text(
+                            [
+                              if (g.work != null) g.range,
+                              if (g.jobs.length > 1) '${g.jobs.length} capítulos',
+                              ...{for (final j in g.jobs) j.downloadOnly ? 'baixar' : 'traduzir'},
+                              if (g.jobs.any((j) => j.options?['visionDevice'] == 'cpu')) 'visão na CPU',
+                            ].join(' · '),
+                            style: const TextStyle(color: muted, fontSize: 12),
                           ),
-                          IconButton(tooltip: 'Tirar da fila', icon: const Icon(Icons.close), onPressed: () => _do(() => widget.api.cancelJob(j.id))),
-                          ReorderableDragStartListener(index: i, child: const Icon(Icons.drag_handle, color: muted)),
-                        ]),
+                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                            IconButton(
+                              tooltip: 'Para o começo da fila',
+                              icon: const Icon(Icons.vertical_align_top),
+                              onPressed: i == 0 ? null : () => _save(jobs, [g, ...groups.where((o) => o != g)]),
+                            ),
+                            IconButton(
+                              tooltip: g.jobs.length > 1 ? 'Tirar a obra da fila' : 'Tirar da fila',
+                              icon: const Icon(Icons.close),
+                              onPressed: () => _removeGroup(g),
+                            ),
+                            if (g.work != null) Icon(open ? Icons.expand_less : Icons.expand_more, color: muted),
+                            ReorderableDragStartListener(index: i, child: const Icon(Icons.drag_handle, color: muted)),
+                          ]),
+                        ),
                       ),
-                    ),
+                      if (open)
+                        ReorderableListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          buildDefaultDragHandles: false,
+                          itemCount: g.jobs.length,
+                          onReorderItem: (from, to) {
+                            final chapters = [...g.jobs];
+                            chapters.insert(to, chapters.removeAt(from));
+                            _save(jobs, [for (final o in groups) o == g ? o.withJobs(chapters) : o]);
+                          },
+                          itemBuilder: (context, k) {
+                            final j = g.jobs[k];
+                            return Material(
+                              key: ValueKey(j.id),
+                              color: background,
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: const EdgeInsets.only(left: 60, right: 16),
+                                title: Text(j.chapter != null ? 'Cap. ${chapterLabel(j.chapter!)}' : j.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  IconButton(
+                                    tooltip: 'Primeiro da obra',
+                                    icon: const Icon(Icons.vertical_align_top, size: 20),
+                                    onPressed: k == 0 ? null : () => _save(jobs, [for (final o in groups) o == g ? o.withJobs([j, ...g.jobs.where((x) => x != j)]) : o]),
+                                  ),
+                                  IconButton(tooltip: 'Tirar da fila', icon: const Icon(Icons.close, size: 20), onPressed: () => _do(() => widget.api.cancelJob(j.id))),
+                                  ReorderableDragStartListener(index: k, child: const Icon(Icons.drag_handle, color: muted, size: 20)),
+                                ]),
+                              ),
+                            );
+                          },
+                        ),
+                    ]),
                   );
                 },
               ),
@@ -174,6 +255,46 @@ class _QueueScreenState extends State<QueueScreen> {
             ]),
     );
   }
+}
+
+/// A work's chapters waiting (`work` null: a link or PDF sent on its own), as in the PC's queue window.
+class _Group {
+  _Group(this.key, this.work, this.jobs);
+
+  final String key;
+  final String? work;
+  final List<RemoteJob> jobs;
+
+  _Group withJobs(List<RemoteJob> jobs) => _Group(key, work, jobs);
+
+  /// "Cap. 31–40", or "Cap. 36" for one.
+  String get range {
+    final numbers = [for (final j in jobs) ?j.chapter];
+    if (numbers.isEmpty) return '';
+    final low = numbers.reduce((a, b) => a < b ? a : b);
+    final high = numbers.reduce((a, b) => a > b ? a : b);
+    return low == high ? 'Cap. ${chapterLabel(low)}' : 'Cap. ${chapterLabel(low)}–${chapterLabel(high)}';
+  }
+}
+
+/// The queue by work, each where its first chapter is: moving a work moves all its chapters, and saving
+/// that order puts them together.
+List<_Group> _byWork(List<RemoteJob> jobs) {
+  final groups = <_Group>[];
+  final byWork = <String, _Group>{};
+  for (final j in jobs) {
+    if (j.work == null) {
+      groups.add(_Group(j.id, null, [j]));
+      continue;
+    }
+    final key = 'work:${j.work!.toLowerCase()}';
+    byWork.putIfAbsent(key, () {
+      final g = _Group(key, j.work, []);
+      groups.add(g);
+      return g;
+    }).jobs.add(j);
+  }
+  return groups;
 }
 
 /// The chapter on now, as a download manager shows one: what it is doing, how far, and a bar.

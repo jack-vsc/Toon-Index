@@ -235,6 +235,10 @@ void main() {
     tester.view.physicalSize = phone * ratio;
     tester.view.devicePixelRatio = ratio;
     await shoot(tester, QueueScreen(api: FakeQueueApi()), 'm6-queue');
+    // A work opened to its chapters.
+    await tester.tap(find.text('Solo Spell Caster').last);
+    await settle(tester);
+    await capture(tester, 'm6b-queue-open');
     await tester.tap(find.text('Mudar'));
     await settle(tester);
     await tester.tap(find.text('Placa de vídeo (GPU)').first);
