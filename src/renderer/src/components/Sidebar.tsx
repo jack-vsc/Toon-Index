@@ -10,12 +10,13 @@ interface Props {
   onBatch: () => void
   onPhone: () => void
   onAi: () => void
+  onStorage: () => void
   onSettings: () => void
   onSearch: () => void
 }
 
 /** The app's way around, down the left side as on MangaDex. */
-export function Sidebar({ page, fresh, onPage, onBatch, onPhone, onAi, onSettings, onSearch }: Props) {
+export function Sidebar({ page, fresh, onPage, onBatch, onPhone, onAi, onStorage, onSettings, onSearch }: Props) {
   const at = page.kind === 'work' ? 'library' : page.kind
   return (
     <nav className="sidebar">
@@ -40,6 +41,7 @@ export function Sidebar({ page, fresh, onPage, onBatch, onPhone, onAi, onSetting
       <div className="sidebar-group mono">App</div>
       <Item icon={icons.phone} label="Celular" onClick={onPhone} />
       <Item icon={icons.gpu} label="IAs e GPU" onClick={onAi} />
+      <Item icon={icons.storage} label="Armazenamento" onClick={onStorage} />
       <Item icon={icons.settings} label="Configurações" onClick={onSettings} />
     </nav>
   )
@@ -62,6 +64,13 @@ const svg = (path: ReactNode): ReactNode => (
 )
 
 const icons = {
+  storage: svg(
+    <>
+      <ellipse cx="12" cy="6" rx="8" ry="3" />
+      <path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6" />
+      <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+    </>
+  ),
   search: svg(
     <>
       <circle cx="11" cy="11" r="7" />

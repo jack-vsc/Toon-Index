@@ -166,6 +166,13 @@ class _OptionsSheetState extends State<_OptionsSheet> {
             value: _o['translateSfx'] == true,
             onChanged: (v) => _set('translateSfx', v),
           ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Reaproveitar páginas já traduzidas antes'),
+            subtitle: const Text('Desligue para traduzir de novo do zero (com outro modelo, por exemplo)', style: TextStyle(fontSize: 12)),
+            value: _o['reuseLayers'] != false,
+            onChanged: (v) => _set('reuseLayers', v),
+          ),
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Salvar como padrão do PC'),

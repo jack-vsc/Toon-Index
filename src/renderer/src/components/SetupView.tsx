@@ -51,6 +51,7 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
     concurrency: settings.concurrency,
     speed: settings.speed,
     translateSfx: settings.translateSfx,
+    reuseLayers: settings.reuseLayers,
     skipStart: settings.skipStart,
     skipEnd: settings.skipEnd,
     gpuSharing: settings.gpuSharing,
@@ -175,6 +176,10 @@ export function SetupView({ fileName, numPages, cover, settings, onStart, onCanc
         <label className="checkbox">
           <input type="checkbox" checked={draft.translateSfx} onChange={(e) => patch({ translateSfx: e.target.checked })} />
           Traduzir onomatopeias
+        </label>
+        <label className="checkbox" title="Desligue para traduzir de novo do zero (com outro modelo, por exemplo)">
+          <input type="checkbox" checked={draft.reuseLayers} onChange={(e) => patch({ reuseLayers: e.target.checked })} />
+          Reaproveitar páginas já traduzidas antes
         </label>
 
         <section>

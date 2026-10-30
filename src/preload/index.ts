@@ -65,6 +65,15 @@ const api: MangaApi = {
     stop: (target) => ipcRenderer.invoke('ai:stop', target)
   },
   cancelTranslations: (requestIds) => ipcRenderer.invoke('translate:cancel', requestIds),
+  storage: {
+    usage: () => ipcRenderer.invoke('storage:usage'),
+    clear: (area) => ipcRenderer.invoke('storage:clear', area),
+    deleteWork: (workId) => ipcRenderer.invoke('storage:delete-work', workId)
+  },
+  layers: {
+    get: (key) => ipcRenderer.invoke('layers:get', key),
+    save: (key, layer) => ipcRenderer.invoke('layers:save', key, layer)
+  },
   savePdf: (bytes, suggestedName) => ipcRenderer.invoke('pdf:save', bytes, suggestedName),
   showFile: (path) => ipcRenderer.invoke('shell:show-file', path),
   library: {

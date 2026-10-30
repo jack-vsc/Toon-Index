@@ -11,6 +11,7 @@ import 'batch_screen.dart';
 import 'reader_screen.dart';
 import 'queue_screen.dart';
 import 'search_screen.dart';
+import 'settings_screen.dart';
 import 'theme.dart';
 import 'translate_screen.dart';
 import 'work_screen.dart';
@@ -136,55 +137,48 @@ class _LibraryScreenState extends State<LibraryScreen> {
         title: Text(const ['Manga Index', 'Novidades', 'Biblioteca'][_tab], style: const TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(tooltip: 'Buscar obra', icon: const Icon(Icons.search), onPressed: _search),
-          if (_library?.ntfyTopic != null)
-            IconButton(
-              tooltip: 'Receber avisos de capítulo novo (app ntfy)',
-              icon: const Icon(Icons.notifications_active_outlined),
-              onPressed: () => _subscribe(_library!.ntfyTopic!),
-            ),
-          IconButton(
-            tooltip: 'Ler nos sites',
-            icon: const Icon(Icons.public),
-            onPressed: () => _browse(null),
-          ),
           PopupMenuButton<String>(
             onSelected: (action) => switch (action) {
-              'batch' => _batch(),
               'queue' => Navigator.push(context, MaterialPageRoute(builder: (_) => QueueScreen(api: widget.api))),
-              'update' => AppUpdate.check(context, widget.api),
               'downloads' => Navigator.push(context, MaterialPageRoute(builder: (_) => DownloadsScreen(api: widget.api))),
-              'data' => Navigator.push(context, MaterialPageRoute(builder: (_) => DataScreen(api: widget.api))).then((_) => _refresh()),
-              'connect' => widget.onConnect(),
-              _ => _unpair(),
+              _ => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsScreen(
+                      api: widget.api,
+                      onConnect: widget.onConnect,
+                      onUnpair: _unpair,
+                      ntfyTopic: _library?.ntfyTopic,
+                      onSubscribe: _subscribe,
+                    ),
+                  ),
+                ).then((_) => _refresh()),
             },
             itemBuilder: (_) => [
-              if (widget.api.paired) const PopupMenuItem(value: 'batch', child: Text('Vários capítulos')),
               if (widget.api.paired) const PopupMenuItem(value: 'queue', child: Text('Fila do PC')),
               const PopupMenuItem(value: 'downloads', child: Text('Downloads')),
-              const PopupMenuItem(value: 'data', child: Text('Dados e backup')),
-              if (widget.api.paired) const PopupMenuItem(value: 'update', child: Text('Verificar atualização')),
-              widget.api.paired
-                  ? const PopupMenuItem(value: 'unpair', child: Text('Desparear do PC'))
-                  : const PopupMenuItem(value: 'connect', child: Text('Conectar a um PC')),
+              const PopupMenuItem(value: 'settings', child: Text('Configurações')),
             ],
           ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        // Início, Browser, Biblioteca, Novidades; Browser opens the sites' browser over the tabs instead of being one.
+        selectedIndex: const [0, 3, 2][_tab],
+        onDestinationSelected: (i) => i == 1 ? _browse(null) : setState(() => _tab = const [0, -1, 2, 1][i]),
         height: 64,
         destinations: [
           const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Início'),
-          NavigationDestination(
-            icon: Badge(isLabelVisible: fresh > 0, label: Text('$fresh'), child: const Icon(Icons.notifications_outlined)),
-            selectedIcon: Badge(isLabelVisible: fresh > 0, label: Text('$fresh'), child: const Icon(Icons.notifications)),
-            label: 'Novidades',
-          ),
+          const NavigationDestination(icon: Icon(Icons.public), label: 'Browser'),
           const NavigationDestination(
             icon: Icon(Icons.collections_bookmark_outlined),
             selectedIcon: Icon(Icons.collections_bookmark),
             label: 'Biblioteca',
+          ),
+          NavigationDestination(
+            icon: Badge(isLabelVisible: fresh > 0, label: Text('$fresh'), child: const Icon(Icons.notifications_outlined)),
+            selectedIcon: Badge(isLabelVisible: fresh > 0, label: Text('$fresh'), child: const Icon(Icons.notifications)),
+            label: 'Novidades',
           ),
         ],
       ),

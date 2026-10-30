@@ -23,6 +23,7 @@ import { Reader, type ReaderPage } from './components/Reader'
 import { SettingsDialog } from './components/SettingsDialog'
 import { SetupView, type SetupChoice } from './components/SetupView'
 import { AiMonitor } from './components/AiMonitor'
+import { StorageDialog } from './components/StorageDialog'
 import { PhoneDialog } from './components/PhoneDialog'
 import { BatchDialog } from './components/BatchDialog'
 import { QueueDialog } from './components/QueueDialog'
@@ -73,6 +74,7 @@ export default function App() {
   const [reading, setReading] = useState<ReadingRecord[]>([])
   const [updates, setUpdates] = useState<UpdatesStatus | null>(null)
   const [aiMonitorOpen, setAiMonitorOpen] = useState(false)
+  const [storageOpen, setStorageOpen] = useState(false)
   const [phoneOpen, setPhoneOpen] = useState(false)
   const [remoteJob, setRemoteJob] = useState<RemoteJob | null>(null)
   const [queue, setQueue] = useState<RemoteQueue | null>(null)
@@ -316,6 +318,8 @@ export default function App() {
     if (!current || !run) return
     setRunning(true)
     setStopReason(null)
+    // Pages are kept per language and sound-effect choice: another one draws a different translation.
+    current.layers = { tag: `${run.targetLanguage}|sfx:${run.translateSfx}`, reuse: run.reuseLayers }
     await current.run(concurrency, await runPhased(run))
     setRunning(false)
     setStopping(false)
@@ -585,6 +589,7 @@ export default function App() {
           onBatch={() => setBatchOpen(true)}
           onPhone={() => setPhoneOpen(true)}
           onAi={() => setAiMonitorOpen(true)}
+          onStorage={() => setStorageOpen(true)}
           onSettings={() => setSettingsOpen(true)}
           onSearch={() => setSearchOpen(true)}
         />
@@ -899,6 +904,7 @@ export default function App() {
         <SettingsDialog initial={settings} onClose={() => setSettingsOpen(false)} onSaved={setSettings} />
       )}
       {aiMonitorOpen && <AiMonitor onClose={() => setAiMonitorOpen(false)} />}
+      {storageOpen && <StorageDialog onClose={() => setStorageOpen(false)} />}
       {batchOpen && (
         <BatchDialog works={works} reading={reading} initialQuery={batchQuery} onClose={() => (setBatchOpen(false), setBatchQuery(undefined))} />
       )}

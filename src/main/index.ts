@@ -60,6 +60,9 @@ import {
 } from './remoteJobs'
 import { checkNow, onUpdatesChanged, setNtfy, setWorkSources, startUpdates, stopUpdates, updatesStatus } from './updates'
 import { READING_PORT, restartReadingServer, startReadingServer, stopReadingServer } from './readingServer'
+import { readLayer, saveLayer } from './layers'
+import { clearArea, deleteWorkChapters, storageUsage } from './storage'
+import type { StorageArea } from '../shared/storage'
 import { getPublicSettings, onSettingsChangedElsewhere, saveSettings } from './settings'
 import { cancelTranslations, listModels, testApi, translate } from './translate'
 import { releaseVisionWhenIdle, detect as visionDetect, inpaint as visionInpaint, stopVision } from './vision'
@@ -129,6 +132,11 @@ function registerIpc(): void {
   ipcMain.handle('ai:gpu', () => gpuTotals())
   ipcMain.handle('ai:stop', (_e, target: AiStopTarget) => stopAi(target))
   ipcMain.handle('translate:cancel', (_e, requestIds?: string[]) => cancelTranslations(requestIds))
+  ipcMain.handle('layers:get', (_e, key: string) => readLayer(key))
+  ipcMain.handle('layers:save', (_e, key: string, layer: string) => saveLayer(key, layer))
+  ipcMain.handle('storage:usage', () => storageUsage())
+  ipcMain.handle('storage:clear', (_e, area: StorageArea) => clearArea(area))
+  ipcMain.handle('storage:delete-work', (_e, workId: string) => deleteWorkChapters(workId))
 
   ipcMain.handle('pdf:save', async (e, bytes: Uint8Array, suggestedName: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -194,8 +202,8 @@ function registerIpc(): void {
   ipcMain.handle('reading:list', () => listReading())
   ipcMain.handle('reading:finished', (_e, entryId: string) => finishedInApp(entryId))
   ipcMain.handle('reading:progress', (_e, entryId: string, progress: number) => readInApp(entryId, progress))
-  ipcMain.handle('reading:mark', (_e, workId: string, chapter: number) => markRead(workId, chapter))
-  ipcMain.handle('reading:forget', (_e, workId: string, chapter: number | null) => forgetReading(workId, chapter))
+  ipcMain.handle('reading:mark', (_e, workId: string, chapters: number | number[]) => markRead(workId, chapters))
+  ipcMain.handle('reading:forget', (_e, workId: string, chapters: number | number[] | null) => forgetReading(workId, chapters))
   ipcMain.handle('reading:scan-history', () => scanHistory())
   ipcMain.handle('reading:import-history', (_e, works: HistoryWork[]) => importHistory(works))
   // The extension is loaded unpacked from this folder (chrome://extensions → "Carregar sem compactação").

@@ -120,16 +120,25 @@ export function mergeRecords(incoming: ReadingRecord[]): void {
   for (const workId of new Set(incoming.map((r) => r.workId))) startedReading(workId)
 }
 
-/** "Read up to chapter N" set by hand (read somewhere the app could not see, like the phone). */
-export function markRead(workId: string, chapter: number): void {
+/** Chapters marked read by hand (read somewhere the app could not see, like the phone): one, or a run of them. */
+export function markRead(workId: string, chapters: number | number[]): void {
+  const at = Date.now()
+  const list = Array.isArray(chapters) ? chapters : [chapters]
   saveReading(
-    upsert(listReading(), { workId, chapter, status: 'read', progress: 1, url: '', title: '', source: 'manual', updatedAt: Date.now() })
+    list.reduce(
+      (records, chapter) => upsert(records, { workId, chapter, status: 'read', progress: 1, url: '', title: '', source: 'manual', updatedAt: at }),
+      listReading()
+    )
   )
 }
 
-/** Forgets one chapter (marked by mistake), or every chapter of the work when `chapter` is null. */
-export function forgetReading(workId: string, chapter: number | null): void {
-  saveReading(listReading().filter((r) => r.workId !== workId || (chapter !== null && r.chapter !== chapter)))
+/**
+ * Chapters marked unread: their reading forgotten (one, a run of them, or every chapter of the work
+ * when `chapters` is null).
+ */
+export function forgetReading(workId: string, chapters: number | number[] | null): void {
+  const list = chapters === null ? null : new Set(Array.isArray(chapters) ? chapters : [chapters])
+  saveReading(listReading().filter((r) => r.workId !== workId || (list !== null && !list.has(r.chapter))))
 }
 
 /** The chapters of `fromId` go to `intoId` when two works are merged. */

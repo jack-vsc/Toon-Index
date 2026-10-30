@@ -22,6 +22,7 @@ import type {
 import type { DevicesStatus, PairingCode } from '../shared/devices'
 import type { HistoryWork, ReadingRecord } from '../shared/reading'
 import type { RemoteJob, RemoteQueue } from '../shared/remoteJobs'
+import type { StorageArea, StorageUsage } from '../shared/storage'
 import type { ChapterLink, UpdatesStatus } from '../shared/updates'
 import type { CatalogMatch, CatalogResult, CatalogSite } from '../shared/catalog'
 import type { Shelf, Work } from '../shared/works'
@@ -85,6 +86,20 @@ export interface MangaApi {
   }
   /** Aborts running requests (all of them when no ids are given). */
   cancelTranslations(requestIds?: string[]): Promise<void>
+  /** Translated pages kept as only what changed on them, to put a page translated before back without the AI. */
+  /** How much of the disk the app takes, and clearing it. */
+  storage: {
+    usage(): Promise<StorageUsage>
+    /** Clears what is made again when needed. */
+    clear(area: StorageArea): Promise<StorageUsage>
+    /** Deletes every chapter of a work on this PC (readings and translation layers stay). */
+    deleteWork(workId: string): Promise<StorageUsage>
+  }
+  layers: {
+    /** The layer saved for this page key (JSON), or null. */
+    get(key: string): Promise<string | null>
+    save(key: string, layer: string): Promise<void>
+  }
   savePdf(bytes: Uint8Array, suggestedName: string): Promise<string | null>
   showFile(path: string): Promise<void>
   library: {
@@ -172,10 +187,10 @@ export interface MangaApi {
     finished(entryId: string): Promise<void>
     /** How far into a library chapter the reader is (0 to 1). */
     progress(entryId: string, progress: number): Promise<void>
-    /** Marks a chapter read by hand (read on the phone, say). */
-    mark(workId: string, chapter: number): Promise<void>
-    /** Forgets one chapter, or the whole work's reading when `chapter` is null. */
-    forget(workId: string, chapter: number | null): Promise<void>
+    /** Marks chapters read by hand (read on the phone, say): one, or a run of them. */
+    mark(workId: string, chapters: number | number[]): Promise<void>
+    /** Marks chapters unread (forgets their reading), or the whole work's reading when null. */
+    forget(workId: string, chapters: number | number[] | null): Promise<void>
     scanHistory(): Promise<{ works: HistoryWork[]; problems: string[] }>
     /** Returns how many chapters were imported. */
     importHistory(works: HistoryWork[]): Promise<number>

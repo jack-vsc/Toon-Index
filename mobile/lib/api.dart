@@ -131,20 +131,23 @@ class Api {
     return LocalData.library();
   }
 
-  /// "Read up to chapter N", set by hand: on the phone at once, on the PC now or once it answers.
-  Future<void> markRead(String workId, double chapter) async {
+  /// Chapters marked read by hand (one, or a run of them): on the phone at once, on the PC now or once it answers.
+  Future<void> markRead(String workId, List<double> chapters) async {
+    if (chapters.isEmpty) return;
     final at = DateTime.now().millisecondsSinceEpoch;
-    await LocalData.applyMark(workId, chapter, at);
-    await _queueMark({'kind': 'mark', 'workId': workId, 'name': await LocalData.nameOf(workId), 'chapter': chapter, 'at': at});
+    await LocalData.applyMark(workId, chapters, at);
+    await _queueMark({'kind': 'mark', 'workId': workId, 'name': await LocalData.nameOf(workId), 'chapter': chapters.first, 'chapters': chapters, 'at': at});
   }
 
-  Future<void> forget(String workId, double? chapter) async {
-    await LocalData.applyForget(workId, chapter);
+  /// Chapters marked unread, or the whole work's reading forgotten when [chapters] is null.
+  Future<void> forget(String workId, List<double>? chapters) async {
+    await LocalData.applyForget(workId, chapters);
     await _queueMark({
       'kind': 'forget',
       'workId': workId,
       'name': await LocalData.nameOf(workId),
-      'chapter': chapter,
+      'chapter': chapters?.first,
+      'chapters': ?chapters,
       'at': DateTime.now().millisecondsSinceEpoch,
     });
   }
@@ -412,6 +415,20 @@ class Api {
       return false;
     }
   }
+
+  /// How much of its disk the PC app takes (each work's chapters, the translation layers, caches).
+  Future<Map<String, dynamic>> pcStorage() async {
+    final response = await _send((url) => http.get(url('/api/storage'), headers: authHeaders), timeout: const Duration(seconds: 30));
+    return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// Clears on the PC what is made again when needed ('layers', 'aiCache' or 'appCache').
+  Future<Map<String, dynamic>> clearPcStorage(String area) async =>
+      jsonDecode(utf8.decode((await _postFor('/api/storage/clear', {'area': area}, const Duration(seconds: 60))).bodyBytes)) as Map<String, dynamic>;
+
+  /// Deletes every chapter of a work on the PC (its readings and translation layers stay).
+  Future<Map<String, dynamic>> deletePcWork(String workId) async =>
+      jsonDecode(utf8.decode((await _postFor('/api/storage/work', {'workId': workId}, const Duration(seconds: 60))).bodyBytes)) as Map<String, dynamic>;
 
   Future<void> _post(String path, Object body) => _postFor(path, body, _timeout);
 

@@ -9,6 +9,7 @@ import {
 } from '../../../shared/types'
 import { detectText, drawKey, drawMarks, type TextRegion } from './detect'
 import { buildPdf, type OutputPage } from './exportPdf'
+import { applyLayer, extractLayer, layerKey, type PageLayer } from './layers'
 import { ensureFonts } from './fonts'
 import { drawOverlay, type OverlayInfo } from './overlay'
 import {
@@ -74,6 +75,11 @@ export class TranslationJob {
   readonly blocks = new Map<number, TextBlock[]>()
   /** Evaluation runs inspect each page before and after the translation is drawn, with the detected text. */
   onPageRendered?: (pageNumber: number, before: HTMLCanvasElement, after: HTMLCanvasElement, regions: Box[], drawn: OverlayInfo[]) => Promise<void>
+  /**
+   * Finished pages kept as what changed on them (lib/layers), under the run's language and sound-effect
+   * choice; `reuse` puts a page translated before back from it instead of asking the AI again.
+   */
+  layers: { tag: string; reuse: boolean } | null = null
   private outputs = new Map<number, OutputPage>()
   private cancelled = false
   private activeRequests = new Set<string>()
@@ -147,6 +153,7 @@ export class TranslationJob {
     for (const number of pending) {
       if (this.cancelled) break
       await this.guard(number, async () => {
+        if (await this.fromLayer(number)) return
         const { started, widthPt, heightPt, tall, scene } = await this.detect(number, 'Detectando texto')
         detected.set(number, { started, widthPt, heightPt, tall, scene })
         this.update(number, { stage: 'Aguardando tradução' })
@@ -232,6 +239,7 @@ export class TranslationJob {
 
   private async processPage(pageNumber: number): Promise<void> {
     await this.guard(pageNumber, async () => {
+      if (await this.fromLayer(pageNumber)) return
       const page = await this.detect(pageNumber)
       const blocks = await this.translateSlices(pageNumber, page.prepared)
       await this.draw(pageNumber, page, blocks)
@@ -313,16 +321,47 @@ export class TranslationJob {
       await this.onPageRendered?.(pageNumber, before, canvas, regions, drawn)
     }
 
+    if (this.layers) await this.keepLayer(pageNumber, canvas, blocks.length)
+    await this.finishPage(pageNumber, canvas, widthPt, heightPtOut, blocks.length, page.started)
+  }
+
+  private async finishPage(pageNumber: number, canvas: HTMLCanvasElement, widthPt: number, heightPt: number, blockCount: number, started: number): Promise<void> {
     const jpeg = await canvasToBytes(canvas, 'image/jpeg', 0.9)
-    this.outputs.set(pageNumber, { jpeg, widthPt, heightPt: heightPtOut })
+    this.outputs.set(pageNumber, { jpeg, widthPt, heightPt })
     this.update(pageNumber, {
       status: 'done',
       stage: undefined,
-      blockCount: blocks.length,
-      ms: performance.now() - page.started,
+      blockCount,
+      ms: performance.now() - started,
       imageUrl: jpegUrl(jpeg),
       thumbUrl: URL.createObjectURL(await canvasToBlob(thumbnailCanvas(canvas, THUMB_LONG_SIDE), 'image/jpeg', 0.8))
     })
+  }
+
+  /** The page put back from the layer saved when it was translated before; false when there is none. */
+  private async fromLayer(pageNumber: number): Promise<boolean> {
+    if (!this.layers?.reuse) return false
+    const started = performance.now()
+    const canvas = await renderForTranslation(this.doc, pageNumber)
+    const saved = await window.api.layers.get(await layerKey(canvas, this.layers.tag)).catch(() => null)
+    if (!saved) return false
+    const layer = JSON.parse(saved) as PageLayer
+    if (!(await applyLayer(canvas, layer))) return false
+    const { widthPt, heightPt } = await pageSize(this.doc, pageNumber)
+    await this.finishPage(pageNumber, canvas, widthPt, heightPt, layer.blockCount, started)
+    return true
+  }
+
+  /** Saves what the translation changed on the page, compared with the page rendered again as it was. */
+  private async keepLayer(pageNumber: number, translated: HTMLCanvasElement, blockCount: number): Promise<void> {
+    try {
+      const original = await renderForTranslation(this.doc, pageNumber)
+      if (original.width !== translated.width || original.height !== translated.height) return
+      const layer = await extractLayer(original, translated, blockCount)
+      await window.api.layers.save(await layerKey(original, this.layers!.tag), JSON.stringify(layer))
+    } catch {
+      // Only a faster next time is lost.
+    }
   }
 
   private async renderOriginal(pageNumber: number): Promise<OutputPage> {

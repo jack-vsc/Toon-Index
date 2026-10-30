@@ -29,6 +29,7 @@ import { getPublicSettings, saveTranslateDefaults } from './settings'
 import { AUTO_LANGUAGE, isLocalProfile, LANGUAGES, profileReady, TRANSLATE_OPTION_KEYS } from '../shared/types'
 import { finishedInApp, forgetReading, libraryChangedElsewhere, listReading, markRead, readInApp, reportReading } from './reading'
 import { mergeData, resolveWork } from './dataSync'
+import { clearArea, deleteWorkChapters, storageUsage } from './storage'
 
 /** The browser extension (extension/background.js) and the phone app reach the app here. */
 export const READING_PORT = 47321
@@ -286,10 +287,12 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   }
   // Works the phone made on its own come with their name, and are found (or made) by it.
   if (req.method === 'POST' && path === '/api/reading/mark') {
-    const { workId, name, chapter } = (await readBody(req)) as { workId?: unknown; name?: unknown; chapter?: unknown }
+    const { workId, name, chapter, chapters } = (await readBody(req)) as { workId?: unknown; name?: unknown; chapter?: unknown; chapters?: unknown }
     const id = resolveWork(workId, name)
-    if (!id || typeof chapter !== 'number') return send(res, 400, { error: 'workId e chapter.' })
-    markRead(id, chapter)
+    // One chapter, or a run of them ("lidos até aqui").
+    const list = Array.isArray(chapters) && chapters.every((c) => typeof c === 'number') ? (chapters as number[]) : typeof chapter === 'number' ? [chapter] : null
+    if (!id || !list) return send(res, 400, { error: 'workId e chapter.' })
+    markRead(id, list)
     return send(res, 200, { ok: true })
   }
   // What the phone has (a backup restored there): merged into the PC's.
@@ -317,11 +320,24 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     libraryChangedElsewhere()
     return send(res, 200, { ok: true })
   }
+  // The PC's storage, seen and cleared from the phone as on its storage page.
+  if (req.method === 'GET' && path === '/api/storage') return send(res, 200, storageUsage())
+  if (req.method === 'POST' && path === '/api/storage/clear') {
+    const { area } = (await readBody(req)) as { area?: unknown }
+    if (area !== 'layers' && area !== 'aiCache' && area !== 'appCache') return send(res, 400, { error: 'area.' })
+    return send(res, 200, await clearArea(area))
+  }
+  if (req.method === 'POST' && path === '/api/storage/work') {
+    const { workId } = (await readBody(req)) as { workId?: unknown }
+    if (typeof workId !== 'string') return send(res, 400, { error: 'workId.' })
+    return send(res, 200, deleteWorkChapters(workId))
+  }
   if (req.method === 'POST' && path === '/api/reading/forget') {
-    const { workId, name, chapter } = (await readBody(req)) as { workId?: unknown; name?: unknown; chapter?: number | null }
+    const { workId, name, chapter, chapters } = (await readBody(req)) as { workId?: unknown; name?: unknown; chapter?: number | null; chapters?: unknown }
     // A work the PC does not know has nothing to forget (nor is it made for that).
     const id = typeof workId === 'string' && listWorks().some((w) => w.id === workId) ? workId : typeof name === 'string' ? findWork(listWorks(), name)?.id : undefined
-    if (id) forgetReading(id, chapter ?? null)
+    const list = Array.isArray(chapters) && chapters.every((c) => typeof c === 'number') ? (chapters as number[]) : null
+    if (id) forgetReading(id, list ?? chapter ?? null)
     return send(res, 200, { ok: true })
   }
   send(res, 404, { error: 'Não encontrado.' })

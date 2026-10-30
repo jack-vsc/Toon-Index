@@ -80,6 +80,21 @@ class Downloads {
     await partial.rename(target.path);
   }
 
+  /// Each chapter's PDF size: the ones kept to read without internet, or the ones only cached while reading.
+  static Future<Map<String, int>> sizes({required bool kept}) async {
+    final dir = await _folder(kept);
+    return {
+      for (final f in dir.listSync().whereType<File>())
+        if (f.path.endsWith('.pdf')) f.uri.pathSegments.last.replaceFirst(RegExp(r'\.pdf$'), ''): f.lengthSync(),
+    };
+  }
+
+  /// The chapters cached while reading (fetched again from the PC when opened).
+  static Future<void> clearCache() async {
+    final dir = await _folder(false);
+    if (await dir.exists()) await dir.delete(recursive: true);
+  }
+
   static Future<void> remove(String entryId) async {
     final file = await _file(entryId, kept: true);
     if (await file.exists()) await file.delete();

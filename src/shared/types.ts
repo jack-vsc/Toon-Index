@@ -53,6 +53,8 @@ export interface AppSettings {
   sourceLanguage: string
   targetLanguage: string
   translateSfx: boolean
+  /** A page translated before is put back from the layer saved then (lib/layers) instead of asking the AI again. */
+  reuseLayers: boolean
   concurrency: number
   speed: Speed
   /** Pages left untranslated at the start / end of a whole-PDF run (scanlator credit pages). */
@@ -75,6 +77,7 @@ export type TranslateOptions = Pick<
   | 'concurrency'
   | 'speed'
   | 'translateSfx'
+  | 'reuseLayers'
   | 'skipStart'
   | 'skipEnd'
   | 'gpuSharing'
@@ -89,6 +92,7 @@ export const TRANSLATE_OPTION_KEYS: (keyof TranslateOptions)[] = [
   'concurrency',
   'speed',
   'translateSfx',
+  'reuseLayers',
   'skipStart',
   'skipEnd',
   'gpuSharing',
@@ -383,6 +387,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sourceLanguage: AUTO_LANGUAGE,
   targetLanguage: 'Brazilian Portuguese',
   translateSfx: false,
+  reuseLayers: true,
   concurrency: 3,
   speed: 'fast',
   skipStart: 0,

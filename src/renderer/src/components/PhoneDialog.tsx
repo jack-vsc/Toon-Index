@@ -122,7 +122,7 @@ export function PhoneDialog({ onClose }: Props) {
             </label>
             {updates.ntfyTopic && (
               <p className="hint">
-                Instale o app <strong>ntfy</strong> (Play Store) e, no app Manga Index, toque em 🔔 na biblioteca para assinar. Ou assine
+                Instale o app <strong>ntfy</strong> (Play Store) e, no app Manga Index, toque em Configurações › Avisos de capítulo novo para assinar. Ou assine
                 à mão o tópico <code>{updates.ntfyTopic}</code> no servidor ntfy.sh. Quem souber o tópico também vê os avisos: não o
                 compartilhe.
               </p>

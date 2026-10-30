@@ -91,6 +91,7 @@ export function cleanOptions(raw: unknown): Partial<TranslateOptions> | null {
   if (typeof r.concurrency === 'number') out.concurrency = Math.min(8, Math.max(1, Math.round(r.concurrency)))
   if (r.speed === 'fast' || r.speed === 'balanced' || r.speed === 'quality') out.speed = r.speed
   if (typeof r.translateSfx === 'boolean') out.translateSfx = r.translateSfx
+  if (typeof r.reuseLayers === 'boolean') out.reuseLayers = r.reuseLayers
   if (typeof r.skipStart === 'number') out.skipStart = Math.min(50, Math.max(0, Math.round(r.skipStart)))
   if (typeof r.skipEnd === 'number') out.skipEnd = Math.min(50, Math.max(0, Math.round(r.skipEnd)))
   if (r.gpuSharing === 'auto' || r.gpuSharing === 'phased' || r.gpuSharing === 'together') out.gpuSharing = r.gpuSharing

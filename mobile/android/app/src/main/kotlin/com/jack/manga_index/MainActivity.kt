@@ -48,6 +48,8 @@ class MainActivity : FlutterActivity() {
                     if (Build.VERSION.SDK_INT >= 28) packageManager.getPackageInfo(packageName, 0).longVersionCode
                     else @Suppress("DEPRECATION") packageManager.getPackageInfo(packageName, 0).versionCode.toLong()
                 )
+                // This build's version as shown ("1.9.0"), for the about page.
+                "version" -> result.success(packageManager.getPackageInfo(packageName, 0).versionName)
                 // Opens Android's installer on the update downloaded from the PC.
                 "install" -> try {
                     val file = File(call.argument<String>("path")!!)

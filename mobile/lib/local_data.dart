@@ -92,22 +92,24 @@ class LocalData {
         });
       });
 
-  static Future<void> applyMark(String workId, double chapter, int at) => _change((data) {
-        _upsert(data, {
-          'workId': workId,
-          'chapter': chapter,
-          'status': 'read',
-          'progress': 1.0,
-          'url': '',
-          'title': '',
-          'source': 'manual',
-          'updatedAt': at,
-        });
+  static Future<void> applyMark(String workId, List<double> chapters, int at) => _change((data) {
+        for (final chapter in chapters) {
+          _upsert(data, {
+            'workId': workId,
+            'chapter': chapter,
+            'status': 'read',
+            'progress': 1.0,
+            'url': '',
+            'title': '',
+            'source': 'manual',
+            'updatedAt': at,
+          });
+        }
       });
 
-  /// One chapter marked by mistake, or every chapter of the work when [chapter] is null.
-  static Future<void> applyForget(String workId, double? chapter) => _change((data) {
-        (data['reading'] as List).removeWhere((r) => r['workId'] == workId && (chapter == null || r['chapter'] == chapter));
+  /// Chapters marked unread (their reading forgotten), or every chapter of the work when [chapters] is null.
+  static Future<void> applyForget(String workId, List<double>? chapters) => _change((data) {
+        (data['reading'] as List).removeWhere((r) => r['workId'] == workId && (chapters == null || chapters.contains((r['chapter'] as num).toDouble())));
       });
 
   static Future<void> applyShelf(String workId, String? shelf, bool favorite) => _change((data) {

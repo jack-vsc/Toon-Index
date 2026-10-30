@@ -11,6 +11,9 @@ import 'reader_screen.dart';
 import 'site_download.dart';
 import 'theme.dart';
 
+/// Chapters listed from 1 up to the newest; past this (a number misread from a title) only the known ones.
+const _maxListed = 3000;
+
 /// One work: its other names, every chapter read (and where), the ones translated on the PC, and
 /// marking chapters read somewhere the apps could not see.
 class WorkScreen extends StatefulWidget {
@@ -149,12 +152,35 @@ class _WorkScreenState extends State<WorkScreen> {
   Future<void> _markRead() async {
     final chapter = double.tryParse(_chapter.text.trim().replaceAll(',', '.'));
     if (chapter == null) return;
+    await _readUpTo(chapter);
+    if (mounted) Navigator.pop(context);
+  }
+
+  /// Read or unread by hand. Shown at once; the PC gets it now or once it answers.
+  final Map<double, bool> _readNow = {};
+
+  bool _isRead(double chapter, ReadingRecord? record) => _readNow[chapter] ?? record?.read == true;
+
+  Future<void> _setRead(List<double> chapters, bool read) async {
+    if (chapters.isEmpty) return;
+    setState(() => _readNow.addAll({for (final c in chapters) c: read}));
     try {
-      await widget.api.markRead(widget.view.work.id, chapter);
-      if (mounted) Navigator.pop(context);
+      read ? await widget.api.markRead(widget.view.work.id, chapters) : await widget.api.forget(widget.view.work.id, chapters);
     } on ApiException catch (e) {
-      setState(() => _message = e.message);
+      if (mounted) setState(() => _message = e.message);
     }
+  }
+
+  /// This chapter and every one before it, from 1 (the ones not marked yet).
+  Future<void> _readUpTo(double chapter) {
+    final records = {for (final r in widget.view.records) r.chapter: r};
+    final before = {
+      for (var n = 1; n <= chapter && n <= _maxListed; n++) n.toDouble(),
+      for (final r in widget.view.records) if (r.chapter <= chapter) r.chapter,
+      for (final c in widget.view.translated) if (c.chapter != null && c.chapter! <= chapter) c.chapter!,
+      chapter,
+    };
+    return _setRead([for (final c in before) if (!_isRead(c, records[c])) c]..sort(), true);
   }
 
   /// The chapter list: filtered by number, newest or oldest first.
@@ -176,6 +202,11 @@ class _WorkScreenState extends State<WorkScreen> {
     // Every chapter read or translated, the reading and the translations of each side by side (one per
     // site it was saved from, newest first).
     final rows = <double, ({ReadingRecord? record, List<LibraryChapter> versions})>{};
+    // From chapter 1 up to the newest known, even the ones neither read nor translated (a work started
+    // at chapter 50 still lists 1 to 49, to mark as read).
+    for (var n = 1; newest != null && n <= newest && n <= _maxListed; n++) {
+      rows[n.toDouble()] = (record: null, versions: []);
+    }
     for (final r in view.records) {
       rows[r.chapter] = (record: r, versions: []);
     }
@@ -334,7 +365,7 @@ class _WorkScreenState extends State<WorkScreen> {
   /// than one site, each version to read or delete.
   Widget _chapterRow(double n, ReadingRecord? record, List<LibraryChapter> versions) {
     final entry = versions.firstOrNull;
-    final read = record?.read == true;
+    final read = _isRead(n, record);
     final where = record != null
         ? [if (record.url.isNotEmpty) Uri.tryParse(record.url)?.host.replaceFirst(RegExp(r'^www\.'), '') ?? '', timeAgo(record.updatedAt)].where((s) => s.isNotEmpty).join(' · ')
         : entry != null
@@ -342,6 +373,7 @@ class _WorkScreenState extends State<WorkScreen> {
             : '';
     return InkWell(
       onTap: entry != null ? () => _read(entry) : record != null && record.url.isNotEmpty ? () => _browse(record.url) : null,
+      onLongPress: () => _readUpTo(n),
       borderRadius: BorderRadius.circular(10),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -379,6 +411,11 @@ class _WorkScreenState extends State<WorkScreen> {
             ]),
           ),
           if (entry != null) _downloadButton(entry),
+          IconButton(
+            tooltip: read ? 'Marcar como não lido' : 'Marcar como lido (segure o capítulo: lidos até ele)',
+            icon: Icon(read ? Icons.check_circle : Icons.radio_button_unchecked, color: read ? readGreen : muted),
+            onPressed: () => _setRead([n], !read),
+          ),
         ]),
       ),
     );

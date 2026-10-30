@@ -218,6 +218,7 @@ void main() {
   });
 
   testWidgets('work screen with downloads', (tester) async {
+    SharedPreferences.setMockInitialValues({});
     tester.view.physicalSize = phone * ratio;
     tester.view.devicePixelRatio = ratio;
     final root = Directory.systemTemp.createTempSync('mi-downloads');

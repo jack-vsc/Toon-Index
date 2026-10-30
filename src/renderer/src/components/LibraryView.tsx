@@ -568,7 +568,6 @@ export function WorkPage({
   const update = data.fresh.get(work.id) ?? null
   const status = readingStatus(records)
   const aliases = work.names.slice(1)
-  const rows = chapterRows(records, chapters)
   const inApp = nextInLibrary(group)
   const setShelf = async (patch: { shelf?: Shelf | null; favorite?: boolean }) => {
     await window.api.works.setShelf(work.id, patch)
@@ -578,6 +577,14 @@ export function WorkPage({
   const latest = data.latest.get(work.id)
   const { upTo, share } = progressOf(group, latest)
   const newest = newestChapter(group, latest) || null
+  const rows = chapterRows(records, chapters, newest)
+  // Read or unread by hand; "até aqui" marks every chapter before it read too.
+  const toggleRead = (row: ChapterRow) =>
+    row.record?.status === 'read' ? window.api.reading.forget(work.id, row.chapter) : window.api.reading.mark(work.id, row.chapter)
+  const readUpToHere = (chapter: number) => {
+    const unread = rows.filter((r) => r.chapter <= chapter && r.record?.status !== 'read').map((r) => r.chapter)
+    if (unread.length) void window.api.reading.mark(work.id, unread)
+  }
   const [chapterQuery, setChapterQuery] = useState('')
   const [oldestFirst, setOldestFirst] = useState(false)
   const shownRows = rows.filter((r) => !chapterQuery.trim() || String(r.chapter).startsWith(chapterQuery.trim().replace(',', '.')))
@@ -764,6 +771,16 @@ export function WorkPage({
                   )}
                 </span>
                 <span className="chapter-actions">
+                  <button
+                    className={`secondary small read-toggle ${record?.status === 'read' ? 'on' : ''}`}
+                    title={record?.status === 'read' ? 'Marcar como não lido' : 'Marcar como lido'}
+                    onClick={() => void toggleRead({ chapter, record, entry, versions })}
+                  >
+                    ✓
+                  </button>
+                  <button className="secondary small upto" title="Marcar este e todos os anteriores como lidos" onClick={() => readUpToHere(chapter)}>
+                    Lidos até aqui
+                  </button>
                   {entry && (
                     <button className="small" onClick={() => onOpen(entry)}>
                       Ler
@@ -873,6 +890,9 @@ export function WorkPage({
   )
 }
 
+/** Chapters listed from 1 up to the newest; past this (a number misread from a title) only the known ones. */
+const MAX_LISTED = 3000
+
 interface ChapterRow {
   chapter: number
   record?: ReadingRecord
@@ -882,9 +902,14 @@ interface ChapterRow {
   versions: LibraryEntry[]
 }
 
-/** Every chapter read or translated, newest first, the reading and the translations of each side by side. */
-function chapterRows(records: ReadingRecord[], chapters: LibraryEntry[]): ChapterRow[] {
+/**
+ * Every chapter of the work up to the newest known, newest first: the reading and the translations of
+ * each side by side, and the ones neither read nor translated (a work started at chapter 50 still lists
+ * 1 to 49, to mark as read).
+ */
+function chapterRows(records: ReadingRecord[], chapters: LibraryEntry[], newest: number | null): ChapterRow[] {
   const rows = new Map<number, ChapterRow>()
+  for (let n = 1; newest !== null && n <= Math.min(newest, MAX_LISTED); n++) rows.set(n, { chapter: n, versions: [] })
   for (const r of records) rows.set(r.chapter, { chapter: r.chapter, record: r, versions: [] })
   for (const e of [...chapters].sort((a, b) => b.createdAt - a.createdAt)) {
     if (e.chapter === null) continue

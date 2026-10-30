@@ -354,6 +354,10 @@ function QueueOptions({ waiting, settings }: { waiting: RemoteJob[]; settings: P
             <input type="checkbox" checked={draft.translateSfx} onChange={(e) => patch({ translateSfx: e.target.checked })} />
             Traduzir onomatopeias
           </label>
+          <label className="checkbox" title="Desligue para traduzir de novo do zero (com outro modelo, por exemplo)">
+            <input type="checkbox" checked={draft.reuseLayers} onChange={(e) => patch({ reuseLayers: e.target.checked })} />
+            Reaproveitar páginas já traduzidas antes
+          </label>
           <div className="modal-actions">
             <button className="secondary small" onClick={() => (window.api.remote.setOptions(null), setOpen(false))}>
               Usar as do PC
