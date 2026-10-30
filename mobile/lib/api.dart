@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,7 +17,8 @@ class Connection {
   /// Not paired with any PC: the app works on its own data.
   Connection.none() : this(hosts: const [], port: 0, token: '');
 
-  final List<String> hosts;
+  /// The one found on the network when the PC's address changed comes first.
+  List<String> hosts;
   final int port;
   final String token;
   String? lastHost;
@@ -79,9 +82,10 @@ class Api {
 
   Map<String, String> get authHeaders => {'Authorization': 'Bearer ${connection.token}'};
 
-  /// Sends the request to each address in turn until one answers.
+  /// Sends the request to each address in turn until one answers; when none does, looks for the PC
+  /// on the phone's Wi-Fi (the router may have given it another address) and asks it there.
   Future<http.Response> _send(Future<http.Response> Function(Uri Function(String path) url) request, {Duration timeout = _timeout}) async {
-    for (final host in connection.ordered) {
+    Future<http.Response?> at(String host) async {
       try {
         final response = await request((path) => Uri.parse('http://$host:${connection.port}$path')).timeout(timeout);
         if (connection.lastHost != host) {
@@ -94,7 +98,21 @@ class Api {
       } on ApiException {
         rethrow;
       } catch (_) {
-        // Not reachable at this address; try the next one.
+        // Not reachable at this address.
+        return null;
+      }
+    }
+
+    for (final host in connection.ordered) {
+      final response = await at(host);
+      if (response != null) return response;
+    }
+    if (paired) {
+      final found = await _findPc();
+      if (found != null) {
+        connection.hosts = [found, ...connection.hosts.where((h) => h != found)];
+        final response = await at(found);
+        if (response != null) return response;
       }
     }
     throw ApiException(paired
@@ -335,6 +353,63 @@ class Api {
     } on ApiException {
       await Store.addPending(report, Store.pendingReports, 'url');
       return local == null ? null : {...local, 'offline': true};
+    }
+  }
+
+  /// One search at a time, shared by the requests waiting on it, and not again right after one found nothing.
+  static Future<String?>? _finding;
+  static DateTime? _lastSearch;
+
+  Future<String?> _findPc() {
+    final last = _lastSearch;
+    if (_finding == null && last != null && DateTime.now().difference(last) < const Duration(seconds: 30)) return Future.value(null);
+    return _finding ??= _searchNetwork().whenComplete(() => (_finding = null, _lastSearch = DateTime.now()));
+  }
+
+  /// The PC on the phone's home network: every address of it with the app's port open, asked whether
+  /// this phone is paired there (another PC with the app, or anything else on that port, is not it).
+  Future<String?> _searchNetwork() async {
+    final networks = <String>{};
+    try {
+      for (final interface in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
+        for (final a in interface.addresses) {
+          final p = a.address.split('.').map(int.parse).toList();
+          if ((p[0] == 192 && p[1] == 168) || p[0] == 10 || (p[0] == 172 && p[1] >= 16 && p[1] < 32)) networks.add('${p[0]}.${p[1]}.${p[2]}');
+        }
+      }
+    } catch (_) {
+      return null;
+    }
+    for (final network in networks) {
+      final candidates = [for (var n = 1; n < 255; n++) '$network.$n'].where((h) => !connection.hosts.contains(h)).toList();
+      // A few dozen at a time: the whole network in a few seconds.
+      for (var i = 0; i < candidates.length; i += 64) {
+        final batch = candidates.sublist(i, min(i + 64, candidates.length));
+        final open = await Future.wait(batch.map(_portOpen));
+        for (var k = 0; k < batch.length; k++) {
+          if (open[k] && await _pairedAt(batch[k])) return batch[k];
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<bool> _portOpen(String host) async {
+    try {
+      final socket = await Socket.connect(host, connection.port, timeout: const Duration(milliseconds: 600));
+      socket.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _pairedAt(String host) async {
+    try {
+      final response = await http.get(Uri.parse('http://$host:${connection.port}/api/status'), headers: authHeaders).timeout(_timeout);
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
     }
   }
 
