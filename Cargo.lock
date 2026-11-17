@@ -2337,8 +2337,6 @@ dependencies = [
  "base64 0.22.1",
  "chromiumoxide",
  "futures",
- "image",
- "parking_lot",
  "regex",
  "reqwest",
  "serde",

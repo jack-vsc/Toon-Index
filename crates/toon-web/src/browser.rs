@@ -11,7 +11,7 @@ use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
 use chromiumoxide::{Browser, Page};
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
-use tokio::sync::OnceCell;
+use tokio::sync::Mutex;
 use toon_core::paths::browser_profile_dir;
 
 const LOAD_TIMEOUT: Duration = Duration::from_secs(60);
@@ -20,7 +20,10 @@ pub const CHALLENGE_SHOW_AFTER: Duration = Duration::from_secs(6);
 pub const CHALLENGE_TIMEOUT: Duration = Duration::from_secs(120);
 const OFF_SCREEN: i64 = -32_000;
 
-static BROWSER: OnceCell<Browser> = OnceCell::const_new();
+/// O navegador conectado; refeito quando a pessoa fecha o navegador ou ele cai.
+static BROWSER: Mutex<Option<std::sync::Arc<Browser>>> = Mutex::const_new(None);
+/// Nenhum comando ao navegador espera mais que isso.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(90);
 
 fn executable() -> anyhow::Result<PathBuf> {
     let candidates = [
@@ -32,8 +35,16 @@ fn executable() -> anyhow::Result<PathBuf> {
     candidates.iter().map(PathBuf::from).find(|p| p.exists()).ok_or_else(|| anyhow!("Não achei o Edge nem o Chrome neste PC."))
 }
 
-async fn browser() -> anyhow::Result<&'static Browser> {
-    BROWSER.get_or_try_init(connect).await
+async fn browser() -> anyhow::Result<std::sync::Arc<Browser>> {
+    let mut slot = BROWSER.lock().await;
+    if let Some(b) = slot.as_ref() {
+        if tokio::time::timeout(Duration::from_secs(3), b.version()).await.is_ok_and(|r| r.is_ok()) {
+            return Ok(b.clone());
+        }
+    }
+    let b = std::sync::Arc::new(connect().await?);
+    *slot = Some(b.clone());
+    Ok(b)
 }
 
 /// O endereço de depuração que o navegador anota no perfil quando está aberto.
@@ -97,7 +108,9 @@ pub struct Tab {
 
 impl Tab {
     pub async fn new() -> anyhow::Result<Tab> {
-        let page = browser().await?.new_page("about:blank").await?;
+        let page = tokio::time::timeout(COMMAND_TIMEOUT, browser().await?.new_page("about:blank"))
+            .await
+            .map_err(|_| anyhow!("O navegador não respondeu."))??;
         Ok(Tab { page, shown: false })
     }
 
@@ -120,7 +133,9 @@ impl Tab {
     /// Roda JavaScript na página e devolve o valor (promessas são esperadas).
     pub async fn eval<T: DeserializeOwned>(&self, js: &str) -> anyhow::Result<T> {
         let params = EvaluateParams::builder().expression(js).await_promise(true).return_by_value(true).build().map_err(|e| anyhow!(e))?;
-        let result = self.page.evaluate(params).await?;
+        let result = tokio::time::timeout(COMMAND_TIMEOUT, self.page.evaluate(params))
+            .await
+            .map_err(|_| anyhow!("A página não respondeu."))??;
         Ok(result.into_value()?)
     }
 

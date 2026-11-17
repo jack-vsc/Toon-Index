@@ -18,7 +18,5 @@ tokio.workspace = true
 futures.workspace = true
 url.workspace = true
 tracing.workspace = true
-image.workspace = true
-parking_lot.workspace = true
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 base64.workspace = true
