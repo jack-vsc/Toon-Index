@@ -1,0 +1,32 @@
+/target/
+**/*.rs.bk
+
+# Dados e segredos ficam em %APPDATA%\Manga Index, nunca aqui
+.env
+.env.*
+*.env
+settings.json
+cloud.json
+Local State
+site-logins*
+*.key
+*.jks
+*.keystore
+key.properties
+google-services.json
+
+# Celular (Flutter) e Android
+mobile/build/
+mobile/.dart_tool/
+mobile/.flutter-plugins*
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/release/
+mobile/**/*.iml
+
+# Modelos e amostras pesadas
+models/
+samples/
+*.gguf
+*.onnx
+*.pt
