@@ -1,0 +1,26 @@
+[package]
+name = "toon-ai"
+description = "Tradução das páginas e dos textos pelos modelos de IA"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+toon-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+base64.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tracing.workspace = true
+url.workspace = true
+rand = "0.9"
+image.workspace = true
+sha1 = "0.10"
