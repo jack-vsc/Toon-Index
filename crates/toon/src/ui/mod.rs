@@ -43,6 +43,10 @@ pub struct App {
     covers: HashMap<String, Option<TextureHandle>>,
     reader: Option<Reader>,
     selected_entry: Option<String>,
+    refreshing: Option<Pending<Result<(), String>>>,
+    history: Option<Vec<toon_core::history::HistoryWork>>,
+    history_pick: Vec<bool>,
+    storage: Option<toon_core::storage::Usage>,
     // Busca
     query: String,
     searching: Option<Pending<Vec<SiteResult>>>,
@@ -96,6 +100,10 @@ impl App {
             covers: HashMap::new(),
             reader: None,
             selected_entry: None,
+            refreshing: None,
+            history: None,
+            history_pick: Vec::new(),
+            storage: None,
             query: String::new(),
             searching: None,
             results: Vec::new(),
@@ -445,7 +453,66 @@ impl App {
             {
                 let _ = open::that(source);
             }
+            if let Some(done) = self.refreshing.as_ref().and_then(Pending::take) {
+                self.refreshing = None;
+                self.notice = match done {
+                    Ok(()) => "Dados da obra atualizados.".into(),
+                    Err(e) => e,
+                };
+                self.covers.remove(&work.id);
+                self.reload();
+            }
+            if self.refreshing.is_some() {
+                ui.spinner();
+            } else if ui.button("Atualizar dados").clicked() {
+                let id = work.id.clone();
+                self.refreshing = Some(Pending::spawn(&self.runtime, ctx, async move {
+                    toon_web::details::refresh_work(&id)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                }));
+            }
+            let mut auto = work.auto;
+            egui::ComboBox::from_id_salt("auto")
+                .selected_text(match auto {
+                    None => "Capítulo novo: só avisar",
+                    Some(toon_core::works::Auto::Translate) => "Capítulo novo: traduzir",
+                    Some(toon_core::works::Auto::Download) => "Capítulo novo: baixar",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut auto, None, "Só avisar");
+                    ui.selectable_value(
+                        &mut auto,
+                        Some(toon_core::works::Auto::Translate),
+                        "Traduzir sozinho",
+                    );
+                    ui.selectable_value(
+                        &mut auto,
+                        Some(toon_core::works::Auto::Download),
+                        "Baixar sozinho",
+                    );
+                });
+            if auto != work.auto {
+                let _ = library::set_work_auto(&work.id, auto);
+                self.reload();
+            }
         });
+        if let Some(info) = &work.info {
+            let mut facts = Vec::new();
+            if let Some(s) = &info.status {
+                facts.push(s.clone());
+            }
+            if let Some(y) = info.year {
+                facts.push(y.to_string());
+            }
+            if let Some(t) = &info.tags {
+                facts.push(t.join(", "));
+            }
+            if !facts.is_empty() {
+                ui.label(RichText::new(facts.join(" · ")).weak());
+            }
+        }
         if let Some(synopsis) = work.info.as_ref().and_then(|i| i.synopsis.clone()) {
             ui.label(RichText::new(synopsis).weak());
         }

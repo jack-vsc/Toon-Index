@@ -550,6 +550,28 @@ impl App {
                 ui.selectable_value(&mut self.settings.speed, Speed::Quality, "Qualidade");
             });
             ui.checkbox(&mut self.settings.translate_sfx, "Traduzir onomatopeias");
+            ui.checkbox(
+                &mut self.settings.reuse_layers,
+                "Reaproveitar páginas já traduzidas (camadas)",
+            );
+            ui.horizontal(|ui| {
+                ui.label("PDFs são");
+                ui.selectable_value(
+                    &mut self.settings.content_type,
+                    settings::ContentType::Auto,
+                    "Detectar",
+                );
+                ui.selectable_value(
+                    &mut self.settings.content_type,
+                    settings::ContentType::Comic,
+                    "Quadrinhos",
+                );
+                ui.selectable_value(
+                    &mut self.settings.content_type,
+                    settings::ContentType::Novel,
+                    "Novels (texto)",
+                );
+            });
             ui.horizontal(|ui| {
                 ui.label("Pular páginas no começo");
                 ui.add(egui::DragValue::new(&mut self.settings.skip_start).range(0..=50));
@@ -572,11 +594,161 @@ impl App {
                 if ui.button("Contas dos sites (site-logins.env)").clicked() {
                     let _ = open::that(toon_web::logins::ensure_file());
                 }
+                if ui.button("Importar histórico dos navegadores").clicked() {
+                    let (works, problems) = toon_core::history::scan();
+                    self.history_pick = vec![true; works.len()];
+                    self.history = Some(works);
+                    if !problems.is_empty() {
+                        self.notice = problems.join(" ");
+                    }
+                }
+                if ui.button("Espaço em disco").clicked() {
+                    self.storage = Some(toon_core::storage::usage());
+                }
                 if ui.button("Pasta de dados").clicked() {
                     let _ = open::that(toon_core::paths::data_dir());
                 }
             });
+            self.history_panel(ui);
+            self.storage_panel(ui);
+            self.online_panel(ui);
         });
+    }
+
+    fn history_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(works) = self.history.clone() else {
+            return;
+        };
+        ui.separator();
+        ui.heading("Histórico dos navegadores");
+        ui.label("Escolha as obras: os capítulos antes do último visto contam como lidos; o último, como onde você parou.");
+        for (i, w) in works.iter().enumerate() {
+            let last = w
+                .chapters
+                .last()
+                .map(|c| jobs::number_text(c.chapter))
+                .unwrap_or_default();
+            let known = if w.work_id.is_some() {
+                "já na biblioteca"
+            } else {
+                "obra nova"
+            };
+            ui.checkbox(
+                &mut self.history_pick[i],
+                format!(
+                    "{} — {} capítulos, último {last} ({known}; {})",
+                    w.name,
+                    w.chapters.len(),
+                    w.sites.join(", ")
+                ),
+            );
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Importar as marcadas").clicked() {
+                let chosen: Vec<_> = works
+                    .iter()
+                    .zip(&self.history_pick)
+                    .filter(|(_, p)| **p)
+                    .map(|(w, _)| w.clone())
+                    .collect();
+                match toon_core::history::import(&chosen) {
+                    Ok(n) => self.notice = format!("{n} capítulos importados do histórico."),
+                    Err(e) => self.notice = e.to_string(),
+                }
+                self.history = None;
+                self.reload();
+            }
+            if ui.button("Fechar").clicked() {
+                self.history = None;
+            }
+        });
+    }
+
+    fn storage_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(usage) = self.storage.clone() else {
+            return;
+        };
+        use toon_core::storage::human;
+        ui.separator();
+        ui.heading("Espaço em disco");
+        ui.label(format!("Capítulos da biblioteca: {}", human(usage.library)));
+        ui.label(format!("Exemplos de treino: {}", human(usage.dataset)));
+        for (label, area, size) in [
+            (
+                "Páginas para refazer capítulos (camadas)",
+                "layers",
+                usage.layers,
+            ),
+            ("Respostas guardadas das IAs", "aiCache", usage.ai_cache),
+            ("Cache do navegador do app", "appCache", usage.app_cache),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(format!("{label}: {}", human(size)));
+                if ui.small_button("Limpar").clicked() {
+                    match toon_core::storage::clear(area) {
+                        Ok(u) => self.storage = Some(u),
+                        Err(e) => self.notice = e.to_string(),
+                    }
+                }
+            });
+        }
+    }
+
+    fn online_panel(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.heading("Avisos e internet");
+        let status = crate::cloud::STATUS.lock().clone();
+        let text = if !status.configured {
+            "Sincronização pela internet desligada (cloud.json sem projeto).".to_string()
+        } else if status.connected {
+            format!(
+                "Sincronizando pelo Firebase · {} celulares no espaço · push {}",
+                status.members,
+                if status.push { "ligado" } else { "desligado" }
+            )
+        } else {
+            format!(
+                "Firebase configurado, sem conexão: {}",
+                status.error.unwrap_or_default()
+            )
+        };
+        ui.label(text);
+        let topic = toon_core::updates::load().ntfy_topic;
+        let mut ntfy = topic.is_some();
+        if ui
+            .checkbox(
+                &mut ntfy,
+                "Avisar no celular pelo ntfy.sh quando não houver push do Firebase",
+            )
+            .changed()
+        {
+            match crate::notify::set_ntfy(ntfy) {
+                Ok(Some(t)) => {
+                    self.notice = format!("Assine o tópico \"{t}\" no app ntfy do celular.")
+                }
+                Ok(None) => self.notice = "Avisos pelo ntfy desligados.".into(),
+                Err(e) => self.notice = e.to_string(),
+            }
+        }
+        if let Some(t) = topic {
+            ui.label(RichText::new(format!("Tópico do ntfy: {t}")).weak());
+        }
+        if status.configured {
+            ui.horizontal(|ui| {
+                if ui.button("Colar chave da conta de serviço (push)").clicked() {
+                    if let Some(file) = rfd::FileDialog::new().add_filter("JSON", &["json"]).pick_file() {
+                        let result = std::fs::read_to_string(file).map_err(anyhow::Error::from).and_then(|t| crate::cloud::set_push_key(Some(&t)));
+                        self.notice = match result {
+                            Ok(()) => "Chave guardada: os capítulos novos chegam como notificação no celular.".into(),
+                            Err(e) => e.to_string(),
+                        };
+                    }
+                }
+                if status.push && ui.button("Esquecer a chave").clicked() {
+                    let _ = crate::cloud::set_push_key(None);
+                }
+            });
+        }
     }
 }
 
