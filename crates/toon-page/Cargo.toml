@@ -1,0 +1,26 @@
+[package]
+name = "toon-page"
+description = "Páginas: detecção do texto, apagar e escrever a tradução, PDFs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+toon-core.workspace = true
+toon-ai.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+base64.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+futures.workspace = true
+rayon = "1"
+ab_glyph = "0.2"
+lopdf = "0.36"
+unicode-segmentation = "1"
