@@ -22,8 +22,14 @@ impl App {
             }
         }
         ui.horizontal(|ui| {
-            let field = ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("Nome da obra ou link da página dela").desired_width(420.0));
-            let go = ui.add_enabled(self.searching.is_none(), egui::Button::new("Buscar")).clicked()
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut self.query)
+                    .hint_text("Nome da obra ou link da página dela")
+                    .desired_width(420.0),
+            );
+            let go = ui
+                .add_enabled(self.searching.is_none(), egui::Button::new("Buscar"))
+                .clicked()
                 || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
             if go && !self.query.trim().is_empty() {
                 let q = self.query.trim().to_string();
@@ -31,10 +37,20 @@ impl App {
                 self.chapters = None;
                 if q.starts_with("http") {
                     // Um link de obra colado vai direto para a lista de capítulos.
-                    let m = Match { site: catalog::Site::of_url(&q), title: String::new(), url: q.clone(), cover: None, alt_names: Vec::new(), latest: None, pt_names: Vec::new() };
+                    let m = Match {
+                        site: catalog::Site::of_url(&q),
+                        title: String::new(),
+                        url: q.clone(),
+                        cover: None,
+                        alt_names: Vec::new(),
+                        latest: None,
+                        pt_names: Vec::new(),
+                    };
                     self.pick(ctx, m);
                 } else {
-                    self.searching = Some(Pending::spawn(&self.runtime, ctx, async move { catalog::search(&q).await }));
+                    self.searching = Some(Pending::spawn(&self.runtime, ctx, async move {
+                        catalog::search(&q).await
+                    }));
                 }
             }
             if self.searching.is_some() || self.listing.is_some() {
@@ -43,40 +59,66 @@ impl App {
         });
         ui.label(RichText::new("MangaDex, mgeko, MangaKakalot e MangaLivre. Quando um site pedir verificação, a janela do navegador aparece para você confirmar.").weak());
         ui.separator();
-        egui::SidePanel::left("results").resizable(true).default_width(420.0).show_inside(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let mut chosen = None;
-                for r in &self.results {
-                    ui.label(RichText::new(r.site.label()).strong().color(ACCENT));
-                    if let Some(e) = &r.error {
-                        ui.colored_label(Color32::LIGHT_RED, e);
-                    }
-                    if r.matches.is_empty() && r.error.is_none() {
-                        ui.label(RichText::new("Nada encontrado.").weak());
-                    }
-                    for m in &r.matches {
-                        let latest = m.latest.map(|l| format!(" · cap. {}", jobs::number_text(l))).unwrap_or_default();
-                        if ui.selectable_label(self.picked.as_ref().is_some_and(|p| p.url == m.url), format!("{}{latest}", m.title)).clicked() {
-                            chosen = Some(m.clone());
+        egui::SidePanel::left("results")
+            .resizable(true)
+            .default_width(420.0)
+            .show_inside(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let mut chosen = None;
+                    for r in &self.results {
+                        ui.label(RichText::new(r.site.label()).strong().color(ACCENT));
+                        if let Some(e) = &r.error {
+                            ui.colored_label(Color32::LIGHT_RED, e);
                         }
+                        if r.matches.is_empty() && r.error.is_none() {
+                            ui.label(RichText::new("Nada encontrado.").weak());
+                        }
+                        for m in &r.matches {
+                            let latest = m
+                                .latest
+                                .map(|l| format!(" · cap. {}", jobs::number_text(l)))
+                                .unwrap_or_default();
+                            if ui
+                                .selectable_label(
+                                    self.picked.as_ref().is_some_and(|p| p.url == m.url),
+                                    format!("{}{latest}", m.title),
+                                )
+                                .clicked()
+                            {
+                                chosen = Some(m.clone());
+                            }
+                        }
+                        ui.add_space(6.0);
                     }
-                    ui.add_space(6.0);
-                }
-                if let Some(m) = chosen {
-                    self.pick(ctx, m);
-                }
+                    if let Some(m) = chosen {
+                        self.pick(ctx, m);
+                    }
+                });
             });
-        });
         let Some(list) = self.chapters.clone() else {
             ui.centered_and_justified(|ui| ui.label("Escolha um resultado para ver os capítulos."));
             return;
         };
-        let title = self.picked.as_ref().map(|m| m.title.clone()).filter(|t| !t.is_empty()).or(list.title.clone()).unwrap_or_default();
+        let title = self
+            .picked
+            .as_ref()
+            .map(|m| m.title.clone())
+            .filter(|t| !t.is_empty())
+            .or(list.title.clone())
+            .unwrap_or_default();
         ui.heading(&title);
         ui.label(format!("{} capítulos", list.chapters.len()));
-        let portuguese = list.language.as_deref().is_some_and(|l| l.to_lowercase().starts_with("pt"));
+        let portuguese = list
+            .language
+            .as_deref()
+            .is_some_and(|l| l.to_lowercase().starts_with("pt"));
         if portuguese {
-            ui.label(RichText::new("Este site já está em português: os capítulos são baixados como estão.").weak());
+            ui.label(
+                RichText::new(
+                    "Este site já está em português: os capítulos são baixados como estão.",
+                )
+                .weak(),
+            );
         }
         ui.horizontal(|ui| {
             ui.label("Do capítulo");
@@ -84,15 +126,42 @@ impl App {
             ui.label("ao");
             ui.add(egui::DragValue::new(&mut self.to).speed(1.0));
         });
-        let picked: Vec<BatchChapter> =
-            list.chapters.iter().filter(|c| c.chapter >= self.from && c.chapter <= self.to).map(|c| BatchChapter { chapter: c.chapter, url: c.url.clone() }).collect();
+        let picked: Vec<BatchChapter> = list
+            .chapters
+            .iter()
+            .filter(|c| c.chapter >= self.from && c.chapter <= self.to)
+            .map(|c| BatchChapter {
+                chapter: c.chapter,
+                url: c.url.clone(),
+            })
+            .collect();
         ui.horizontal(|ui| {
-            let site = self.picked.as_ref().map(|m| serde_json::to_value(m.site).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()).unwrap_or_default();
-            let work = if title.is_empty() { "Sem nome".to_string() } else { title.clone() };
-            if !portuguese && ui.button(format!("Traduzir {} capítulos", picked.len())).clicked() {
+            let site = self
+                .picked
+                .as_ref()
+                .map(|m| {
+                    serde_json::to_value(m.site)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+            let work = if title.is_empty() {
+                "Sem nome".to_string()
+            } else {
+                title.clone()
+            };
+            if !portuguese
+                && ui
+                    .button(format!("Traduzir {} capítulos", picked.len()))
+                    .clicked()
+            {
                 self.queue_batch(&work, &site, &picked, false);
             }
-            if ui.button(format!("Baixar {} sem traduzir", picked.len())).clicked() {
+            if ui
+                .button(format!("Baixar {} sem traduzir", picked.len()))
+                .clicked()
+            {
                 self.queue_batch(&work, &site, &picked, true);
             }
         });
@@ -113,7 +182,11 @@ impl App {
         let (site, url) = (m.site, m.url.clone());
         self.picked = Some(m);
         self.chapters = None;
-        self.listing = Some(Pending::spawn(&self.runtime, ctx, async move { catalog::chapter_list(site, &url).await.map_err(|e| e.to_string()) }));
+        self.listing = Some(Pending::spawn(&self.runtime, ctx, async move {
+            catalog::chapter_list(site, &url)
+                .await
+                .map_err(|e| e.to_string())
+        }));
     }
 
     fn queue_batch(&mut self, work: &str, site: &str, chapters: &[BatchChapter], download: bool) {
@@ -134,27 +207,44 @@ impl App {
     pub(super) fn queue_tab(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let paused = self.queue.paused;
-            if ui.button(if paused { "▶ Continuar a fila" } else { "⏸ Pausar a fila" }).clicked() {
-                if let Ok(q) = jobs::pause(!paused) {
-                    self.queue = q;
-                }
+            if ui
+                .button(if paused {
+                    "▶ Continuar a fila"
+                } else {
+                    "⏸ Pausar a fila"
+                })
+                .clicked()
+                && let Ok(q) = jobs::pause(!paused)
+            {
+                self.queue = q;
             }
-            let failed = self.queue.jobs.iter().filter(|j| j.status == Status::Failed).count();
+            let failed = self
+                .queue
+                .jobs
+                .iter()
+                .filter(|j| j.status == Status::Failed)
+                .count();
             if failed > 0 && ui.button(format!("Tentar de novo ({failed})")).clicked() {
-                let ids: Vec<String> = self.queue.jobs.iter().filter(|j| j.status == Status::Failed).map(|j| j.id.clone()).collect();
+                let ids: Vec<String> = self
+                    .queue
+                    .jobs
+                    .iter()
+                    .filter(|j| j.status == Status::Failed)
+                    .map(|j| j.id.clone())
+                    .collect();
                 if let Ok(q) = jobs::retry(Some(&ids)) {
                     self.queue = q;
                 }
             }
-            if ui.button("Ordenar por capítulo").clicked() {
-                if let Ok(q) = jobs::sort() {
-                    self.queue = q;
-                }
+            if ui.button("Ordenar por capítulo").clicked()
+                && let Ok(q) = jobs::sort()
+            {
+                self.queue = q;
             }
-            if ui.button("Limpar faixas paradas").clicked() {
-                if let Ok(q) = jobs::clear_batch() {
-                    self.queue = q;
-                }
+            if ui.button("Limpar faixas paradas").clicked()
+                && let Ok(q) = jobs::clear_batch()
+            {
+                self.queue = q;
             }
         });
         ui.separator();
@@ -181,17 +271,27 @@ impl App {
                     if j.batch.as_ref().is_some_and(|b| b.download) {
                         ui.label(RichText::new("baixar").weak());
                     }
-                    if let Some(p) = &j.progress {
-                        if p.total > 0 {
-                            ui.add(egui::ProgressBar::new(p.done as f32 / p.total as f32).desired_width(160.0).text(format!("{}/{}", p.done, p.total)));
-                        }
+                    if let Some(p) = &j.progress
+                        && p.total > 0
+                    {
+                        ui.add(
+                            egui::ProgressBar::new(p.done as f32 / p.total as f32)
+                                .desired_width(160.0)
+                                .text(format!("{}/{}", p.done, p.total)),
+                        );
                     }
                     if let Some(m) = &j.message {
                         ui.label(RichText::new(m).weak());
                     }
                     match j.status {
-                        Status::Queued | Status::Running if ui.small_button("Cancelar").clicked() => cancel = Some(j.id.clone()),
-                        Status::Failed if ui.small_button("De novo").clicked() => retry = Some(j.id.clone()),
+                        Status::Queued | Status::Running
+                            if ui.small_button("Cancelar").clicked() =>
+                        {
+                            cancel = Some(j.id.clone())
+                        }
+                        Status::Failed if ui.small_button("De novo").clicked() => {
+                            retry = Some(j.id.clone())
+                        }
                         _ => {}
                     }
                 });
@@ -206,10 +306,10 @@ impl App {
                 self.queue = q;
             }
         }
-        if let Some(id) = retry {
-            if let Ok(q) = jobs::retry(Some(&[id])) {
-                self.queue = q;
-            }
+        if let Some(id) = retry
+            && let Ok(q) = jobs::retry(Some(&[id]))
+        {
+            self.queue = q;
         }
     }
 
@@ -218,27 +318,39 @@ impl App {
     pub(super) fn pdf_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("Traduzir PDFs");
         ui.label("Os PDFs entram na fila com as configurações atuais. O nome do arquivo diz a obra e o capítulo (\"Obra Chapter 12.pdf\").");
-        if ui.button("Escolher PDFs…").clicked() {
-            if let Some(files) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_files() {
-                let mut added = 0;
-                for f in files {
-                    let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    match std::fs::read(&f).map_err(anyhow::Error::from).and_then(|b| jobs::add_pdf(&name, &b, "PC", None)) {
-                        Ok(_) => added += 1,
-                        Err(e) => self.notice = format!("{name}: {e}"),
-                    }
+        if ui.button("Escolher PDFs…").clicked()
+            && let Some(files) = rfd::FileDialog::new()
+                .add_filter("PDF", &["pdf"])
+                .pick_files()
+        {
+            let mut added = 0;
+            for f in files {
+                let name = f
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                match std::fs::read(&f)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|b| jobs::add_pdf(&name, &b, "PC", None))
+                {
+                    Ok(_) => added += 1,
+                    Err(e) => self.notice = format!("{name}: {e}"),
                 }
-                self.queue = jobs::queue();
-                if added > 0 {
-                    self.notice = format!("{added} PDFs na fila.");
-                    self.tab = Tab::Queue;
-                }
+            }
+            self.queue = jobs::queue();
+            if added > 0 {
+                self.notice = format!("{added} PDFs na fila.");
+                self.tab = Tab::Queue;
             }
         }
         ui.add_space(12.0);
         ui.heading("Um capítulo por link");
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("Link da página de leitura do capítulo").desired_width(420.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.query)
+                    .hint_text("Link da página de leitura do capítulo")
+                    .desired_width(420.0),
+            );
             if ui.button("Traduzir").clicked() {
                 match jobs::add_link(self.query.trim(), "PC", None) {
                     Ok(_) => {
@@ -256,14 +368,24 @@ impl App {
     pub(super) fn phone(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.heading("Celular");
         let mut enabled = devices::phones_enabled();
-        if ui.checkbox(&mut enabled, "Atender o celular na rede de casa (e no Tailscale)").changed() {
+        if ui
+            .checkbox(
+                &mut enabled,
+                "Atender o celular na rede de casa (e no Tailscale)",
+            )
+            .changed()
+        {
             let _ = devices::set_phones_enabled(enabled);
             self.notice = "Reinicie o app para o servidor ouvir na rede.".into();
         }
         let addresses = devices::addresses();
         ui.label(format!(
             "Endereços: {}  ·  porta {}",
-            addresses.iter().map(|a| format!("{} ({})", a.address, a.kind)).collect::<Vec<_>>().join(", "),
+            addresses
+                .iter()
+                .map(|a| format!("{} ({})", a.address, a.kind))
+                .collect::<Vec<_>>()
+                .join(", "),
             toon_server::PORT
         ));
         ui.add_space(8.0);
@@ -275,13 +397,21 @@ impl App {
                 let scale = 6;
                 let border = 4;
                 let size = (side + 2 * border) * scale;
-                let mut img = image::RgbaImage::from_pixel(size as u32, size as u32, image::Rgba([255, 255, 255, 255]));
+                let mut img = image::RgbaImage::from_pixel(
+                    size as u32,
+                    size as u32,
+                    image::Rgba([255, 255, 255, 255]),
+                );
                 for (i, c) in modules.iter().enumerate() {
                     if *c == qrcode::Color::Dark {
                         let (x, y) = ((i % side + border) * scale, (i / side + border) * scale);
                         for dy in 0..scale {
                             for dx in 0..scale {
-                                img.put_pixel((x + dx) as u32, (y + dy) as u32, image::Rgba([0, 0, 0, 255]));
+                                img.put_pixel(
+                                    (x + dx) as u32,
+                                    (y + dy) as u32,
+                                    image::Rgba([0, 0, 0, 255]),
+                                );
                             }
                         }
                     }
@@ -322,7 +452,10 @@ impl App {
                         ui.radio_value(&mut self.settings.active_profile_id, p.id.clone(), "");
                         ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(160.0));
                         if p.kind == ProviderKind::Cursor {
-                            ui.colored_label(Color32::LIGHT_RED, "Cursor não funciona nesta versão");
+                            ui.colored_label(
+                                Color32::LIGHT_RED,
+                                "Cursor não funciona nesta versão",
+                            );
                         }
                         if ui.small_button("Remover").clicked() {
                             remove = Some(i);
@@ -330,7 +463,11 @@ impl App {
                     });
                     ui.horizontal(|ui| {
                         ui.label("URL base");
-                        ui.add(egui::TextEdit::singleline(&mut p.base_url).desired_width(320.0).hint_text("https://openrouter.ai/api/v1"));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut p.base_url)
+                                .desired_width(320.0)
+                                .hint_text("https://openrouter.ai/api/v1"),
+                        );
                     });
                     ui.horizontal(|ui| {
                         ui.label("Modelo");
@@ -339,16 +476,32 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label("Chave");
                         let key = self.keys.entry(p.id.clone()).or_default();
-                        let hint = self.hints.get(&p.id).map(|h| format!("guardada (…{h})")).unwrap_or_else(|| "sem chave".into());
-                        ui.add(egui::TextEdit::singleline(key).password(true).desired_width(320.0).hint_text(hint));
+                        let hint = self
+                            .hints
+                            .get(&p.id)
+                            .map(|h| format!("guardada (…{h})"))
+                            .unwrap_or_else(|| "sem chave".into());
+                        ui.add(
+                            egui::TextEdit::singleline(key)
+                                .password(true)
+                                .desired_width(320.0)
+                                .hint_text(hint),
+                        );
                     });
                     if p.is_anthropic() {
                         let mut level = p.thinking.unwrap_or_default();
-                        egui::ComboBox::from_id_salt(format!("think{i}")).selected_text(format!("Raciocínio: {level:?}")).show_ui(ui, |ui| {
-                            for t in [Thinking::Off, Thinking::Low, Thinking::Medium, Thinking::High] {
-                                ui.selectable_value(&mut level, t, format!("{t:?}"));
-                            }
-                        });
+                        egui::ComboBox::from_id_salt(format!("think{i}"))
+                            .selected_text(format!("Raciocínio: {level:?}"))
+                            .show_ui(ui, |ui| {
+                                for t in [
+                                    Thinking::Off,
+                                    Thinking::Low,
+                                    Thinking::Medium,
+                                    Thinking::High,
+                                ] {
+                                    ui.selectable_value(&mut level, t, format!("{t:?}"));
+                                }
+                            });
                         p.thinking = (level != Thinking::Off).then_some(level);
                     }
                     if ui.button("Testar").clicked() && self.testing.is_none() {
@@ -368,7 +521,12 @@ impl App {
             }
             if ui.button("+ Adicionar API").clicked() {
                 let id = format!("api-{}", toon_core::now_ms());
-                self.settings.profiles.push(ApiProfile { id, name: "Nova API".into(), base_url: "https://openrouter.ai/api/v1".into(), ..Default::default() });
+                self.settings.profiles.push(ApiProfile {
+                    id,
+                    name: "Nova API".into(),
+                    base_url: "https://openrouter.ai/api/v1".into(),
+                    ..Default::default()
+                });
             }
             if self.testing.is_some() {
                 ui.spinner();
@@ -424,12 +582,18 @@ impl App {
 
 fn language_combo(ui: &mut egui::Ui, label: &str, value: &mut String, auto: bool) {
     ui.label(label);
-    egui::ComboBox::from_id_salt(label).selected_text(settings::language_label(value)).show_ui(ui, |ui| {
-        if auto {
-            ui.selectable_value(value, settings::AUTO_LANGUAGE.to_string(), settings::language_label(settings::AUTO_LANGUAGE));
-        }
-        for (v, l) in LANGUAGES {
-            ui.selectable_value(value, v.to_string(), *l);
-        }
-    });
+    egui::ComboBox::from_id_salt(label)
+        .selected_text(settings::language_label(value))
+        .show_ui(ui, |ui| {
+            if auto {
+                ui.selectable_value(
+                    value,
+                    settings::AUTO_LANGUAGE.to_string(),
+                    settings::language_label(settings::AUTO_LANGUAGE),
+                );
+            }
+            for (v, l) in LANGUAGES {
+                ui.selectable_value(value, v.to_string(), *l);
+            }
+        });
 }

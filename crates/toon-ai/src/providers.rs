@@ -4,9 +4,9 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use crate::cancel::Cancel;
 use rand::Rng;
 use serde_json::{Value, json};
-use crate::cancel::Cancel;
 use toon_core::settings::{ApiProfile, LOCAL_AI_BASE_URL, Thinking};
 
 use crate::error::AiError;
@@ -36,7 +36,10 @@ pub(crate) static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("cliente HTTP")
 });
 
-async fn guarded<T>(cancel: &Cancel, fut: impl Future<Output = Result<T, AiError>>) -> Result<T, AiError> {
+async fn guarded<T>(
+    cancel: &Cancel,
+    fut: impl Future<Output = Result<T, AiError>>,
+) -> Result<T, AiError> {
     tokio::select! {
         r = fut => r,
         _ = cancel.cancelled() => Err(AiError::Cancelled),
@@ -80,24 +83,56 @@ async fn with_retries(call: &Call<'_>, local: bool) -> Result<String, AiError> {
     loop {
         match guarded(call.cancel, openai(call, json_mode, temperature, local)).await {
             Ok(text) => return Ok(text),
-            Err(AiError::Http { status, body, retry_after }) => {
-                if json_mode && status == 400 && body_mentions(&body, &["response_format", "json_object", "json mode"]) {
+            Err(AiError::Http {
+                status,
+                body,
+                retry_after,
+            }) => {
+                if json_mode
+                    && status == 400
+                    && body_mentions(&body, &["response_format", "json_object", "json mode"])
+                {
                     json_mode = false;
                     continue;
                 }
-                if temperature.is_some() && status == 400 && body_mentions(&body, &["temperature"]) {
+                if temperature.is_some() && status == 400 && body_mentions(&body, &["temperature"])
+                {
                     temperature = None;
                     continue;
                 }
                 let lower = body.to_lowercase();
-                let transient = (status == 429 || status >= 500) && !["quota", "per-day", "credits"].iter().any(|w| lower.contains(w));
+                let transient = (status == 429 || status >= 500)
+                    && !["quota", "per-day", "credits"]
+                        .iter()
+                        .any(|w| lower.contains(w));
                 let limited = status == 429;
-                if !transient || attempt >= if limited { RATE_LIMIT_ATTEMPTS } else { MAX_ATTEMPTS } {
-                    return Err(AiError::Http { status, body, retry_after });
+                if !transient
+                    || attempt
+                        >= if limited {
+                            RATE_LIMIT_ATTEMPTS
+                        } else {
+                            MAX_ATTEMPTS
+                        }
+                {
+                    return Err(AiError::Http {
+                        status,
+                        body,
+                        retry_after,
+                    });
                 }
-                let backoff = if limited { (5.0 * 2f64.powi(attempt as i32 - 1)).min(60.0) } else { (2.0 * 2f64.powi(attempt as i32 - 1)).min(20.0) };
-                let seconds = retry_after.map(|s| (s as f64).min(60.0)).unwrap_or(backoff * rand::rng().random_range(0.8..1.2));
-                tracing::warn!("HTTP {status}, nova tentativa em {}s ({})", seconds.round(), attempt + 1);
+                let backoff = if limited {
+                    (5.0 * 2f64.powi(attempt as i32 - 1)).min(60.0)
+                } else {
+                    (2.0 * 2f64.powi(attempt as i32 - 1)).min(20.0)
+                };
+                let seconds = retry_after
+                    .map(|s| (s as f64).min(60.0))
+                    .unwrap_or(backoff * rand::rng().random_range(0.8..1.2));
+                tracing::warn!(
+                    "HTTP {status}, nova tentativa em {}s ({})",
+                    seconds.round(),
+                    attempt + 1
+                );
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_secs_f64(seconds)) => {}
                     _ = call.cancel.cancelled() => return Err(AiError::Cancelled),
@@ -115,16 +150,35 @@ fn body_mentions(body: &str, words: &[&str]) -> bool {
 }
 
 async fn send(builder: reqwest::RequestBuilder) -> Result<(u16, Option<u64>, String), AiError> {
-    let response = builder.send().await.map_err(|e| AiError::Network(e.to_string()))?;
+    let response = builder
+        .send()
+        .await
+        .map_err(|e| AiError::Network(e.to_string()))?;
     let status = response.status().as_u16();
-    let retry_after = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
-    let body = response.text().await.map_err(|e| AiError::Network(e.to_string()))?;
+    let retry_after = response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok());
+    let body = response
+        .text()
+        .await
+        .map_err(|e| AiError::Network(e.to_string()))?;
     Ok((status, retry_after, body))
 }
 
-async fn openai(call: &Call<'_>, json_mode: bool, temperature: Option<f32>, local: bool) -> Result<String, AiError> {
+async fn openai(
+    call: &Call<'_>,
+    json_mode: bool,
+    temperature: Option<f32>,
+    local: bool,
+) -> Result<String, AiError> {
     let base = trim_url(&call.profile.base_url);
-    let max_tokens = if local { LOCAL_MAX_OUTPUT_TOKENS } else { MAX_OUTPUT_TOKENS };
+    let max_tokens = if local {
+        LOCAL_MAX_OUTPUT_TOKENS
+    } else {
+        MAX_OUTPUT_TOKENS
+    };
     let mut content = vec![json!({ "type": "text", "text": call.prompt })];
     content.extend(call.images.iter().map(|img| json!({ "type": "image_url", "image_url": { "url": data_url(img), "detail": "high" } })));
     let mut body = json!({
@@ -152,19 +206,30 @@ async fn openai(call: &Call<'_>, json_mode: bool, temperature: Option<f32>, loca
         .json(&body);
     let (status, retry_after, text) = send(request).await?;
     if !(200..300).contains(&status) {
-        return Err(AiError::Http { status, body: text, retry_after });
+        return Err(AiError::Http {
+            status,
+            body: text,
+            retry_after,
+        });
     }
-    let data: Value = serde_json::from_str(&text).map_err(|e| AiError::Format(format!("Resposta da API ilegível: {e}")))?;
+    let data: Value = serde_json::from_str(&text)
+        .map_err(|e| AiError::Format(format!("Resposta da API ilegível: {e}")))?;
     if let Some(err) = data.get("error") {
         let code = err.get("code").and_then(Value::as_u64).unwrap_or(500) as u16;
-        return Err(AiError::Http { status: code, body: text, retry_after: None });
+        return Err(AiError::Http {
+            status: code,
+            body: text,
+            retry_after: None,
+        });
     }
     let choice = &data["choices"][0];
     let content = choice["message"]["content"].as_str().unwrap_or("");
     let finish = choice["finish_reason"].as_str().unwrap_or("desconhecido");
     if content.is_empty() {
         let preview: String = text.chars().take(300).collect();
-        return Err(AiError::Format(format!("Resposta vazia da API (finish_reason: {finish}): {preview}")));
+        return Err(AiError::Format(format!(
+            "Resposta vazia da API (finish_reason: {finish}): {preview}"
+        )));
     }
     if finish == "length" {
         return Err(truncated(content, max_tokens));
@@ -173,7 +238,14 @@ async fn openai(call: &Call<'_>, json_mode: bool, temperature: Option<f32>, loca
 }
 
 fn truncated(content: &str, limit: u32) -> AiError {
-    let tail: String = content.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
+    let tail: String = content
+        .chars()
+        .rev()
+        .take(200)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     AiError::Truncated {
         message: format!(
             "A resposta da IA foi cortada no limite de {limit} tokens (o modelo provavelmente entrou em repetição). Fim da resposta: {tail}"
@@ -187,7 +259,9 @@ fn is_ollama(base: &str) -> bool {
 }
 
 async fn ollama(call: &Call<'_>) -> Result<String, AiError> {
-    let origin = url::Url::parse(&call.profile.base_url).map(|u| u.origin().ascii_serialization()).unwrap_or_default();
+    let origin = url::Url::parse(&call.profile.base_url)
+        .map(|u| u.origin().ascii_serialization())
+        .unwrap_or_default();
     let body = json!({
         "model": call.profile.model,
         "stream": false,
@@ -198,15 +272,26 @@ async fn ollama(call: &Call<'_>) -> Result<String, AiError> {
     });
     let (status, _, text) = send(HTTP.post(format!("{origin}/api/chat")).json(&body)).await?;
     if !(200..300).contains(&status) {
-        return Err(AiError::Http { status, body: text, retry_after: None });
+        return Err(AiError::Http {
+            status,
+            body: text,
+            retry_after: None,
+        });
     }
     let data: Value = serde_json::from_str(&text).map_err(|e| AiError::Format(e.to_string()))?;
     if data.get("error").is_some() {
-        return Err(AiError::Http { status: 500, body: text, retry_after: None });
+        return Err(AiError::Http {
+            status: 500,
+            body: text,
+            retry_after: None,
+        });
     }
     let content = data["message"]["content"].as_str().unwrap_or("");
     if content.is_empty() {
-        return Err(AiError::Format(format!("Resposta vazia do Ollama: {}", text.chars().take(300).collect::<String>())));
+        return Err(AiError::Format(format!(
+            "Resposta vazia do Ollama: {}",
+            text.chars().take(300).collect::<String>()
+        )));
     }
     if data["done_reason"] == "length" {
         return Err(truncated(content, LOCAL_MAX_OUTPUT_TOKENS));
@@ -257,9 +342,14 @@ async fn anthropic(call: &Call<'_>) -> Result<String, AiError> {
             continue;
         }
         if !(200..300).contains(&status) {
-            return Err(AiError::Http { status, body: text, retry_after });
+            return Err(AiError::Http {
+                status,
+                body: text,
+                retry_after,
+            });
         }
-        let data: Value = serde_json::from_str(&text).map_err(|e| AiError::Format(e.to_string()))?;
+        let data: Value =
+            serde_json::from_str(&text).map_err(|e| AiError::Format(e.to_string()))?;
         let answer: String = data["content"]
             .as_array()
             .into_iter()
@@ -271,7 +361,9 @@ async fn anthropic(call: &Call<'_>) -> Result<String, AiError> {
             Some("refusal") => {
                 return Err(AiError::Http {
                     status: 400,
-                    body: r#"{"error":{"message":"content_policy: o modelo recusou esta página."}}"#.into(),
+                    body:
+                        r#"{"error":{"message":"content_policy: o modelo recusou esta página."}}"#
+                            .into(),
                     retry_after: None,
                 });
             }
@@ -279,7 +371,10 @@ async fn anthropic(call: &Call<'_>) -> Result<String, AiError> {
             _ => {}
         }
         if answer.is_empty() {
-            return Err(AiError::Format(format!("Resposta vazia da API (stop_reason: {}).", data["stop_reason"])));
+            return Err(AiError::Format(format!(
+                "Resposta vazia da API (stop_reason: {}).",
+                data["stop_reason"]
+            )));
         }
         return Ok(answer);
     }
@@ -293,24 +388,38 @@ pub struct ModelOption {
 }
 
 /// Os modelos que a API lista; no OpenRouter, só os que aceitam imagem, com o preço.
-pub async fn list_models(profile: &ApiProfile, api_key: Option<&str>) -> Result<Vec<ModelOption>, AiError> {
+pub async fn list_models(
+    profile: &ApiProfile,
+    api_key: Option<&str>,
+) -> Result<Vec<ModelOption>, AiError> {
     if profile.is_anthropic() {
-        let mut req = HTTP.get("https://api.anthropic.com/v1/models?limit=100").header("anthropic-version", "2023-06-01");
+        let mut req = HTTP
+            .get("https://api.anthropic.com/v1/models?limit=100")
+            .header("anthropic-version", "2023-06-01");
         if let Some(k) = api_key {
             req = req.header("x-api-key", k);
         }
         let (status, _, text) = send(req).await?;
         if !(200..300).contains(&status) {
-            return Err(AiError::Http { status, body: text, retry_after: None });
+            return Err(AiError::Http {
+                status,
+                body: text,
+                retry_after: None,
+            });
         }
-        let data: Value = serde_json::from_str(&text).map_err(|e| AiError::Format(e.to_string()))?;
+        let data: Value =
+            serde_json::from_str(&text).map_err(|e| AiError::Format(e.to_string()))?;
         return Ok(data["data"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|m| {
                 let id = m["id"].as_str()?.to_string();
-                Some(ModelOption { label: m["display_name"].as_str().unwrap_or(&id).to_string(), id, price: None })
+                Some(ModelOption {
+                    label: m["display_name"].as_str().unwrap_or(&id).to_string(),
+                    id,
+                    price: None,
+                })
             })
             .collect());
     }
@@ -320,7 +429,11 @@ pub async fn list_models(profile: &ApiProfile, api_key: Option<&str>) -> Result<
     }
     let (status, _, text) = send(req).await?;
     if !(200..300).contains(&status) {
-        return Err(AiError::Http { status, body: text, retry_after: None });
+        return Err(AiError::Http {
+            status,
+            body: text,
+            retry_after: None,
+        });
     }
     let data: Value = serde_json::from_str(&text).map_err(|e| AiError::Format(e.to_string()))?;
     let mut models: Vec<ModelOption> = data["data"]
@@ -328,16 +441,29 @@ pub async fn list_models(profile: &ApiProfile, api_key: Option<&str>) -> Result<
         .into_iter()
         .flatten()
         .filter(|m| {
-            m["architecture"]["input_modalities"].as_array().is_none_or(|list| list.iter().any(|x| x == "image"))
+            m["architecture"]["input_modalities"]
+                .as_array()
+                .is_none_or(|list| list.iter().any(|x| x == "image"))
         })
         .filter_map(|m| {
             let id = m["id"].as_str()?.to_string();
-            let per_million = |v: &Value| v.as_str().and_then(|s| s.parse::<f64>().ok()).map(|p| p * 1e6);
-            let price = match (per_million(&m["pricing"]["prompt"]), per_million(&m["pricing"]["completion"])) {
+            let per_million = |v: &Value| {
+                v.as_str()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|p| p * 1e6)
+            };
+            let price = match (
+                per_million(&m["pricing"]["prompt"]),
+                per_million(&m["pricing"]["completion"]),
+            ) {
                 (Some(i), Some(o)) => Some(format!("${i:.2} / ${o:.2} por 1M tokens")),
                 _ => None,
             };
-            Some(ModelOption { label: m["name"].as_str().unwrap_or(&id).to_string(), id, price })
+            Some(ModelOption {
+                label: m["name"].as_str().unwrap_or(&id).to_string(),
+                id,
+                price,
+            })
         })
         .collect();
     models.sort_by(|a, b| a.id.cmp(&b.id));

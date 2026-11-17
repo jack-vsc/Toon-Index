@@ -8,7 +8,10 @@ use serde::de::DeserializeOwned;
 
 /// Lê um JSON; arquivo ausente ou estragado vira o valor padrão, como o app sempre fez.
 pub fn read_json<T: DeserializeOwned + Default>(path: &Path) -> T {
-    fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
 }
 
 /// Grava num arquivo ao lado e troca pelo de verdade: um app fechado no meio não deixa JSON pela metade.
@@ -26,7 +29,8 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         path.extension().and_then(|e| e.to_str()).unwrap_or("")
     ));
     {
-        let mut file = fs::File::create(&tmp).with_context(|| format!("criando {}", tmp.display()))?;
+        let mut file =
+            fs::File::create(&tmp).with_context(|| format!("criando {}", tmp.display()))?;
         file.write_all(bytes)?;
         file.sync_all()?;
     }

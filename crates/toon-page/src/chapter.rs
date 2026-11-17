@@ -18,10 +18,18 @@ pub fn pages_from_images(images: &[Vec<u8>]) -> anyhow::Result<Vec<PdfPage>> {
         .iter()
         .map(|bytes| {
             let image = image::load_from_memory(bytes)?;
-            let jpeg = image::guess_format(bytes).ok().filter(|f| *f == image::ImageFormat::Jpeg).map(|_| bytes.clone());
+            let jpeg = image::guess_format(bytes)
+                .ok()
+                .filter(|f| *f == image::ImageFormat::Jpeg)
+                .map(|_| bytes.clone());
             // 96 pontos por polegada, como o navegador mostra.
             let (w, h) = (image.width() as f32 * 0.75, image.height() as f32 * 0.75);
-            Ok(PdfPage { image, jpeg, width_pt: w, height_pt: h })
+            Ok(PdfPage {
+                image,
+                jpeg,
+                width_pt: w,
+                height_pt: h,
+            })
         })
         .collect()
 }
@@ -52,11 +60,21 @@ pub struct Output {
 fn output_page(image: &RgbImage, page: &PdfPage) -> anyhow::Result<OutputPage> {
     // A página pode ter crescido embaixo (notas das placas): o tamanho físico cresce junto.
     let height_pt = page.height_pt * image.height() as f32 / render_height(page) as f32;
-    Ok(OutputPage { jpeg: encode_jpeg(image, JPEG_QUALITY)?, width_px: image.width(), height_px: image.height(), width_pt: page.width_pt, height_pt })
+    Ok(OutputPage {
+        jpeg: encode_jpeg(image, JPEG_QUALITY)?,
+        width_px: image.width(),
+        height_px: image.height(),
+        width_pt: page.width_pt,
+        height_pt,
+    })
 }
 
 fn render_height(page: &PdfPage) -> u32 {
-    let width = if crate::pdf::is_tall(page.width_pt, page.height_pt) { crate::page::OUTPUT_WIDTH_TALL } else { crate::page::OUTPUT_WIDTH };
+    let width = if crate::pdf::is_tall(page.width_pt, page.height_pt) {
+        crate::page::OUTPUT_WIDTH_TALL
+    } else {
+        crate::page::OUTPUT_WIDTH
+    };
     ((page.image.height() as f32 * width as f32 / page.image.width() as f32).round() as u32).max(1)
 }
 
@@ -69,14 +87,23 @@ pub fn original_pdf(pages: &[PdfPage], title: &str) -> anyhow::Result<Vec<u8>> {
                 Some(j) => j.clone(),
                 None => encode_jpeg(&p.image.to_rgb8(), JPEG_QUALITY)?,
             };
-            Ok(OutputPage { jpeg, width_px: p.image.width(), height_px: p.image.height(), width_pt: p.width_pt, height_pt: p.height_pt })
+            Ok(OutputPage {
+                jpeg,
+                width_px: p.image.width(),
+                height_px: p.image.height(),
+                width_pt: p.width_pt,
+                height_pt: p.height_pt,
+            })
         })
         .collect::<anyhow::Result<_>>()?;
     build_pdf(&out, title)
 }
 
 pub fn cover_of(page: &PdfPage) -> anyhow::Result<Vec<u8>> {
-    let thumb = page.image.thumbnail(COVER_LONG_SIDE, COVER_LONG_SIDE).to_rgb8();
+    let thumb = page
+        .image
+        .thumbnail(COVER_LONG_SIDE, COVER_LONG_SIDE)
+        .to_rgb8();
     encode_jpeg(&thumb, 80)
 }
 
@@ -90,7 +117,11 @@ pub async fn translate_chapter(
     on_progress: impl Fn(Progress) + Send + Sync,
 ) -> Result<Output, AiError> {
     let total = pages.len();
-    let mut progress = Progress { done: 0, total, failed: 0 };
+    let mut progress = Progress {
+        done: 0,
+        total,
+        failed: 0,
+    };
     on_progress(progress);
     let skip = |i: usize| i < options.skip_start || i + options.skip_end >= total;
     let mut results: Vec<Option<RgbImage>> = vec![None; total];
@@ -105,7 +136,8 @@ pub async fn translate_chapter(
                 if skip(i) {
                     return (i, Ok(None));
                 }
-                let r = translate_page(&ready, &pages[i], i as u32 + 1, Some(chapter), &cancel).await;
+                let r =
+                    translate_page(&ready, &pages[i], i as u32 + 1, Some(chapter), &cancel).await;
                 (i, r.map(|t| Some(t.image)))
             }
         })
@@ -114,7 +146,12 @@ pub async fn translate_chapter(
         match result {
             Ok(image) => results[i] = image,
             Err(AiError::Cancelled) => return Err(AiError::Cancelled),
-            Err(err @ AiError::App { code: "auth" | "quota" | "credits" | "model" | "vision", .. }) => return Err(err),
+            Err(
+                err @ AiError::App {
+                    code: "auth" | "quota" | "credits" | "model" | "vision",
+                    ..
+                },
+            ) => return Err(err),
             Err(err) => {
                 tracing::warn!("página {} falhou: {err}", i + 1);
                 errors.push((i + 1, err.to_string()));
@@ -132,8 +169,21 @@ pub async fn translate_chapter(
         .map(|(page, image)| output_page(&image.unwrap_or_else(|| render(page)), page))
         .collect::<anyhow::Result<_>>()
         .map_err(|e| AiError::app("unknown", e.to_string()))?;
-    let translated_pdf = build_pdf(&out, &options.chapter).map_err(|e| AiError::app("unknown", e.to_string()))?;
-    let original_pdf = original_pdf(&pages, &options.chapter).map_err(|e| AiError::app("unknown", e.to_string()))?;
-    let cover_jpeg = pages.first().map(cover_of).transpose().map_err(|e| AiError::app("unknown", e.to_string()))?.unwrap_or_default();
-    Ok(Output { translated_pdf, original_pdf, cover_jpeg, translated_pages, errors })
+    let translated_pdf =
+        build_pdf(&out, &options.chapter).map_err(|e| AiError::app("unknown", e.to_string()))?;
+    let original_pdf = original_pdf(&pages, &options.chapter)
+        .map_err(|e| AiError::app("unknown", e.to_string()))?;
+    let cover_jpeg = pages
+        .first()
+        .map(cover_of)
+        .transpose()
+        .map_err(|e| AiError::app("unknown", e.to_string()))?
+        .unwrap_or_default();
+    Ok(Output {
+        translated_pdf,
+        original_pdf,
+        cover_jpeg,
+        translated_pages,
+        errors,
+    })
 }

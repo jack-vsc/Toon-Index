@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::names::parse_chapter_name;
+use crate::now_ms;
 use crate::paths::data_dir;
 use crate::store::{read_json, write_atomic, write_json};
-use crate::now_ms;
 
 /// Pedidos terminados ficam na lista por uma semana.
 const KEEP_DONE_DAYS: i64 = 7;
@@ -104,14 +104,22 @@ pub fn queue() -> Queue {
         .filter(|j| matches!(j.status, Status::Queued | Status::Running) || j.updated_at > old)
         .map(with_work)
         .collect();
-    Queue { jobs, paused: stored.paused }
+    Queue {
+        jobs,
+        paused: stored.paused,
+    }
 }
 
 fn with_work(mut job: Job) -> Job {
     if job.kind == Kind::Pdf && job.batch.is_none() {
         let parsed = parse_chapter_name(&job.name, None);
         if let (false, Some(chapter)) = (parsed.work.is_empty(), parsed.chapter) {
-            job.batch = Some(Batch { work: parsed.work, chapter, site: "pdf".into(), download: false });
+            job.batch = Some(Batch {
+                work: parsed.work,
+                chapter,
+                site: "pdf".into(),
+                download: false,
+            });
         }
     }
     job
@@ -145,13 +153,26 @@ pub fn clean_options(raw: &Value) -> Option<Map<String, Value>> {
             out.insert(key.into(), v.clone());
         }
     }
-    let number = |k: &str, lo: f64, hi: f64| r.get(k).and_then(Value::as_f64).map(|n| Value::from(n.round().clamp(lo, hi) as i64));
-    for (k, lo, hi) in [("concurrency", 1.0, 8.0), ("skipStart", 0.0, 50.0), ("skipEnd", 0.0, 50.0)] {
+    let number = |k: &str, lo: f64, hi: f64| {
+        r.get(k)
+            .and_then(Value::as_f64)
+            .map(|n| Value::from(n.round().clamp(lo, hi) as i64))
+    };
+    for (k, lo, hi) in [
+        ("concurrency", 1.0, 8.0),
+        ("skipStart", 0.0, 50.0),
+        ("skipEnd", 0.0, 50.0),
+    ] {
         if let Some(v) = number(k, lo, hi) {
             out.insert(k.into(), v);
         }
     }
-    let choice = |k: &str, allowed: &[&str]| r.get(k).and_then(Value::as_str).filter(|v| allowed.contains(v)).map(|v| Value::from(v));
+    let choice = |k: &str, allowed: &[&str]| {
+        r.get(k)
+            .and_then(Value::as_str)
+            .filter(|v| allowed.contains(v))
+            .map(Value::from)
+    };
     for (k, allowed) in [
         ("speed", &["fast", "balanced", "quality"][..]),
         ("contentType", &["auto", "comic", "novel"][..]),
@@ -207,7 +228,12 @@ pub fn add_batch(
                 message: None,
                 progress: None,
                 entry_id: None,
-                batch: Some(Batch { work: clean.into(), chapter: c.chapter, site: site.into(), download }),
+                batch: Some(Batch {
+                    work: clean.into(),
+                    chapter: c.chapter,
+                    site: site.into(),
+                    download,
+                }),
                 options: if download { None } else { options.clone() },
             });
         }
@@ -218,12 +244,23 @@ pub fn add_batch(
 
 /// 79 → "79", 340.5 → "340.5".
 pub fn number_text(n: f64) -> String {
-    if n.fract() == 0.0 { format!("{}", n as i64) } else { format!("{n}") }
+    if n.fract() == 0.0 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
 }
 
-pub fn set_options(options: Option<Map<String, Value>>, ids: Option<&[String]>) -> anyhow::Result<Queue> {
+pub fn set_options(
+    options: Option<Map<String, Value>>,
+    ids: Option<&[String]>,
+) -> anyhow::Result<Queue> {
     change(|q| {
-        for j in q.jobs.iter_mut().filter(|j| j.status == Status::Queued && ids.is_none_or(|ids| ids.contains(&j.id))) {
+        for j in q
+            .jobs
+            .iter_mut()
+            .filter(|j| j.status == Status::Queued && ids.is_none_or(|ids| ids.contains(&j.id)))
+        {
             j.options = options.clone();
         }
         Ok(())
@@ -233,10 +270,15 @@ pub fn set_options(options: Option<Map<String, Value>>, ids: Option<&[String]>) 
 /// Tira da fila as faixas ainda não começadas.
 pub fn clear_batch() -> anyhow::Result<Queue> {
     change(|q| {
-        for j in q.jobs.iter().filter(|j| j.batch.is_some() && j.status == Status::Queued && j.kind == Kind::Pdf) {
+        for j in q
+            .jobs
+            .iter()
+            .filter(|j| j.batch.is_some() && j.status == Status::Queued && j.kind == Kind::Pdf)
+        {
             let _ = std::fs::remove_file(pdf_path(&j.id));
         }
-        q.jobs.retain(|j| !(j.batch.is_some() && j.status == Status::Queued));
+        q.jobs
+            .retain(|j| !(j.batch.is_some() && j.status == Status::Queued));
         Ok(())
     })
 }
@@ -244,8 +286,17 @@ pub fn clear_batch() -> anyhow::Result<Queue> {
 /// Os que falharam voltam para a fila (esses, ou todos os das faixas).
 pub fn retry(ids: Option<&[String]>) -> anyhow::Result<Queue> {
     change(|q| {
-        let again = |j: &Job| j.status == Status::Failed && j.kind == Kind::Link && ids.map_or(j.batch.is_some(), |ids| ids.contains(&j.id));
-        let works: Vec<String> = q.jobs.iter().filter(|j| again(j)).filter_map(|j| j.batch.as_ref().map(|b| b.work.clone())).collect();
+        let again = |j: &Job| {
+            j.status == Status::Failed
+                && j.kind == Kind::Link
+                && ids.map_or(j.batch.is_some(), |ids| ids.contains(&j.id))
+        };
+        let works: Vec<String> = q
+            .jobs
+            .iter()
+            .filter(|j| again(j))
+            .filter_map(|j| j.batch.as_ref().map(|b| b.work.clone()))
+            .collect();
         let now = now_ms();
         for j in q.jobs.iter_mut().filter(|j| again(j)) {
             j.status = Status::Queued;
@@ -263,12 +314,32 @@ pub fn retry(ids: Option<&[String]>) -> anyhow::Result<Queue> {
 /// Os capítulos na fila de uma obra ficam juntos, na ordem dos números, onde estava o primeiro deles.
 fn in_chapter_order(jobs: Vec<Job>, work: &str) -> Vec<Job> {
     let key = work.to_lowercase();
-    let of_work = |j: &Job| j.batch.as_ref().is_some_and(|b| b.work.to_lowercase() == key);
+    let of_work = |j: &Job| {
+        j.batch
+            .as_ref()
+            .is_some_and(|b| b.work.to_lowercase() == key)
+    };
     let queued: Vec<&Job> = jobs.iter().filter(|j| j.status == Status::Queued).collect();
-    let Some(first) = queued.iter().position(|j| of_work(j)) else { return jobs };
-    let mut block: Vec<Job> = queued.iter().filter(|j| of_work(j)).map(|j| (*j).clone()).collect();
-    block.sort_by(|a, b| a.batch.as_ref().unwrap().chapter.total_cmp(&b.batch.as_ref().unwrap().chapter));
-    let rest: Vec<Job> = queued.iter().filter(|j| !of_work(j)).map(|j| (*j).clone()).collect();
+    let Some(first) = queued.iter().position(|j| of_work(j)) else {
+        return jobs;
+    };
+    let mut block: Vec<Job> = queued
+        .iter()
+        .filter(|j| of_work(j))
+        .map(|j| (*j).clone())
+        .collect();
+    block.sort_by(|a, b| {
+        a.batch
+            .as_ref()
+            .unwrap()
+            .chapter
+            .total_cmp(&b.batch.as_ref().unwrap().chapter)
+    });
+    let rest: Vec<Job> = queued
+        .iter()
+        .filter(|j| !of_work(j))
+        .map(|j| (*j).clone())
+        .collect();
     let before = queued[..first].iter().filter(|j| !of_work(j)).count();
     let mut order = rest[..before].to_vec();
     order.extend(block);
@@ -278,13 +349,29 @@ fn in_chapter_order(jobs: Vec<Job>, work: &str) -> Vec<Job> {
 
 fn with_queued(jobs: Vec<Job>, queued: Vec<Job>) -> Vec<Job> {
     let mut next = queued.into_iter();
-    jobs.into_iter().map(|j| if j.status == Status::Queued { next.next().unwrap_or(j) } else { j }).collect()
+    jobs.into_iter()
+        .map(|j| {
+            if j.status == Status::Queued {
+                next.next().unwrap_or(j)
+            } else {
+                j
+            }
+        })
+        .collect()
 }
 
 pub fn reorder(ids: &[String]) -> anyhow::Result<Queue> {
     change(|q| {
-        let queued: Vec<Job> = q.jobs.iter().filter(|j| j.status == Status::Queued).cloned().collect();
-        let mut order: Vec<Job> = ids.iter().filter_map(|id| queued.iter().find(|j| &j.id == id).cloned()).collect();
+        let queued: Vec<Job> = q
+            .jobs
+            .iter()
+            .filter(|j| j.status == Status::Queued)
+            .cloned()
+            .collect();
+        let mut order: Vec<Job> = ids
+            .iter()
+            .filter_map(|id| queued.iter().find(|j| &j.id == id).cloned())
+            .collect();
         order.extend(queued.into_iter().filter(|j| !ids.contains(&j.id)));
         q.jobs = with_queued(std::mem::take(&mut q.jobs), order);
         Ok(())
@@ -293,7 +380,12 @@ pub fn reorder(ids: &[String]) -> anyhow::Result<Queue> {
 
 pub fn sort() -> anyhow::Result<Queue> {
     change(|q| {
-        let works: Vec<String> = q.jobs.iter().filter(|j| j.status == Status::Queued).filter_map(|j| j.batch.as_ref().map(|b| b.work.clone())).collect();
+        let works: Vec<String> = q
+            .jobs
+            .iter()
+            .filter(|j| j.status == Status::Queued)
+            .filter_map(|j| j.batch.as_ref().map(|b| b.work.clone()))
+            .collect();
         for w in works {
             q.jobs = in_chapter_order(std::mem::take(&mut q.jobs), &w);
         }
@@ -331,23 +423,49 @@ fn new_job(kind: Kind, name: String, device: &str, options: Option<Map<String, V
     }
 }
 
-pub fn add_link(url: &str, device: &str, options: Option<Map<String, Value>>) -> anyhow::Result<Job> {
+pub fn add_link(
+    url: &str,
+    device: &str,
+    options: Option<Map<String, Value>>,
+) -> anyhow::Result<Job> {
     let parsed = url::Url::parse(url)?;
     if !matches!(parsed.scheme(), "http" | "https") {
         bail!("Só links http ou https.");
     }
-    let mut job = new_job(Kind::Link, format!("{}{}", parsed.host_str().unwrap_or(""), parsed.path()), device, options);
+    let mut job = new_job(
+        Kind::Link,
+        format!("{}{}", parsed.host_str().unwrap_or(""), parsed.path()),
+        device,
+        options,
+    );
     job.url = Some(url.into());
     add(job)
 }
 
-pub fn add_pdf(name: &str, pdf: &[u8], device: &str, options: Option<Map<String, Value>>) -> anyhow::Result<Job> {
+pub fn add_pdf(
+    name: &str,
+    pdf: &[u8],
+    device: &str,
+    options: Option<Map<String, Value>>,
+) -> anyhow::Result<Job> {
     if !pdf.starts_with(b"%PDF-") {
         bail!("O arquivo enviado não é um PDF.");
     }
-    let clean: String = name.trim().chars().map(|c| if "\\/:*?\"<>|".contains(c) { ' ' } else { c }).collect();
-    let clean = if clean.is_empty() { "capitulo.pdf".to_string() } else { clean };
-    let name = if clean.to_lowercase().ends_with(".pdf") { clean } else { format!("{clean}.pdf") };
+    let clean: String = name
+        .trim()
+        .chars()
+        .map(|c| if "\\/:*?\"<>|".contains(c) { ' ' } else { c })
+        .collect();
+    let clean = if clean.is_empty() {
+        "capitulo.pdf".to_string()
+    } else {
+        clean
+    };
+    let name = if clean.to_lowercase().ends_with(".pdf") {
+        clean
+    } else {
+        format!("{clean}.pdf")
+    };
     let job = with_work(new_job(Kind::Pdf, name, device, options));
     std::fs::create_dir_all(dir())?;
     write_atomic(&pdf_path(&job.id), pdf)?;
@@ -373,7 +491,14 @@ pub fn take() -> Option<(Job, Option<Vec<u8>>)> {
         match std::fs::read(pdf_path(&job.id)) {
             Ok(pdf) => return Some((job, Some(pdf))),
             Err(_) => {
-                let _ = update(&job.id, Update { status: Some(Status::Failed), message: Some("O PDF enviado sumiu do PC.".into()), ..Default::default() });
+                let _ = update(
+                    &job.id,
+                    Update {
+                        status: Some(Status::Failed),
+                        message: Some("O PDF enviado sumiu do PC.".into()),
+                        ..Default::default()
+                    },
+                );
                 return None;
             }
         }
@@ -419,7 +544,8 @@ pub fn update(id: &str, patch: Update) -> anyhow::Result<Queue> {
 /// Um pedido ainda na fila sai dela (um em andamento é parado por quem roda a fila).
 pub fn cancel(id: &str) -> anyhow::Result<Queue> {
     change(|q| {
-        q.jobs.retain(|j| !(j.id == id && j.status == Status::Queued));
+        q.jobs
+            .retain(|j| !(j.id == id && j.status == Status::Queued));
         let _ = std::fs::remove_file(pdf_path(id));
         Ok(())
     })

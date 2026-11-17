@@ -13,13 +13,19 @@ pub struct Gray {
 impl Gray {
     pub fn from_rgba(rgba: &image::RgbaImage) -> Gray {
         let (w, h) = (rgba.width() as usize, rgba.height() as usize);
-        let px = rgba.pixels().map(|p| ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8).collect();
+        let px = rgba
+            .pixels()
+            .map(|p| ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8)
+            .collect();
         Gray { w, h, px }
     }
 
     pub fn from_rgb(rgb: &image::RgbImage) -> Gray {
         let (w, h) = (rgb.width() as usize, rgb.height() as usize);
-        let px = rgb.pixels().map(|p| ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8).collect();
+        let px = rgb
+            .pixels()
+            .map(|p| ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8)
+            .collect();
         Gray { w, h, px }
     }
 }
@@ -43,7 +49,15 @@ pub fn round(v: f64) -> usize {
 
 /// Uma letra fica sobre fundo liso (a maior parte dos pixels em volta tem o mesmo cinza) e se
 /// distingue bem dele. Desenho falha no primeiro teste; os vãos de fundo entre letras, no segundo.
-pub fn is_glyph(c: &Comp, gray: &[u8], ink: &[u8], labels: &[i32], ww: usize, wh: usize, tolerance: i32) -> bool {
+pub fn is_glyph(
+    c: &Comp,
+    gray: &[u8],
+    ink: &[u8],
+    labels: &[i32],
+    ww: usize,
+    wh: usize,
+    tolerance: i32,
+) -> bool {
     let e = round(c.h as f64 * 0.35).max(2);
     let x0 = c.x0.saturating_sub(e);
     let y0 = c.y0.saturating_sub(e);
@@ -67,7 +81,10 @@ pub fn is_glyph(c: &Comp, gray: &[u8], ink: &[u8], labels: &[i32], ww: usize, wh
         return false;
     }
     let median = quantile(&around, 0.5);
-    let flat = around.iter().filter(|&&v| (v - median).abs() <= tolerance).count();
+    let flat = around
+        .iter()
+        .filter(|&&v| (v - median).abs() <= tolerance)
+        .count();
     if (flat as f64) / (around.len() as f64) < 0.6 {
         return false;
     }
@@ -104,7 +121,16 @@ pub fn components(mask: &[u8], ww: usize, wh: usize) -> (Vec<i32>, Vec<Comp>) {
                 }
             }
         }
-        comps.push(Comp { id, x0, y0, x1, y1, w: x1 - x0, h: y1 - y0, count });
+        comps.push(Comp {
+            id,
+            x0,
+            y0,
+            x1,
+            y1,
+            w: x1 - x0,
+            h: y1 - y0,
+            count,
+        });
     }
     (labels, comps)
 }
@@ -131,10 +157,18 @@ fn morph(src: &[u8], ww: usize, wh: usize, k: usize, max: bool) -> Vec<u8> {
             *slot = read(i.saturating_sub(r).min(n - 1));
         }
         for i in 0..m {
-            g[i] = if i % k == 0 { line[i] } else { pick(line[i], g[i - 1]) };
+            g[i] = if i % k == 0 {
+                line[i]
+            } else {
+                pick(line[i], g[i - 1])
+            };
         }
         for i in (0..m).rev() {
-            h[i] = if i == m - 1 || (i + 1) % k == 0 { line[i] } else { pick(line[i], h[i + 1]) };
+            h[i] = if i == m - 1 || (i + 1) % k == 0 {
+                line[i]
+            } else {
+                pick(line[i], h[i + 1])
+            };
         }
         for i in 0..n {
             out(i, pick(h[i], g[i + 2 * r]));

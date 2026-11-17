@@ -28,9 +28,17 @@ fn fill_rect(image: &mut RgbImage, x0: i64, y0: i64, x1: i64, y1: i64, color: Rg
 }
 
 fn label(image: &mut RgbImage, text: &str, x: f32, y_top: f32, size: f32) {
-    let pen = Pen { font: FACES.face(FontRole::Sans, true), size };
+    let pen = Pen {
+        font: FACES.face(FontRole::Sans, true),
+        size,
+    };
     let cap = pen.cap_ratio() * size;
-    let mut cover = Coverage::new(x as i64 - 2, y_top as i64 - 2, (pen.width(text) + 6.0) as usize, (size * 1.4) as usize + 4);
+    let mut cover = Coverage::new(
+        x as i64 - 2,
+        y_top as i64 - 2,
+        (pen.width(text) + 6.0) as usize,
+        (size * 1.4) as usize + 4,
+    );
     pen.rasterize(&mut cover, text, x, y_top + cap + (size - cap) / 2.0, 0.0);
     cover.paint(image, [255, 255, 255]);
 }
@@ -53,11 +61,18 @@ pub fn draw_marks(source: &RgbImage, marks: &[Mark]) -> RgbImage {
         fill_rect(&mut image, x0, y0, x0 + line, y1, MARK);
         fill_rect(&mut image, x1 - line, y0, x1, y1, MARK);
         let text = m.id.to_string();
-        let pen = Pen { font: FACES.face(FontRole::Sans, true), size: font };
+        let pen = Pen {
+            font: FACES.face(FontRole::Sans, true),
+            size: font,
+        };
         let tw = pen.width(&text) as i64 + 8;
         let th = font as i64 + 4;
         let tx = x0.min(w - tw);
-        let ty = if y0 - th >= 0 { y0 - th } else { y1.min(h - th) };
+        let ty = if y0 - th >= 0 {
+            y0 - th
+        } else {
+            y1.min(h - th)
+        };
         fill_rect(&mut image, tx, ty, tx + tw, ty + th, MARK);
         label(&mut image, &text, tx as f32 + 4.0, ty as f32 + 2.0, font);
     }
@@ -101,7 +116,14 @@ pub fn draw_key(regions: &[KeyRegion]) -> Vec<RgbImage> {
             .min((KEY_MAX_HEIGHT - 2 * gap) as f32 / (y1 - y0) as f32);
         let tw = (((x1 - x0) as f32 * s).round() as u32).max(1);
         let th = (((y1 - y0) as f32 * s).round() as u32).max(1);
-        let cut = image::imageops::crop_imm(r.source, x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32).to_image();
+        let cut = image::imageops::crop_imm(
+            r.source,
+            x0 as u32,
+            y0 as u32,
+            (x1 - x0) as u32,
+            (y1 - y0) as u32,
+        )
+        .to_image();
         let crop = image::imageops::resize(&cut, tw, th, image::imageops::FilterType::CatmullRom);
         let width = tag_w + tw + gap;
         if x + width > KEY_WIDTH {
@@ -116,7 +138,12 @@ pub fn draw_key(regions: &[KeyRegion]) -> Vec<RgbImage> {
             row_h = 0;
         }
         sheet.1 = sheet.1.max(row_top + th + gap);
-        sheet.0.push(Tile { id: r.id, crop, x, y: row_top });
+        sheet.0.push(Tile {
+            id: r.id,
+            crop,
+            x,
+            y: row_top,
+        });
         x += width;
         row_h = row_h.max(th);
     }
@@ -129,8 +156,21 @@ pub fn draw_key(regions: &[KeyRegion]) -> Vec<RgbImage> {
             let mut image = RgbImage::from_pixel(KEY_WIDTH, height, Rgb([0x55, 0x55, 0x55]));
             for t in tiles {
                 let tag_h = t.crop.height().min(font as u32 + 12);
-                fill_rect(&mut image, t.x as i64, t.y as i64, (t.x + tag_w - 4) as i64, (t.y + tag_h) as i64, MARK);
-                label(&mut image, &t.id.to_string(), t.x as f32 + 4.0, t.y as f32 + (tag_h as f32 - font) / 2.0, font);
+                fill_rect(
+                    &mut image,
+                    t.x as i64,
+                    t.y as i64,
+                    (t.x + tag_w - 4) as i64,
+                    (t.y + tag_h) as i64,
+                    MARK,
+                );
+                label(
+                    &mut image,
+                    &t.id.to_string(),
+                    t.x as f32 + 4.0,
+                    t.y as f32 + (tag_h as f32 - font) / 2.0,
+                    font,
+                );
                 image::imageops::replace(&mut image, &t.crop, (t.x + tag_w) as i64, t.y as i64);
             }
             image

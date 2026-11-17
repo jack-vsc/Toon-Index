@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::library::list_works;
+use crate::now_ms;
 use crate::paths::data_dir;
 use crate::reading::{self, Status};
 use crate::store::{read_json, write_json};
 use crate::works::Work;
-use crate::now_ms;
 
 /// Um capítulo conta como novo por uma semana depois de sair.
 pub const NEW_FOR_MS: i64 = 7 * 24 * 60 * 60_000;
@@ -67,7 +67,9 @@ pub struct WorkUpdate {
 
 impl WorkUpdate {
     pub fn is_recent(&self) -> bool {
-        self.date.or(self.since).is_some_and(|out| now_ms() - out <= NEW_FOR_MS)
+        self.date
+            .or(self.since)
+            .is_some_and(|out| now_ms() - out <= NEW_FOR_MS)
     }
 
     /// Quando o capítulo saiu, até onde se sabe, para pôr o histórico em ordem.
@@ -93,35 +95,68 @@ pub fn change(f: impl FnOnce(&mut Stored)) -> anyhow::Result<Stored> {
 }
 
 /// As datas dos capítulos de uma obra em todos os sites: a mais antiga em que cada um foi visto.
-pub fn work_dates(sources: &[String], checks: &BTreeMap<String, SourceCheck>) -> BTreeMap<String, i64> {
+pub fn work_dates(
+    sources: &[String],
+    checks: &BTreeMap<String, SourceCheck>,
+) -> BTreeMap<String, i64> {
     let mut dates: BTreeMap<String, i64> = BTreeMap::new();
     for check in sources.iter().filter_map(|s| checks.get(s)) {
         for (chapter, date) in &check.dates {
-            dates.entry(chapter.clone()).and_modify(|d| *d = (*d).min(*date)).or_insert(*date);
+            dates
+                .entry(chapter.clone())
+                .and_modify(|d| *d = (*d).min(*date))
+                .or_insert(*date);
         }
     }
     dates
 }
 
 fn number_key(n: f64) -> String {
-    if n.fract() == 0.0 { format!("{}", n as i64) } else { format!("{n}") }
+    if n.fract() == 0.0 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
 }
 
 /// O capítulo mais novo de cada obra em qualquer um dos sites dela.
-pub fn work_updates(works: &[Work], checks: &BTreeMap<String, SourceCheck>) -> BTreeMap<String, WorkUpdate> {
+pub fn work_updates(
+    works: &[Work],
+    checks: &BTreeMap<String, SourceCheck>,
+) -> BTreeMap<String, WorkUpdate> {
     let mut updates: BTreeMap<String, WorkUpdate> = BTreeMap::new();
     for work in works {
         for source in work.sources() {
-            let Some(check) = checks.get(source) else { continue };
-            let (Some(latest), Some(url)) = (check.latest, check.latest_url.clone()) else { continue };
+            let Some(check) = checks.get(source) else {
+                continue;
+            };
+            let (Some(latest), Some(url)) = (check.latest, check.latest_url.clone()) else {
+                continue;
+            };
             if updates.get(&work.id).is_some_and(|u| u.latest >= latest) {
                 continue;
             }
-            let date = work_dates(work.sources(), checks).get(&number_key(latest)).copied();
-            let site = url::Url::parse(source).ok().and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string())).unwrap_or_default();
+            let date = work_dates(work.sources(), checks)
+                .get(&number_key(latest))
+                .copied();
+            let site = url::Url::parse(source)
+                .ok()
+                .and_then(|u| {
+                    u.host_str()
+                        .map(|h| h.trim_start_matches("www.").to_string())
+                })
+                .unwrap_or_default();
             updates.insert(
                 work.id.clone(),
-                WorkUpdate { work_id: work.id.clone(), latest, url, site, checked_at: check.checked_at, date, since: check.latest_since },
+                WorkUpdate {
+                    work_id: work.id.clone(),
+                    latest,
+                    url,
+                    site,
+                    checked_at: check.checked_at,
+                    date,
+                    since: check.latest_since,
+                },
             );
         }
     }
@@ -134,7 +169,11 @@ pub fn unread() -> Vec<WorkUpdate> {
     work_updates(&list_works(), &load().checks)
         .into_values()
         .filter(|u| {
-            let read = records.iter().filter(|r| r.work_id == u.work_id && r.status == Status::Read).map(|r| r.chapter).fold(f64::MIN, f64::max);
+            let read = records
+                .iter()
+                .filter(|r| r.work_id == u.work_id && r.status == Status::Read)
+                .map(|r| r.chapter)
+                .fold(f64::MIN, f64::max);
             read == f64::MIN || u.latest > read
         })
         .collect()

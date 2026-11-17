@@ -21,18 +21,31 @@ fn master_key() -> anyhow::Result<[u8; 32]> {
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    if let Some(encoded) = state.pointer("/os_crypt/encrypted_key").and_then(Value::as_str) {
-        let blob = B64.decode(encoded).context("Local State com chave ilegível")?;
-        let protected = blob.strip_prefix(b"DPAPI").ok_or_else(|| anyhow!("Local State sem o prefixo DPAPI"))?;
+    if let Some(encoded) = state
+        .pointer("/os_crypt/encrypted_key")
+        .and_then(Value::as_str)
+    {
+        let blob = B64
+            .decode(encoded)
+            .context("Local State com chave ilegível")?;
+        let protected = blob
+            .strip_prefix(b"DPAPI")
+            .ok_or_else(|| anyhow!("Local State sem o prefixo DPAPI"))?;
         let key = dpapi::unprotect(protected)?;
-        return key.try_into().map_err(|_| anyhow!("chave mestra com tamanho errado"));
+        return key
+            .try_into()
+            .map_err(|_| anyhow!("chave mestra com tamanho errado"));
     }
     let mut key = [0u8; 32];
     getrandom(&mut key)?;
     let mut blob = b"DPAPI".to_vec();
     blob.extend(dpapi::protect(&key)?);
-    let obj = state.as_object_mut().ok_or_else(|| anyhow!("Local State não é um objeto"))?;
-    obj.entry("os_crypt").or_insert_with(|| serde_json::json!({}))["encrypted_key"] = Value::String(B64.encode(blob));
+    let obj = state
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Local State não é um objeto"))?;
+    obj.entry("os_crypt")
+        .or_insert_with(|| serde_json::json!({}))["encrypted_key"] =
+        Value::String(B64.encode(blob));
     crate::store::write_json(&path, &state)?;
     Ok(key)
 }
@@ -51,7 +64,9 @@ pub fn encrypt(plain: &str) -> anyhow::Result<String> {
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| anyhow!("chave mestra inválida"))?;
     let mut nonce = [0u8; 12];
     getrandom(&mut nonce)?;
-    let sealed = cipher.encrypt(Nonce::from_slice(&nonce), plain.as_bytes()).map_err(|_| anyhow!("falha ao criptografar"))?;
+    let sealed = cipher
+        .encrypt(Nonce::from_slice(&nonce), plain.as_bytes())
+        .map_err(|_| anyhow!("falha ao criptografar"))?;
     let mut out = PREFIX.to_vec();
     out.extend(nonce);
     out.extend(sealed);
@@ -70,7 +85,9 @@ pub fn decrypt(encoded: &str) -> anyhow::Result<String> {
     let key = master_key()?;
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| anyhow!("chave mestra inválida"))?;
     let (nonce, sealed) = rest.split_at(12);
-    let plain = cipher.decrypt(Nonce::from_slice(nonce), sealed).map_err(|_| anyhow!("não deu para abrir a chave guardada"))?;
+    let plain = cipher
+        .decrypt(Nonce::from_slice(nonce), sealed)
+        .map_err(|_| anyhow!("não deu para abrir a chave guardada"))?;
     Ok(String::from_utf8(plain)?)
 }
 
@@ -78,10 +95,15 @@ pub fn decrypt(encoded: &str) -> anyhow::Result<String> {
 mod dpapi {
     use anyhow::bail;
     use windows::Win32::Foundation::{HLOCAL, LocalFree};
-    use windows::Win32::Security::Cryptography::{CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData};
+    use windows::Win32::Security::Cryptography::{
+        CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData,
+    };
 
     fn run(input: &[u8], protect: bool) -> anyhow::Result<Vec<u8>> {
-        let blob_in = CRYPT_INTEGER_BLOB { cbData: input.len() as u32, pbData: input.as_ptr() as *mut u8 };
+        let blob_in = CRYPT_INTEGER_BLOB {
+            cbData: input.len() as u32,
+            pbData: input.as_ptr() as *mut u8,
+        };
         let mut out = CRYPT_INTEGER_BLOB::default();
         // SAFETY: as estruturas vivem durante a chamada; a saída é liberada com LocalFree logo depois de copiada.
         unsafe {

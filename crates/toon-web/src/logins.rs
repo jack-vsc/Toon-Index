@@ -16,7 +16,8 @@ MEDIOCRESCAN_USER=
 MEDIOCRESCAN_PASSWORD=
 ";
 
-static LOGIN_PATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)/(entrar|login|signin|sign-in|auth)(/|$|\?)").unwrap());
+static LOGIN_PATH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)/(entrar|login|signin|sign-in|auth)(/|$|\?)").unwrap());
 
 /// Cria o arquivo com as linhas vazias, para a pessoa preencher, quando ainda não existe.
 pub fn ensure_file() -> std::path::PathBuf {
@@ -28,10 +29,25 @@ pub fn ensure_file() -> std::path::PathBuf {
 }
 
 fn site_key(url: &str) -> String {
-    let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+    let host = url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+        .unwrap_or_default();
     let labels: Vec<&str> = host.trim_start_matches("www.").split('.').collect();
-    let base = if labels.len() > 1 { labels[..labels.len() - 1].join("_") } else { labels[0].to_string() };
-    base.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' }).collect()
+    let base = if labels.len() > 1 {
+        labels[..labels.len() - 1].join("_")
+    } else {
+        labels[0].to_string()
+    };
+    base.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 struct Login {
@@ -40,7 +56,8 @@ struct Login {
 }
 
 fn login_for(url: &str) -> Option<Login> {
-    static LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$").unwrap());
+    static LINE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$").unwrap());
     let text = std::fs::read_to_string(site_logins_file()).ok()?;
     let key = site_key(url);
     let value = |name: String| {
@@ -55,7 +72,13 @@ fn login_for(url: &str) -> Option<Login> {
 }
 
 fn on_login_page(url: &str) -> bool {
-    url::Url::parse(url).is_ok_and(|u| LOGIN_PATH.is_match(&format!("{}{}", u.path(), u.query().map(|q| format!("?{q}")).unwrap_or_default())))
+    url::Url::parse(url).is_ok_and(|u| {
+        LOGIN_PATH.is_match(&format!(
+            "{}{}",
+            u.path(),
+            u.query().map(|q| format!("?{q}")).unwrap_or_default()
+        ))
+    })
 }
 
 /// Mandado para a página de login: entra com a conta do arquivo, quando há uma, e volta para `url`.
@@ -64,7 +87,9 @@ pub async fn sign_in_if_asked(tab: &Tab, url: &str) -> bool {
     if !on_login_page(&here) {
         return false;
     }
-    let Some(login) = login_for(&here) else { return false };
+    let Some(login) = login_for(&here) else {
+        return false;
+    };
     let script = format!(
         r#"(async () => {{
     const shown = (el) => el && el.getClientRects().length > 0
@@ -130,7 +155,10 @@ mod tests {
 
     #[test]
     fn keys() {
-        assert_eq!(site_key("https://www.mediocrescan.com/obra/1"), "MEDIOCRESCAN");
+        assert_eq!(
+            site_key("https://www.mediocrescan.com/obra/1"),
+            "MEDIOCRESCAN"
+        );
         assert!(on_login_page("https://x.com/entrar?next=/a"));
         assert!(!on_login_page("https://x.com/obra/entrar-no-jogo"));
     }

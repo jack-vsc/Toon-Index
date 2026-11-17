@@ -20,7 +20,5 @@ hex.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 futures.workspace = true
-rayon = "1"
 ab_glyph = "0.2"
 lopdf = "0.36"
-unicode-segmentation = "1"

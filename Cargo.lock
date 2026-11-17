@@ -4084,7 +4084,6 @@ dependencies = [
  "hex",
  "image",
  "lopdf",
- "rayon",
  "serde",
  "serde_json",
  "sha2",
@@ -4092,7 +4091,6 @@ dependencies = [
  "toon-ai",
  "toon-core",
  "tracing",
- "unicode-segmentation",
 ]
 
 [[package]]

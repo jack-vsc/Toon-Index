@@ -26,11 +26,22 @@ const MAX_SIDE: u32 = 32_000;
 
 /// A página na largura de saída, como o app sempre mandou traduzir.
 pub fn render(page: &PdfPage) -> RgbImage {
-    let width = if is_tall(page.width_pt, page.height_pt) { OUTPUT_WIDTH_TALL } else { OUTPUT_WIDTH };
+    let width = if is_tall(page.width_pt, page.height_pt) {
+        OUTPUT_WIDTH_TALL
+    } else {
+        OUTPUT_WIDTH
+    };
     let src = page.image.to_rgb8();
     let scale = (width as f32 / src.width() as f32).min(MAX_SIDE as f32 / src.height() as f32);
-    let (w, h) = (((src.width() as f32 * scale).round() as u32).max(1), ((src.height() as f32 * scale).round() as u32).max(1));
-    if (w, h) == src.dimensions() { src } else { image::imageops::resize(&src, w, h, image::imageops::FilterType::CatmullRom) }
+    let (w, h) = (
+        ((src.width() as f32 * scale).round() as u32).max(1),
+        ((src.height() as f32 * scale).round() as u32).max(1),
+    );
+    if (w, h) == src.dimensions() {
+        src
+    } else {
+        image::imageops::resize(&src, w, h, image::imageops::FilterType::CatmullRom)
+    }
 }
 
 /// Uma cópia do pedaço da imagem, reduzida para o lado maior caber em `long_side`.
@@ -40,7 +51,10 @@ pub fn crop(image: &RgbImage, y0: u32, y1: u32, long_side: u32) -> RgbImage {
     if scale >= 1.0 {
         return part;
     }
-    let (w, h) = (((part.width() as f32 * scale).round() as u32).max(1), ((part.height() as f32 * scale).round() as u32).max(1));
+    let (w, h) = (
+        ((part.width() as f32 * scale).round() as u32).max(1),
+        ((part.height() as f32 * scale).round() as u32).max(1),
+    );
     image::imageops::resize(&part, w, h, image::imageops::FilterType::Triangle)
 }
 
@@ -63,16 +77,30 @@ fn text_rows(image: &RgbImage, slice_height: u32, long_side: u32) -> Vec<(f32, f
     let scale = image.width() as f32 / whole.width() as f32;
     detect_text(&Gray::from_rgb(&whole))
         .into_iter()
-        .map(|r| ((r.r#box[1] as f32 - r.letter_height as f32) * scale, (r.r#box[3] as f32 + r.letter_height as f32) * scale))
+        .map(|r| {
+            (
+                (r.r#box[1] as f32 - r.letter_height as f32) * scale,
+                (r.r#box[3] as f32 + r.letter_height as f32) * scale,
+            )
+        })
         .collect()
 }
 
 /// Corta a página nas faixas mandadas ao modelo e acha o texto em cada uma.
 pub fn prepare_slices(image: &RgbImage, tall: bool) -> Vec<PreparedSlice> {
     let slice_height = (image.width() as f32 * SLICE_ASPECT).round() as u32;
-    let long_side = if tall { AI_LONG_SIDE_TALL } else { AI_LONG_SIDE };
+    let long_side = if tall {
+        AI_LONG_SIDE_TALL
+    } else {
+        AI_LONG_SIDE
+    };
     let keep = text_rows(image, slice_height, long_side);
-    let slices: Vec<Slice> = plan_slices(image, slice_height, (slice_height as f32 * SLICE_OVERLAP).round() as u32, &keep);
+    let slices: Vec<Slice> = plan_slices(
+        image,
+        slice_height,
+        (slice_height as f32 * SLICE_OVERLAP).round() as u32,
+        &keep,
+    );
     let mut prepared: Vec<PreparedSlice> = slices
         .iter()
         .map(|s| {
@@ -81,9 +109,17 @@ pub fn prepare_slices(image: &RgbImage, tall: bool) -> Vec<PreparedSlice> {
             let (cut_top, cut_bottom) = (s.y0 > 0, s.y1 < image.height());
             let regions = detect_text(&Gray::from_rgb(&crop))
                 .into_iter()
-                .filter(|r| !(cut_top && r.r#box[1] <= 2) && !(cut_bottom && r.r#box[3] + 2 >= crop.height() as usize))
+                .filter(|r| {
+                    !(cut_top && r.r#box[1] <= 2)
+                        && !(cut_bottom && r.r#box[3] + 2 >= crop.height() as usize)
+                })
                 .collect();
-            PreparedSlice { crop, regions, offset_y: s.y0 as f32, scale }
+            PreparedSlice {
+                crop,
+                regions,
+                offset_y: s.y0 as f32,
+                scale,
+            }
         })
         .collect();
     box_once(&mut prepared);
@@ -103,23 +139,45 @@ fn box_once(slices: &mut [PreparedSlice]) {
     for (i, s) in slices.iter().enumerate() {
         for (j, r) in s.regions.iter().enumerate() {
             let b = r.r#box.map(|v| v as f32);
-            let page = [b[0] * s.scale, b[1] * s.scale + s.offset_y, b[2] * s.scale, b[3] * s.scale + s.offset_y];
+            let page = [
+                b[0] * s.scale,
+                b[1] * s.scale + s.offset_y,
+                b[2] * s.scale,
+                b[3] * s.scale + s.offset_y,
+            ];
             let margin = b[1].min(s.crop.height() as f32 - b[3]);
             let area = (page[2] - page[0]) * (page[3] - page[1]);
-            all.push(Seen { slice: i, index: j, page, score: area * if margin >= r.letter_height as f32 { 1.0 } else { 0.5 } });
+            all.push(Seen {
+                slice: i,
+                index: j,
+                page,
+                score: area
+                    * if margin >= r.letter_height as f32 {
+                        1.0
+                    } else {
+                        0.5
+                    },
+            });
         }
     }
     let mut dropped = std::collections::HashSet::new();
     for a in &all {
         for b in &all {
-            if a.slice == b.slice || dropped.contains(&(a.slice, a.index)) || dropped.contains(&(b.slice, b.index)) {
+            if a.slice == b.slice
+                || dropped.contains(&(a.slice, a.index))
+                || dropped.contains(&(b.slice, b.index))
+            {
                 continue;
             }
             let ix = a.page[2].min(b.page[2]) - a.page[0].max(b.page[0]);
             let iy = a.page[3].min(b.page[3]) - a.page[1].max(b.page[1]);
             let area = |p: [f32; 4]| (p[2] - p[0]) * (p[3] - p[1]);
             if ix > 0.0 && iy > 0.0 && ix * iy > 0.3 * area(a.page).min(area(b.page)) {
-                dropped.insert(if a.score >= b.score { (b.slice, b.index) } else { (a.slice, a.index) });
+                dropped.insert(if a.score >= b.score {
+                    (b.slice, b.index)
+                } else {
+                    (a.slice, a.index)
+                });
             }
         }
     }
@@ -139,7 +197,11 @@ fn jpeg_image(image: &RgbImage) -> PageImage {
 }
 
 /// Numera as regiões no pedido inteiro, desenha nas imagens e monta a chave.
-pub fn marked_request(part: &[&PreparedSlice], page_number: u32, chapter: Option<String>) -> TranslateRequest {
+pub fn marked_request(
+    part: &[&PreparedSlice],
+    page_number: u32,
+    chapter: Option<String>,
+) -> TranslateRequest {
     let mut regions = Vec::new();
     let mut images = Vec::new();
     let mut key_regions = Vec::new();
@@ -155,16 +217,34 @@ pub fn marked_request(part: &[&PreparedSlice], page_number: u32, chapter: Option
                 glyphs: r.glyphs as u32,
             });
             marks.push(Mark { id, r#box: r.r#box });
-            key_regions.push(KeyRegion { id, source: &slice.crop, r#box: r.r#box, letter_height: r.letter_height as f32 });
+            key_regions.push(KeyRegion {
+                id,
+                source: &slice.crop,
+                r#box: r.r#box,
+                letter_height: r.letter_height as f32,
+            });
         }
         images.push(jpeg_image(&draw_marks(&slice.crop, &marks)));
     }
     let key = draw_key(&key_regions).iter().map(jpeg_image).collect();
-    TranslateRequest { images, key, regions, page_number, chapter }
+    TranslateRequest {
+        images,
+        key,
+        regions,
+        page_number,
+        chapter,
+    }
 }
 
 fn to_page_space(mut b: TextBlock, scale: f32, offset_y: f32) -> TextBlock {
-    let map = |x: [f32; 4]| [x[0] * scale, x[1] * scale + offset_y, x[2] * scale, x[3] * scale + offset_y];
+    let map = |x: [f32; 4]| {
+        [
+            x[0] * scale,
+            x[1] * scale + offset_y,
+            x[2] * scale,
+            x[3] * scale + offset_y,
+        ]
+    };
     b.text_box = map(b.text_box);
     b.area_box = map(b.area_box);
     b.ink_boxes = b.ink_boxes.map(|list| list.into_iter().map(map).collect());
@@ -177,10 +257,16 @@ fn to_page_space(mut b: TextBlock, scale: f32, offset_y: f32) -> TextBlock {
 pub fn dedupe(blocks: Vec<TextBlock>) -> Vec<TextBlock> {
     let area = |b: [f32; 4]| (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
     let score = |b: &TextBlock| {
-        (if b.ink_boxes.is_some() { 1e15 } else { 0.0 }) + normalize_text(&b.original).chars().count() as f64 * 1e9 + area(b.text_box) as f64
+        (if b.ink_boxes.is_some() { 1e15 } else { 0.0 })
+            + normalize_text(&b.original).chars().count() as f64 * 1e9
+            + area(b.text_box) as f64
     };
     let mut sorted = blocks;
-    sorted.sort_by(|a, b| score(b).partial_cmp(&score(a)).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| {
+        score(b)
+            .partial_cmp(&score(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut kept: Vec<TextBlock> = Vec::new();
     for block in sorted {
         let duplicate = kept.iter().any(|k| {
@@ -197,7 +283,11 @@ pub fn dedupe(blocks: Vec<TextBlock>) -> Vec<TextBlock> {
             kept.push(block);
         }
     }
-    kept.sort_by(|a, b| a.text_box[1].partial_cmp(&b.text_box[1]).unwrap_or(std::cmp::Ordering::Equal));
+    kept.sort_by(|a, b| {
+        a.text_box[1]
+            .partial_cmp(&b.text_box[1])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     kept
 }
 
@@ -209,13 +299,24 @@ pub async fn translate_slices(
     chapter: Option<String>,
     cancel: &Cancel,
 ) -> Result<Vec<TextBlock>, toon_ai::AiError> {
-    let parts: Vec<Vec<&PreparedSlice>> = prepared.chunks(MAX_IMAGES_PER_REQUEST).map(|c| c.iter().collect()).collect();
-    let requests: Vec<TranslateRequest> = parts.iter().map(|p| marked_request(p, page_number, chapter.clone())).collect();
-    let answers = futures::future::try_join_all(requests.iter().map(|r| ready.translate_page(r, cancel))).await?;
+    let parts: Vec<Vec<&PreparedSlice>> = prepared
+        .chunks(MAX_IMAGES_PER_REQUEST)
+        .map(|c| c.iter().collect())
+        .collect();
+    let requests: Vec<TranslateRequest> = parts
+        .iter()
+        .map(|p| marked_request(p, page_number, chapter.clone()))
+        .collect();
+    let answers =
+        futures::future::try_join_all(requests.iter().map(|r| ready.translate_page(r, cancel)))
+            .await?;
     let mut blocks = Vec::new();
     for (part, lists) in parts.iter().zip(answers) {
         for (slice, list) in part.iter().zip(lists) {
-            blocks.extend(list.into_iter().map(|b| to_page_space(b, slice.scale, slice.offset_y)));
+            blocks.extend(
+                list.into_iter()
+                    .map(|b| to_page_space(b, slice.scale, slice.offset_y)),
+            );
         }
     }
     Ok(dedupe(blocks))
@@ -238,7 +339,9 @@ pub async fn translate_page(
     let tall = is_tall(page.width_pt, page.height_pt);
     let prepared = {
         let image = image.clone();
-        tokio::task::spawn_blocking(move || prepare_slices(&image, tall)).await.expect("faixas")
+        tokio::task::spawn_blocking(move || prepare_slices(&image, tall))
+            .await
+            .expect("faixas")
     };
     let blocks = translate_slices(ready, &prepared, page_number, chapter, cancel).await?;
     let (image, blocks) = tokio::task::spawn_blocking(move || {

@@ -15,7 +15,12 @@ pub struct Slice {
 
 /// Corta a página em faixas de mais ou menos `slice_height`. As linhas em `keep` (texto conhecido,
 /// cujo espaço entre linhas parece vão) nunca são cortadas.
-pub fn plan_slices(image: &RgbImage, slice_height: u32, overlap: u32, keep: &[(f32, f32)]) -> Vec<Slice> {
+pub fn plan_slices(
+    image: &RgbImage,
+    slice_height: u32,
+    overlap: u32,
+    keep: &[(f32, f32)],
+) -> Vec<Slice> {
     let height = image.height();
     if height as f32 <= slice_height as f32 * 1.15 {
         return vec![Slice { y0: 0, y1: height }];
@@ -46,12 +51,18 @@ pub fn plan_slices(image: &RgbImage, slice_height: u32, overlap: u32, keep: &[(f
                 start = c;
             }
             None => {
-                slices.push(Slice { y0: start, y1: target });
+                slices.push(Slice {
+                    y0: start,
+                    y1: target,
+                });
                 start = target - overlap;
             }
         }
     }
-    slices.push(Slice { y0: start, y1: height });
+    slices.push(Slice {
+        y0: start,
+        y1: height,
+    });
     slices
 }
 
@@ -65,12 +76,16 @@ fn row_busyness(image: &RgbImage) -> Vec<f32> {
     for y in 0..h {
         for x in 0..w {
             let p = small.get_pixel(x, y);
-            row[x as usize] = ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u8;
+            row[x as usize] =
+                ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u8;
         }
         let mut sorted = row.clone();
         sorted.sort_unstable();
         let median = sorted[(w >> 1) as usize] as i32;
-        let differing = row.iter().filter(|&&v| (v as i32 - median).abs() > 24).count();
+        let differing = row
+            .iter()
+            .filter(|&&v| (v as i32 - median).abs() > 24)
+            .count();
         result.push(differing as f32 / w as f32);
     }
     result

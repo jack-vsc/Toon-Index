@@ -7,7 +7,14 @@ async fn main() -> anyhow::Result<()> {
     let number: usize = args[2].parse()?;
     let ready = toon_ai::ready(toon_core::settings::load())?;
     let started = std::time::Instant::now();
-    let done = toon_page::page::translate_page(&ready, &pages[number - 1], number as u32, Some("teste".into()), &toon_ai::Cancel::default()).await?;
+    let done = toon_page::page::translate_page(
+        &ready,
+        &pages[number - 1],
+        number as u32,
+        Some("teste".into()),
+        &toon_ai::Cancel::default(),
+    )
+    .await?;
     for b in &done.blocks {
         println!("{:?} {:?} -> {:?}", b.kind, b.original, b.translation);
     }

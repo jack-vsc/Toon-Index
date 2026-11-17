@@ -47,10 +47,10 @@ impl Engine {
     }
 
     pub fn cancel(&self, id: &str) {
-        if let Some((running, cancel)) = self.running.lock().as_ref() {
-            if running == id {
-                cancel.cancel();
-            }
+        if let Some((running, cancel)) = self.running.lock().as_ref()
+            && running == id
+        {
+            cancel.cancel();
         }
     }
 }
@@ -82,16 +82,29 @@ async fn run_queue(engine: Arc<Engine>) {
         let update = match result {
             Ok(entry_id) => {
                 engine.say(format!("Pronto: {}", job.name));
-                Update { status: Some(Status::Done), message: None, entry_id: Some(entry_id), progress: None }
+                Update {
+                    status: Some(Status::Done),
+                    message: None,
+                    entry_id: Some(entry_id),
+                    progress: None,
+                }
             }
             Err(e) if cancel.is_cancelled() => {
                 engine.say(format!("Cancelado: {}", job.name));
                 let _ = jobs::cancel(&job.id);
-                Update { status: Some(Status::Failed), message: Some(format!("{e}")), ..Default::default() }
+                Update {
+                    status: Some(Status::Failed),
+                    message: Some(format!("{e}")),
+                    ..Default::default()
+                }
             }
             Err(e) => {
                 engine.say(format!("Falhou: {} ({e})", job.name));
-                Update { status: Some(Status::Failed), message: Some(e.to_string()), ..Default::default() }
+                Update {
+                    status: Some(Status::Failed),
+                    message: Some(e.to_string()),
+                    ..Default::default()
+                }
             }
         };
         let _ = jobs::update(&job.id, update);
@@ -102,7 +115,14 @@ async fn run_queue(engine: Arc<Engine>) {
 fn progress(id: &str, message: &str, done: usize, total: usize) {
     let _ = jobs::update(
         id,
-        Update { message: Some(message.into()), progress: Some(Progress { done: done as u32, total: total as u32 }), ..Default::default() },
+        Update {
+            message: Some(message.into()),
+            progress: Some(Progress {
+                done: done as u32,
+                total: total as u32,
+            }),
+            ..Default::default()
+        },
     );
 }
 
@@ -116,12 +136,18 @@ fn settings_for(job: &Job) -> anyhow::Result<settings::Settings> {
 }
 
 /// Baixa (ou lê o PDF enviado), traduz quando é para traduzir e salva na biblioteca.
-async fn run_job(engine: &Engine, job: &Job, pdf: Option<Vec<u8>>, cancel: &Cancel) -> anyhow::Result<String> {
+async fn run_job(
+    engine: &Engine,
+    job: &Job,
+    pdf: Option<Vec<u8>>,
+    cancel: &Cancel,
+) -> anyhow::Result<String> {
     let settings = settings_for(job)?;
     let (pages, name, source) = match job.kind {
         Kind::Pdf => {
             let bytes = pdf.ok_or_else(|| anyhow::anyhow!("O PDF enviado sumiu do PC."))?;
-            let pages = tokio::task::spawn_blocking(move || toon_page::pdf::read_pages(&bytes)).await??;
+            let pages =
+                tokio::task::spawn_blocking(move || toon_page::pdf::read_pages(&bytes)).await??;
             (pages, job.name.trim_end_matches(".pdf").to_string(), None)
         }
         Kind::Link => {
@@ -131,16 +157,26 @@ async fn run_job(engine: &Engine, job: &Job, pdf: Option<Vec<u8>>, cancel: &Canc
                 use toon_web::download::Stage;
                 match stage {
                     Stage::Loading => progress(&id, "Abrindo o site", 0, 1),
-                    Stage::Challenge => progress(&id, "O site pediu uma verificação: confirme na janela do navegador", 0, 1),
+                    Stage::Challenge => progress(
+                        &id,
+                        "O site pediu uma verificação: confirme na janela do navegador",
+                        0,
+                        1,
+                    ),
                     Stage::Scrolling => progress(&id, "Lendo as páginas", 0, 1),
                     Stage::Downloading { done, total } => progress(&id, "Baixando", done, total),
                 }
             })
             .await?;
             let images = fetched.images;
-            let pages = tokio::task::spawn_blocking(move || chapter::pages_from_images(&images)).await??;
+            let pages =
+                tokio::task::spawn_blocking(move || chapter::pages_from_images(&images)).await??;
             // O nome da faixa ("Obra Chapter 12") é mais confiável que o título da página.
-            let name = if job.batch.is_some() { job.name.clone() } else { fetched.title };
+            let name = if job.batch.is_some() {
+                job.name.clone()
+            } else {
+                fetched.title
+            };
             (pages, name, Some(url))
         }
     };
@@ -184,9 +220,15 @@ async fn run_job(engine: &Engine, job: &Job, pdf: Option<Vec<u8>>, cancel: &Canc
         concurrency: settings.concurrency as usize,
         chapter: name.clone(),
     };
-    let out = chapter::translate_chapter(ready.clone(), pages.clone(), options, cancel.clone(), move |p| {
-        progress(&id, "Traduzindo", p.done, p.total);
-    })
+    let out = chapter::translate_chapter(
+        ready.clone(),
+        pages.clone(),
+        options,
+        cancel.clone(),
+        move |p| {
+            progress(&id, "Traduzindo", p.done, p.total);
+        },
+    )
     .await?;
     let model = ready.profile.model.clone();
     let count = pages.len() as u32;
@@ -216,7 +258,9 @@ async fn check_loop(engine: Arc<Engine>) {
     // Espera a janela abrir antes da primeira rodada.
     tokio::time::sleep(Duration::from_secs(60)).await;
     loop {
-        let due = updates::load().last_run.is_none_or(|t| toon_core::now_ms() - t >= CHECK_EVERY.as_millis() as i64);
+        let due = updates::load()
+            .last_run
+            .is_none_or(|t| toon_core::now_ms() - t >= CHECK_EVERY.as_millis() as i64);
         if due {
             check_now(&engine).await;
         }
@@ -234,7 +278,10 @@ pub async fn check_now(engine: &Engine) {
         *checking = true;
     }
     engine.say("Procurando capítulos novos");
-    let mut sources: Vec<String> = library::list_works().into_iter().flat_map(|w| w.sources.unwrap_or_default()).collect();
+    let mut sources: Vec<String> = library::list_works()
+        .into_iter()
+        .flat_map(|w| w.sources.unwrap_or_default())
+        .collect();
     sources.sort();
     sources.dedup();
     for (i, source) in sources.iter().enumerate() {
@@ -262,7 +309,11 @@ pub async fn check_now(engine: &Engine) {
     let _ = updates::change(|s| s.last_run = Some(toon_core::now_ms()));
     *engine.checking.lock() = false;
     let fresh = updates::unread().iter().filter(|u| u.is_recent()).count();
-    engine.say(if fresh > 0 { format!("{fresh} obras com capítulo novo") } else { "Nenhum capítulo novo".to_string() });
+    engine.say(if fresh > 0 {
+        format!("{fresh} obras com capítulo novo")
+    } else {
+        "Nenhum capítulo novo".to_string()
+    });
 }
 
 /// Procura nos sites e devolve no formato que o celular espera.
@@ -283,7 +334,9 @@ impl toon_server::App for ServerHooks {
 
     async fn chapter_list(&self, site: &str, url: &str) -> anyhow::Result<Value> {
         let site: Site = serde_json::from_value(Value::String(site.into())).unwrap_or(Site::Link);
-        Ok(serde_json::to_value(catalog::chapter_list(site, url).await?)?)
+        Ok(serde_json::to_value(
+            catalog::chapter_list(site, url).await?,
+        )?)
     }
 
     async fn refresh_work(&self, _work_id: &str) -> anyhow::Result<()> {
@@ -294,9 +347,20 @@ impl toon_server::App for ServerHooks {
         let matches: Vec<catalog::Match> = serde_json::from_value(matches)?;
         let found = library::CatalogFound {
             title: None,
-            names: matches.iter().flat_map(|m| std::iter::once(m.title.clone()).chain(m.alt_names.clone())).collect(),
+            names: matches
+                .iter()
+                .flat_map(|m| std::iter::once(m.title.clone()).chain(m.alt_names.clone()))
+                .collect(),
             sources: matches.iter().map(|m| m.url.clone()).collect(),
-            sites: matches.iter().map(|m| serde_json::to_value(m.site).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()).collect(),
+            sites: matches
+                .iter()
+                .map(|m| {
+                    serde_json::to_value(m.site)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_default()
+                })
+                .collect(),
             cover: None,
             info: None,
         };
@@ -323,12 +387,27 @@ impl toon_server::App for ServerHooks {
     }
 
     fn phone_release(&self) -> Option<(String, u32, std::path::PathBuf)> {
-        let folder = std::env::current_exe().ok()?.parent()?.join("phone");
-        let info: HashMap<String, Value> = serde_json::from_slice(&std::fs::read(folder.join("MangaIndex.json")).ok()?).ok()?;
+        // Ao lado do executável (instalado) ou em mobile/build (rodando do repositório).
+        let exe = std::env::current_exe().ok()?;
+        let dir = exe.parent()?;
+        let candidates = [
+            dir.join("phone"),
+            dir.join("../../mobile/build"),
+            std::env::current_dir().ok()?.join("mobile/build"),
+        ];
+        let folder = candidates
+            .into_iter()
+            .find(|f| f.join("MangaIndex.json").exists())?;
+        let info: HashMap<String, Value> =
+            serde_json::from_slice(&std::fs::read(folder.join("MangaIndex.json")).ok()?).ok()?;
         let apk = folder.join("MangaIndex.apk");
         if !apk.exists() {
             return None;
         }
-        Some((info.get("version")?.as_str()?.to_string(), info.get("build")?.as_u64()? as u32, apk))
+        Some((
+            info.get("version")?.as_str()?.to_string(),
+            info.get("build")?.as_u64()? as u32,
+            apk,
+        ))
     }
 }

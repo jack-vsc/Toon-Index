@@ -11,8 +11,7 @@ use crate::error::AiError;
 use crate::json::parse_lenient;
 use crate::types::{BlockKind, Box, FontRole, MarkedRegion, TextBlock, TranslateRequest};
 
-const EXAMPLE_FIELDS: &str =
-    r##""original":"","translation":"","kind":"speech","font":"comic","italic":false,"color":"#000000","outline":null"##;
+const EXAMPLE_FIELDS: &str = r##""original":"","translation":"","kind":"speech","font":"comic","italic":false,"color":"#000000","outline":null"##;
 
 fn source_line(settings: &Settings) -> String {
     if settings.source_language == AUTO_LANGUAGE {
@@ -42,10 +41,16 @@ pub fn build_prompt(req: &TranslateRequest, settings: &Settings) -> String {
             r#"Also include sound effects / onomatopoeia drawn in the artwork (kind "sfx"), Korean, Japanese and Chinese ones too: each sound effect is one block, and its "translation" is the onomatopoeia a {target} letterer would draw instead (short, uppercase: a laugh, a gulp, a thud), never a description of the sound and never the original characters: a Korean, Japanese or Chinese sound effect is always rewritten in Latin letters."#
         )
     } else {
-        "Ignore sound effects / onomatopoeia drawn as part of the artwork; do not return them.".into()
+        "Ignore sound effects / onomatopoeia drawn as part of the artwork; do not return them."
+            .into()
     };
     let multi = req.images.len() > 1;
-    let sizes: Vec<String> = req.images.iter().enumerate().map(|(i, im)| format!("image {i}: {}x{}", im.width, im.height)).collect();
+    let sizes: Vec<String> = req
+        .images
+        .iter()
+        .enumerate()
+        .map(|(i, im)| format!("image {i}: {}x{}", im.width, im.height))
+        .collect();
     let intro = if multi {
         format!(
             "The first {} attached images are consecutive vertical slices of ONE long manga/webtoon page, ordered top to bottom. Sizes (width x height): {}.\nNeighbouring slices overlap, so some text shows in two slices; it is boxed in only one of them, and is returned only once. If a text block is cut by the top or bottom edge of a slice, skip it in that slice: it appears complete in the neighbouring slice.",
@@ -54,7 +59,10 @@ pub fn build_prompt(req: &TranslateRequest, settings: &Settings) -> String {
         )
     } else {
         let first = &req.images[0];
-        format!("The first attached image is one manga/webtoon page, exactly {}x{} pixels (width x height).", first.width, first.height)
+        format!(
+            "The first attached image is one manga/webtoon page, exactly {}x{} pixels (width x height).",
+            first.width, first.height
+        )
     };
     let fields = block_fields(target);
 
@@ -86,12 +94,24 @@ Respond with ONLY a JSON object, no markdown fences and no commentary, in exactl
     let key_images = if key_count == 1 {
         format!("image {}", req.images.len())
     } else {
-        format!("images {}-{}", req.images.len(), req.images.len() + key_count - 1)
+        format!(
+            "images {}-{}",
+            req.images.len(),
+            req.images.len() + key_count - 1
+        )
     };
     let s = if multi { "s" } else { "" };
-    let key_intro = if key_count == 1 { "image".to_string() } else { format!("{key_count} images") };
+    let key_intro = if key_count == 1 {
+        "image".to_string()
+    } else {
+        format!("{key_count} images")
+    };
     let is_are = if key_count == 1 { "is" } else { "are" };
-    let sfx_skip = if settings.translate_sfx { ", unless it is a sound effect" } else { "" };
+    let sfx_skip = if settings.translate_sfx {
+        ", unless it is a sound effect"
+    } else {
+        ""
+    };
     format!(
         r#"You are a professional manga translator.
 
@@ -124,9 +144,17 @@ Respond with ONLY a JSON object, no markdown fences and no commentary, in exactl
 pub fn build_follow_up(ids: &[u32], req: &TranslateRequest, settings: &Settings) -> String {
     let source = source_line(settings);
     let target = &settings.target_language;
-    let shows = if req.key.len() > 1 { "s show" } else { " shows" };
+    let shows = if req.key.len() > 1 {
+        "s show"
+    } else {
+        " shows"
+    };
     let list: Vec<String> = ids.iter().map(u32::to_string).collect();
-    let sfx = if settings.translate_sfx { "" } else { ", a sound effect" };
+    let sfx = if settings.translate_sfx {
+        ""
+    } else {
+        ", a sound effect"
+    };
     let fields = block_fields(target);
     let first = ids.first().copied().unwrap_or(1);
     format!(
@@ -147,7 +175,11 @@ Respond with ONLY a JSON object, no markdown fences and no commentary, in exactl
 }
 
 /// Os parágrafos de uma novel (texto lido do PDF, sem imagens), traduzidos um a um.
-pub fn build_novel_prompt(paragraphs: &[String], context: &[String], settings: &Settings) -> String {
+pub fn build_novel_prompt(
+    paragraphs: &[String],
+    context: &[String],
+    settings: &Settings,
+) -> String {
     let source = source_line(settings);
     let target = &settings.target_language;
     let before = if context.is_empty() {
@@ -159,7 +191,11 @@ pub fn build_novel_prompt(paragraphs: &[String], context: &[String], settings: &
             quoted.join("\n")
         )
     };
-    let numbered: Vec<String> = paragraphs.iter().enumerate().map(|(i, p)| format!("[{}] {p}", i + 1)).collect();
+    let numbered: Vec<String> = paragraphs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| format!("[{}] {p}", i + 1))
+        .collect();
     let n = paragraphs.len();
     format!(
         r#"You are a professional literary translator translating a light novel into {target}.
@@ -177,13 +213,17 @@ Answer with a JSON object and nothing else: {{"t": ["translation of [1]", "trans
 pub fn parse_novel(raw: &str, count: usize) -> Result<Vec<String>, AiError> {
     let start = raw.find('{').unwrap_or(0);
     let parsed = parse_lenient(&raw[start..]).map_err(|e| AiError::Format(e.to_string()))?;
-    let list: Option<Vec<String>> = parsed
-        .get("t")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect());
+    let list: Option<Vec<String>> = parsed.get("t").and_then(Value::as_array).map(|a| {
+        a.iter()
+            .filter_map(|s| s.as_str().map(str::to_string))
+            .collect()
+    });
     match list {
         Some(l) if l.len() == count => Ok(l),
-        other => Err(AiError::Format(format!("A IA devolveu {} parágrafos de {count}.", other.map_or(0, |l| l.len())))),
+        other => Err(AiError::Format(format!(
+            "A IA devolveu {} parágrafos de {count}.",
+            other.map_or(0, |l| l.len())
+        ))),
     }
 }
 
@@ -195,7 +235,8 @@ pub struct Parsed {
 }
 
 static WEBSITE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b[a-z0-9-]+\.(?:com|net|org|io|co|me|to|gg|cc|xyz|site|online|club|info)\b").unwrap()
+    Regex::new(r"(?i)\b[a-z0-9-]+\.(?:com|net|org|io|co|me|to|gg|cc|xyz|site|online|club|info)\b")
+        .unwrap()
 });
 
 fn extract_json(raw: &str) -> Result<Value, AiError> {
@@ -204,22 +245,40 @@ fn extract_json(raw: &str) -> Result<Value, AiError> {
     let cleaned = cleaned.trim();
     let preview: String = raw.chars().take(300).collect();
     let Some(start) = cleaned.find(['{', '[']) else {
-        return Err(AiError::Format(format!("A IA não retornou JSON válido. Resposta: {preview}")));
+        return Err(AiError::Format(format!(
+            "A IA não retornou JSON válido. Resposta: {preview}"
+        )));
     };
-    parse_lenient(&cleaned[start..]).map_err(|e| AiError::Format(format!("Falha ao ler o JSON da IA: {e}. Resposta: {preview}")))
+    parse_lenient(&cleaned[start..]).map_err(|e| {
+        AiError::Format(format!(
+            "Falha ao ler o JSON da IA: {e}. Resposta: {preview}"
+        ))
+    })
 }
 
 fn normalized_letters(text: &str) -> String {
-    text.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+    text.to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
 }
 
 /// `boxed_only` descarta blocos posicionados pela caixa do próprio modelo (as repescagens só mostram a chave).
-pub fn parse_blocks(raw: &str, req: &TranslateRequest, boxed_only: bool) -> Result<Parsed, AiError> {
+pub fn parse_blocks(
+    raw: &str,
+    req: &TranslateRequest,
+    boxed_only: bool,
+) -> Result<Parsed, AiError> {
     let json = extract_json(raw)?;
     let mut result: Vec<Vec<TextBlock>> = vec![Vec::new(); req.images.len()];
     let mut answered = HashSet::new();
     let mut skipped = HashSet::new();
-    for id in json.get("skip").and_then(Value::as_array).into_iter().flatten() {
+    for id in json
+        .get("skip")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         if let Some(id) = id.as_f64() {
             answered.insert(id as u32);
             skipped.insert(id as u32);
@@ -233,12 +292,17 @@ pub fn parse_blocks(raw: &str, req: &TranslateRequest, boxed_only: bool) -> Resu
             .iter()
             .flat_map(|g| {
                 let image = g.get("image").cloned().unwrap_or(Value::Null);
-                g.get("blocks").and_then(Value::as_array).cloned().unwrap_or_default().into_iter().map(move |mut b| {
-                    if let Value::Object(o) = &mut b {
-                        o.entry("image").or_insert(image.clone());
-                    }
-                    b
-                })
+                g.get("blocks")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |mut b| {
+                        if let Value::Object(o) = &mut b {
+                            o.entry("image").or_insert(image.clone());
+                        }
+                        b
+                    })
             })
             .collect()
     } else if let Some(list) = json.as_array() {
@@ -286,11 +350,23 @@ pub fn parse_blocks(raw: &str, req: &TranslateRequest, boxed_only: bool) -> Resu
         if translation.chars().count() >= 17 {
             keys.push(translation.clone());
         }
-        let live = |key: &str, seen: &HashMap<String, Seen>| seen.get(key).filter(|t| !removed.contains(&(t.image, t.index))).map(|t| (t.image, t.index, t.glyphs));
-        let same_text = if keys.contains(&original) { live(&original, &seen) } else { None };
-        let twin = same_text
-            .filter(|t| t.0 != image)
-            .or_else(|| if keys.contains(&translation) { live(&translation, &seen) } else { None });
+        let live = |key: &str, seen: &HashMap<String, Seen>| {
+            seen.get(key)
+                .filter(|t| !removed.contains(&(t.image, t.index)))
+                .map(|t| (t.image, t.index, t.glyphs))
+        };
+        let same_text = if keys.contains(&original) {
+            live(&original, &seen)
+        } else {
+            None
+        };
+        let twin = same_text.filter(|t| t.0 != image).or_else(|| {
+            if keys.contains(&translation) {
+                live(&translation, &seen)
+            } else {
+                None
+            }
+        });
         if let Some((ti, tidx, tg)) = twin {
             if tg >= glyphs {
                 continue;
@@ -300,15 +376,32 @@ pub fn parse_blocks(raw: &str, req: &TranslateRequest, boxed_only: bool) -> Resu
         let index = result[image].len();
         result[image].push(block);
         for key in keys {
-            seen.insert(key, Seen { image, index, glyphs });
+            seen.insert(
+                key,
+                Seen {
+                    image,
+                    index,
+                    glyphs,
+                },
+            );
         }
     }
     let blocks = result
         .into_iter()
         .enumerate()
-        .map(|(i, list)| list.into_iter().enumerate().filter(|(j, _)| !removed.contains(&(i, *j))).map(|(_, b)| b).collect())
+        .map(|(i, list)| {
+            list.into_iter()
+                .enumerate()
+                .filter(|(j, _)| !removed.contains(&(i, *j)))
+                .map(|(_, b)| b)
+                .collect()
+        })
         .collect();
-    Ok(Parsed { blocks, answered, skipped })
+    Ok(Parsed {
+        blocks,
+        answered,
+        skipped,
+    })
 }
 
 const MIN_COUNTED_GLYPHS: u32 = 3;
@@ -323,7 +416,11 @@ fn letter_count(text: &str) -> usize {
 /// texto vem com o número da caixa seguinte (ou anterior). O detector mediu quantas letras cada caixa
 /// tem; quando os textos dali em diante cabem muito melhor nas caixas deslocadas, eles mudam.
 pub fn realign_ids(entries: &mut [Value], req: &TranslateRequest) {
-    let mut order: Vec<&MarkedRegion> = req.regions.iter().filter(|r| r.glyphs >= MIN_COUNTED_GLYPHS).collect();
+    let mut order: Vec<&MarkedRegion> = req
+        .regions
+        .iter()
+        .filter(|r| r.glyphs >= MIN_COUNTED_GLYPHS)
+        .collect();
     order.sort_by_key(|r| r.id);
     let at: HashMap<u32, usize> = order.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
     struct Row {
@@ -337,9 +434,16 @@ pub fn realign_ids(entries: &mut [Value], req: &TranslateRequest) {
         .filter_map(|(i, e)| {
             let original = e.get("original")?.as_str()?;
             let ids = e.get("ids")?.as_array()?;
-            let places: Vec<usize> = ids.iter().filter_map(|id| id.as_f64().and_then(|n| at.get(&(n as u32)).copied())).collect();
+            let places: Vec<usize> = ids
+                .iter()
+                .filter_map(|id| id.as_f64().and_then(|n| at.get(&(n as u32)).copied()))
+                .collect();
             let letters = letter_count(original);
-            (letters >= 4 && !places.is_empty()).then_some(Row { entry: i, places, letters })
+            (letters >= 4 && !places.is_empty()).then_some(Row {
+                entry: i,
+                places,
+                letters,
+            })
         })
         .collect();
     if rows.len() < 3 {
@@ -354,7 +458,9 @@ pub fn realign_ids(entries: &mut [Value], req: &TranslateRequest) {
             }
             glyphs += order[q as usize].glyphs;
         }
-        (((row.letters as f64 + 4.0) / (glyphs as f64 + 4.0)).ln()).abs().min(3.0)
+        (((row.letters as f64 + 4.0) / (glyphs as f64 + 4.0)).ln())
+            .abs()
+            .min(3.0)
     };
     let given: Vec<f64> = rows.iter().map(|r| cost(r, 0)).collect();
     let mut best = (usize::MAX, 0usize, 0i64, 0.0f64, 0.0f64, 0.0f64);
@@ -378,15 +484,26 @@ pub fn realign_ids(entries: &mut [Value], req: &TranslateRequest) {
         return;
     }
     for row in &rows[from..to] {
-        let ids: Vec<Value> = row.places.iter().map(|&p| Value::from(order[(p as i64 + shift) as usize].id)).collect();
+        let ids: Vec<Value> = row
+            .places
+            .iter()
+            .map(|&p| Value::from(order[(p as i64 + shift) as usize].id))
+            .collect();
         entries[row.entry]["ids"] = Value::Array(ids);
     }
-    tracing::warn!("números das caixas trocados por {shift} nos blocos {}-{} de {}: corrigidos", from + 1, to, rows.len());
+    tracing::warn!(
+        "números das caixas trocados por {shift} nos blocos {}-{} de {}: corrigidos",
+        from + 1,
+        to,
+        rows.len()
+    );
 }
 
 /// Uma palavra (ou poucas) repetida muitas vezes seguidas, ou bem mais texto do que cabe num balão.
 pub fn looping(translation: Option<&Value>) -> bool {
-    let Some(text) = translation.and_then(Value::as_str) else { return false };
+    let Some(text) = translation.and_then(Value::as_str) else {
+        return false;
+    };
     if text.chars().count() > 1200 {
         return true;
     }
@@ -412,11 +529,16 @@ pub fn looping(translation: Option<&Value>) -> bool {
 
 fn pick_regions<'a>(ids: Option<&Value>, req: &'a TranslateRequest) -> Vec<&'a MarkedRegion> {
     let list: Vec<u32> = match ids {
-        Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_f64().filter(|n| n.fract() == 0.0).map(|n| n as u32)).collect(),
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_f64().filter(|n| n.fract() == 0.0).map(|n| n as u32))
+            .collect(),
         Some(v) => v.as_f64().map(|n| vec![n as u32]).unwrap_or_default(),
         None => Vec::new(),
     };
-    list.iter().filter_map(|id| req.regions.iter().find(|r| r.id == *id)).collect()
+    list.iter()
+        .filter_map(|id| req.regions.iter().find(|r| r.id == *id))
+        .collect()
 }
 
 fn to_block<'a>(
@@ -425,18 +547,35 @@ fn to_block<'a>(
     req: &TranslateRequest,
 ) -> Option<(usize, TextBlock, Vec<&'a MarkedRegion>)> {
     let obj = item.as_object()?;
-    let original = obj.get("original").and_then(Value::as_str).unwrap_or("").to_string();
+    let original = obj
+        .get("original")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let kind_text = obj.get("kind").and_then(Value::as_str).unwrap_or("");
     let watermark = kind_text == "watermark" || WEBSITE.is_match(&original);
-    let translation =
-        if watermark { String::new() } else { obj.get("translation").and_then(Value::as_str).unwrap_or("").trim().to_string() };
+    let translation = if watermark {
+        String::new()
+    } else {
+        obj.get("translation")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
     if translation.is_empty() && !watermark {
         return None;
     }
-    let words = original.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count();
+    let words = original
+        .split_whitespace()
+        .filter(|w| w.chars().any(char::is_alphanumeric))
+        .count();
     let placed = place(picked, from_box(obj, req), words)?;
     let size = &req.images[placed.image];
-    let font = obj.get("font").and_then(Value::as_str).and_then(|f| serde_json::from_value(Value::String(f.into())).ok());
+    let font = obj
+        .get("font")
+        .and_then(Value::as_str)
+        .and_then(|f| serde_json::from_value(Value::String(f.into())).ok());
     let block = TextBlock {
         text_box: placed.r#box,
         area_box: room_around(placed.r#box, size.width as f32, size.height as f32),
@@ -444,7 +583,11 @@ fn to_block<'a>(
         letter_height: placed.letter_height,
         original,
         translation,
-        kind: if watermark { BlockKind::Watermark } else { BlockKind::parse(kind_text).unwrap_or(BlockKind::Other) },
+        kind: if watermark {
+            BlockKind::Watermark
+        } else {
+            BlockKind::parse(kind_text).unwrap_or(BlockKind::Other)
+        },
         font: font.map(|f: FontRole| f),
         italic: obj.get("italic").and_then(Value::as_bool),
         color: to_hex(obj.get("color")),
@@ -463,20 +606,43 @@ struct Placed<'a> {
 
 /// As caixas do detector que o modelo escolheu dão a posição exata. A caixa do próprio modelo (muitas
 /// vezes uma linha ou mais fora) só posiciona texto que o detector não achou.
-fn place<'a>(picked: &[&'a MarkedRegion], guess: Option<(usize, Box)>, words: usize) -> Option<Placed<'a>> {
+fn place<'a>(
+    picked: &[&'a MarkedRegion],
+    guess: Option<(usize, Box)>,
+    words: usize,
+) -> Option<Placed<'a>> {
     if picked.is_empty() {
-        return guess.map(|(image, b)| Placed { image, r#box: b, kept: Vec::new(), ink_boxes: None, letter_height: None });
+        return guess.map(|(image, b)| Placed {
+            image,
+            r#box: b,
+            kept: Vec::new(),
+            ink_boxes: None,
+            letter_height: None,
+        });
     }
     // Faixas que se sobrepõem numeram o mesmo texto duas vezes; o bloco fica na faixa da maioria das caixas.
     let mut counts: HashMap<usize, usize> = HashMap::new();
     for r in picked {
         *counts.entry(r.image).or_default() += 1;
     }
-    let image = counts.iter().max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0))).map(|(i, _)| *i).unwrap();
-    let on_image: Vec<&MarkedRegion> = picked.iter().copied().filter(|r| r.image == image).collect();
+    let image = counts
+        .iter()
+        .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+        .map(|(i, _)| *i)
+        .unwrap();
+    let on_image: Vec<&MarkedRegion> = picked
+        .iter()
+        .copied()
+        .filter(|r| r.image == image)
+        .collect();
     // O detector já junta as linhas de um balão; outras caixas que o modelo junta são pontas do balão
     // ou desenho ao lado, a não ser que continuem o texto logo em seguida.
-    let mut kept: Vec<&MarkedRegion> = vec![on_image.iter().copied().fold(on_image[0], |a, b| if b.glyphs > a.glyphs { b } else { a })];
+    let mut kept: Vec<&MarkedRegion> = vec![
+        on_image
+            .iter()
+            .copied()
+            .fold(on_image[0], |a, b| if b.glyphs > a.glyphs { b } else { a }),
+    ];
     let mut grew = true;
     while grew {
         grew = false;
@@ -490,7 +656,11 @@ fn place<'a>(picked: &[&'a MarkedRegion], guess: Option<(usize, Box)>, words: us
     // Cada palavra é pelo menos um pedaço de tinta: bem menos pedaços que palavras é uma caixa ao lado
     // do texto (a ponta de um balão perto de um comentário pequeno, um rosto).
     let pieces: usize = kept.iter().map(|r| r.glyphs as usize).sum();
-    if if words <= 2 { pieces < words } else { pieces * 2 < words } {
+    if if words <= 2 {
+        pieces < words
+    } else {
+        pieces * 2 < words
+    } {
         return None;
     }
     let ink: Vec<Box> = kept.iter().map(|r| r.r#box).collect();
@@ -498,7 +668,13 @@ fn place<'a>(picked: &[&'a MarkedRegion], guess: Option<(usize, Box)>, words: us
     let r#box = ink.iter().copied().reduce(union).unwrap();
     let mut all = kept.clone();
     all.extend(picked.iter().copied().filter(|r| r.image != image));
-    Some(Placed { image, r#box, kept: all, ink_boxes: Some(ink), letter_height: Some(letter_height) })
+    Some(Placed {
+        image,
+        r#box,
+        kept: all,
+        ink_boxes: Some(ink),
+        letter_height: Some(letter_height),
+    })
 }
 
 /// Se `b` é a próxima linha de `a`, ou o resto da mesma linha.
@@ -518,14 +694,22 @@ fn continues(a: &MarkedRegion, b: &MarkedRegion) -> bool {
 }
 
 fn from_box(obj: &serde_json::Map<String, Value>, req: &TranslateRequest) -> Option<(usize, Box)> {
-    let image = obj.get("image").and_then(Value::as_u64).map(|n| n as usize).unwrap_or(0);
+    let image = obj
+        .get("image")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(0);
     let size = req.images.get(image)?;
     to_box(obj.get("box_2d")?, size.width as f32, size.height as f32).map(|b| (image, b))
 }
 
 /// `[ymin, xmin, ymax, xmax]` de 0 a 1000 para `[x0, y0, x1, y1]` em pixels.
 fn to_box(value: &Value, width: f32, height: f32) -> Option<Box> {
-    let n: Vec<f32> = value.as_array()?.iter().filter_map(|v| v.as_f64().map(|x| x as f32)).collect();
+    let n: Vec<f32> = value
+        .as_array()?
+        .iter()
+        .filter_map(|v| v.as_f64().map(|x| x as f32))
+        .collect();
     if n.len() != 4 {
         return None;
     }
@@ -542,16 +726,27 @@ fn room_around(b: Box, width: f32, height: f32) -> Box {
     let h = b[3] - b[1];
     let px = (w * 0.3).max(16.0);
     let py = (h * 0.6).max(16.0);
-    [(b[0] - px).clamp(0.0, width), (b[1] - py).clamp(0.0, height), (b[2] + px).clamp(0.0, width), (b[3] + py).clamp(0.0, height)]
+    [
+        (b[0] - px).clamp(0.0, width),
+        (b[1] - py).clamp(0.0, height),
+        (b[2] + px).clamp(0.0, width),
+        (b[3] + py).clamp(0.0, height),
+    ]
 }
 
 fn to_hex(value: Option<&Value>) -> Option<String> {
     let s = value?.as_str()?.trim();
-    (s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())).then(|| s.to_lowercase())
+    (s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| s.to_lowercase())
 }
 
 pub fn union(a: Box, b: Box) -> Box {
-    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
+    [
+        a[0].min(b[0]),
+        a[1].min(b[1]),
+        a[2].max(b[2]),
+        a[3].max(b[3]),
+    ]
 }
 
 #[cfg(test)]
@@ -560,12 +755,29 @@ mod tests {
     use crate::types::PageImage;
 
     fn req() -> TranslateRequest {
-        let img = PageImage { base64: String::new(), mime_type: "image/jpeg".into(), width: 1000, height: 1600 };
+        let img = PageImage {
+            base64: String::new(),
+            mime_type: "image/jpeg".into(),
+            width: 1000,
+            height: 1600,
+        };
         TranslateRequest {
             images: vec![img],
             regions: vec![
-                MarkedRegion { id: 1, image: 0, r#box: [100.0, 100.0, 400.0, 140.0], letter_height: 30.0, glyphs: 15 },
-                MarkedRegion { id: 2, image: 0, r#box: [100.0, 150.0, 420.0, 190.0], letter_height: 30.0, glyphs: 18 },
+                MarkedRegion {
+                    id: 1,
+                    image: 0,
+                    r#box: [100.0, 100.0, 400.0, 140.0],
+                    letter_height: 30.0,
+                    glyphs: 15,
+                },
+                MarkedRegion {
+                    id: 2,
+                    image: 0,
+                    r#box: [100.0, 150.0, 420.0, 190.0],
+                    letter_height: 30.0,
+                    glyphs: 18,
+                },
             ],
             ..Default::default()
         }
@@ -585,6 +797,8 @@ mod tests {
     fn detects_loops() {
         let text = "E A ".repeat(12);
         assert!(looping(Some(&Value::String(text))));
-        assert!(!looping(Some(&Value::String("Uma fala normal de balão.".into()))));
+        assert!(!looping(Some(&Value::String(
+            "Uma fala normal de balão.".into()
+        ))));
     }
 }

@@ -9,7 +9,11 @@ pub fn data_dir() -> PathBuf {
     ROOT.get_or_init(|| {
         std::env::var_os("TOON_DATA_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Manga Index"))
+            .unwrap_or_else(|| {
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("Manga Index")
+            })
     })
     .clone()
 }
@@ -36,7 +40,9 @@ pub fn translation_cache_dir() -> PathBuf {
 }
 
 pub fn dataset_dir() -> PathBuf {
-    std::env::var_os("MI_DATASET_DIR").map(PathBuf::from).unwrap_or_else(|| data_dir().join("training-dataset"))
+    std::env::var_os("MI_DATASET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| data_dir().join("training-dataset"))
 }
 
 /// Perfil do navegador que o app controla para ler os sites (cookies, verificações já passadas).

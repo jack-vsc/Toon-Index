@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::library::{self, LOCK};
 use crate::names::{is_novel_url, parse_chapter_name};
+use crate::now_ms;
 use crate::paths::library_dir;
 use crate::store::{read_json, write_json};
 use crate::works::Format;
-use crate::now_ms;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -87,14 +87,23 @@ fn change(f: impl FnOnce(Vec<Record>) -> Vec<Record>) -> anyhow::Result<()> {
 /// Anota um capítulo como lido ou como o ponto da leitura. Nunca volta atrás: o que foi lido continua
 /// lido e a posição só avança. Abrir um capítulo quer dizer que o anterior foi terminado.
 pub fn upsert(mut records: Vec<Record>, next: Record) -> Vec<Record> {
-    if let Some(old) = records.iter_mut().find(|r| r.work_id == next.work_id && r.chapter == next.chapter) {
-        let status = if old.status == Status::Read || next.status == Status::Read { Status::Read } else { Status::Reading };
+    if let Some(old) = records
+        .iter_mut()
+        .find(|r| r.work_id == next.work_id && r.chapter == next.chapter)
+    {
+        let status = if old.status == Status::Read || next.status == Status::Read {
+            Status::Read
+        } else {
+            Status::Reading
+        };
         let progress = match (old.progress, next.progress) {
             (None, p) | (p, None) => p,
             (Some(a), Some(b)) => Some(a.max(b)),
         };
         // O lugar mais recente onde foi lido; o histórico nunca substitui o que a extensão viu.
-        if next.updated_at >= old.updated_at && (next.source != Source::History || old.source == Source::History) {
+        if next.updated_at >= old.updated_at
+            && (next.source != Source::History || old.source == Source::History)
+        {
             if !next.url.is_empty() {
                 old.url = next.url.clone();
             }
@@ -110,9 +119,19 @@ pub fn upsert(mut records: Vec<Record>, next: Record) -> Vec<Record> {
         records.push(next.clone());
     }
     // Em qualquer ordem que cheguem (o histórico pode trazer um capítulo antigo depois de um novo).
-    let chapters: Vec<f64> = records.iter().filter(|r| r.work_id == next.work_id).map(|r| r.chapter).collect();
-    for r in records.iter_mut().filter(|r| r.work_id == next.work_id && r.status == Status::Reading) {
-        if chapters.iter().any(|&c| c > r.chapter && c <= r.chapter + 1.0) {
+    let chapters: Vec<f64> = records
+        .iter()
+        .filter(|r| r.work_id == next.work_id)
+        .map(|r| r.chapter)
+        .collect();
+    for r in records
+        .iter_mut()
+        .filter(|r| r.work_id == next.work_id && r.status == Status::Reading)
+    {
+        if chapters
+            .iter()
+            .any(|&c| c > r.chapter && c <= r.chapter + 1.0)
+        {
             r.status = Status::Read;
             r.progress = Some(1.0);
         }
@@ -123,13 +142,23 @@ pub fn upsert(mut records: Vec<Record>, next: Record) -> Vec<Record> {
 /// Uma página de capítulo aberta no navegador; `None` quando a página não nomeia capítulo de nada.
 pub fn report(report: &Report) -> anyhow::Result<Option<(Record, String)>> {
     let parsed = parse_chapter_name(&report.title, Some(&report.url));
-    let (Some(chapter), false) = (parsed.chapter, parsed.work.is_empty()) else { return Ok(None) };
-    let format = if is_novel_url(&report.url) { Format::Novel } else { Format::Comic };
+    let (Some(chapter), false) = (parsed.chapter, parsed.work.is_empty()) else {
+        return Ok(None);
+    };
+    let format = if is_novel_url(&report.url) {
+        Format::Novel
+    } else {
+        Format::Comic
+    };
     let work_id = library::index_work(&parsed.work, format, false)?;
     let record = Record {
         work_id: work_id.clone(),
         chapter,
-        status: if report.finished { Status::Read } else { Status::Reading },
+        status: if report.finished {
+            Status::Read
+        } else {
+            Status::Reading
+        },
         progress: report.progress.map(|p| p.clamp(0.0, 1.0)),
         url: report.url.clone(),
         title: report.title.clone(),
@@ -138,13 +167,19 @@ pub fn report(report: &Report) -> anyhow::Result<Option<(Record, String)>> {
     };
     change(|records| upsert(records, record))?;
     library::started_reading(&work_id);
-    if let Some(work_url) = &report.work_url {
-        if same_site(work_url, &report.url) && crate::names::chapter_in_url(work_url).is_none() {
-            library::add_work_source_to(&work_id, work_url)?;
-        }
+    if let Some(work_url) = &report.work_url
+        && same_site(work_url, &report.url)
+        && crate::names::chapter_in_url(work_url).is_none()
+    {
+        library::add_work_source_to(&work_id, work_url)?;
     }
-    let saved = list().into_iter().find(|r| r.work_id == work_id && r.chapter == chapter);
-    let name = library::list_works().into_iter().find(|w| w.id == work_id).map(|w| w.name().to_string());
+    let saved = list()
+        .into_iter()
+        .find(|r| r.work_id == work_id && r.chapter == chapter);
+    let name = library::list_works()
+        .into_iter()
+        .find(|w| w.id == work_id)
+        .map(|w| w.name().to_string());
     Ok(saved.map(|r| (r, name.unwrap_or(parsed.work))))
 }
 
@@ -159,12 +194,18 @@ fn same_site(a: &str, b: &str) -> bool {
 /// a última página conta como lido.
 pub fn read_in_app(entry_id: &str, progress: f64, at: Option<i64>) -> anyhow::Result<()> {
     let meta = library::read_meta(entry_id)?;
-    let Some(chapter) = meta.chapter else { return Ok(()) };
+    let Some(chapter) = meta.chapter else {
+        return Ok(());
+    };
     let p = progress.clamp(0.0, 1.0);
     let record = Record {
         work_id: meta.work_id.clone(),
         chapter,
-        status: if p >= 1.0 { Status::Read } else { Status::Reading },
+        status: if p >= 1.0 {
+            Status::Read
+        } else {
+            Status::Reading
+        },
         progress: Some(p),
         url: meta.source.clone().unwrap_or_default(),
         title: meta.title.clone(),
@@ -214,7 +255,9 @@ pub fn mark_read(work_id: &str, chapters: &[f64]) -> anyhow::Result<()> {
 /// Capítulos marcados como não lidos: a leitura deles some (ou de todos, com `None`).
 pub fn forget(work_id: &str, chapters: Option<&[f64]>) -> anyhow::Result<()> {
     change(|mut records| {
-        records.retain(|r| r.work_id != work_id || chapters.is_some_and(|list| !list.contains(&r.chapter)));
+        records.retain(|r| {
+            r.work_id != work_id || chapters.is_some_and(|list| !list.contains(&r.chapter))
+        });
         records
     })
 }
@@ -225,7 +268,8 @@ pub fn move_reading(from_id: &str, into_id: &str) -> anyhow::Result<()> {
     if !records.iter().any(|r| r.work_id == from_id) {
         return Ok(());
     }
-    let (moving, staying): (Vec<Record>, Vec<Record>) = records.into_iter().partition(|r| r.work_id == from_id);
+    let (moving, staying): (Vec<Record>, Vec<Record>) =
+        records.into_iter().partition(|r| r.work_id == from_id);
     let merged = moving.into_iter().fold(staying, |all, mut r| {
         r.work_id = into_id.to_string();
         upsert(all, r)

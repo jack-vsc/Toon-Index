@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail};
-use chromiumoxide::cdp::browser_protocol::browser::{Bounds, GetWindowForTargetParams, SetWindowBoundsParams, WindowState};
+use chromiumoxide::cdp::browser_protocol::browser::{
+    Bounds, GetWindowForTargetParams, SetWindowBoundsParams, WindowState,
+};
 use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
 use chromiumoxide::{Browser, Page};
 use futures::StreamExt;
@@ -32,15 +34,21 @@ fn executable() -> anyhow::Result<PathBuf> {
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
     ];
-    candidates.iter().map(PathBuf::from).find(|p| p.exists()).ok_or_else(|| anyhow!("Não achei o Edge nem o Chrome neste PC."))
+    candidates
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.exists())
+        .ok_or_else(|| anyhow!("Não achei o Edge nem o Chrome neste PC."))
 }
 
 async fn browser() -> anyhow::Result<std::sync::Arc<Browser>> {
     let mut slot = BROWSER.lock().await;
-    if let Some(b) = slot.as_ref() {
-        if tokio::time::timeout(Duration::from_secs(3), b.version()).await.is_ok_and(|r| r.is_ok()) {
-            return Ok(b.clone());
-        }
+    if let Some(b) = slot.as_ref()
+        && tokio::time::timeout(Duration::from_secs(3), b.version())
+            .await
+            .is_ok_and(|r| r.is_ok())
+    {
+        return Ok(b.clone());
     }
     let b = std::sync::Arc::new(connect().await?);
     *slot = Some(b.clone());
@@ -66,10 +74,10 @@ async fn attach(ws: &str) -> anyhow::Result<Browser> {
 async fn connect() -> anyhow::Result<Browser> {
     let profile = browser_profile_dir();
     std::fs::create_dir_all(&profile)?;
-    if let Some(ws) = active_port(&profile) {
-        if let Ok(browser) = attach(&ws).await {
-            return Ok(browser);
-        }
+    if let Some(ws) = active_port(&profile)
+        && let Ok(browser) = attach(&ws).await
+    {
+        return Ok(browser);
     }
     let _ = std::fs::remove_file(profile.join("DevToolsActivePort"));
     std::process::Command::new(executable()?)
@@ -91,10 +99,10 @@ async fn connect() -> anyhow::Result<Browser> {
         .context("abrindo o navegador")?;
     for _ in 0..100 {
         tokio::time::sleep(Duration::from_millis(200)).await;
-        if let Some(ws) = active_port(&profile) {
-            if let Ok(browser) = attach(&ws).await {
-                return Ok(browser);
-            }
+        if let Some(ws) = active_port(&profile)
+            && let Ok(browser) = attach(&ws).await
+        {
+            return Ok(browser);
         }
     }
     bail!("O navegador não abriu a porta de controle.")
@@ -121,7 +129,11 @@ impl Tab {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(err)) => bail!("Não foi possível abrir o link ({err})."),
             Err(_) => {
-                if self.eval::<bool>("document.readyState !== 'loading'").await.unwrap_or(false) {
+                if self
+                    .eval::<bool>("document.readyState !== 'loading'")
+                    .await
+                    .unwrap_or(false)
+                {
                     Ok(())
                 } else {
                     bail!("O site demorou demais para abrir.")
@@ -132,7 +144,12 @@ impl Tab {
 
     /// Roda JavaScript na página e devolve o valor (promessas são esperadas).
     pub async fn eval<T: DeserializeOwned>(&self, js: &str) -> anyhow::Result<T> {
-        let params = EvaluateParams::builder().expression(js).await_promise(true).return_by_value(true).build().map_err(|e| anyhow!(e))?;
+        let params = EvaluateParams::builder()
+            .expression(js)
+            .await_promise(true)
+            .return_by_value(true)
+            .build()
+            .map_err(|e| anyhow!(e))?;
         let result = tokio::time::timeout(COMMAND_TIMEOUT, self.page.evaluate(params))
             .await
             .map_err(|_| anyhow!("A página não respondeu."))??;
@@ -153,9 +170,20 @@ impl Tab {
     }
 
     async fn place(&self, left: i64, top: i64) -> anyhow::Result<()> {
-        let window = self.page.execute(GetWindowForTargetParams::default()).await?.result.window_id;
-        let bounds = Bounds::builder().left(left).top(top).window_state(WindowState::Normal).build();
-        self.page.execute(SetWindowBoundsParams::new(window, bounds)).await?;
+        let window = self
+            .page
+            .execute(GetWindowForTargetParams::default())
+            .await?
+            .result
+            .window_id;
+        let bounds = Bounds::builder()
+            .left(left)
+            .top(top)
+            .window_state(WindowState::Normal)
+            .build();
+        self.page
+            .execute(SetWindowBoundsParams::new(window, bounds))
+            .await?;
         Ok(())
     }
 
@@ -201,7 +229,9 @@ impl Tab {
 
     /// Os cookies que o site tem nesta aba, como um cabeçalho `Cookie` para o endereço.
     pub async fn cookie_header(&self, url: &str) -> String {
-        let Ok(target) = url::Url::parse(url) else { return String::new() };
+        let Ok(target) = url::Url::parse(url) else {
+            return String::new();
+        };
         let host = target.host_str().unwrap_or("").to_string();
         let cookies = self.page.get_cookies().await.unwrap_or_default();
         cookies
@@ -216,12 +246,17 @@ impl Tab {
     }
 
     pub async fn user_agent(&self) -> String {
-        self.eval::<String>("navigator.userAgent").await.unwrap_or_default()
+        self.eval::<String>("navigator.userAgent")
+            .await
+            .unwrap_or_default()
     }
 
     /// Força o desenho de um quadro: leitores que carregam imagens ao aparecer na tela esperam um.
     pub async fn frame(&self) {
-        let _ = self.page.screenshot(chromiumoxide::page::ScreenshotParams::builder().build()).await;
+        let _ = self
+            .page
+            .screenshot(chromiumoxide::page::ScreenshotParams::builder().build())
+            .await;
     }
 
     /// Mostra o site para a pessoa entrar na conta; volta quando ela fecha a aba ou passa o tempo.

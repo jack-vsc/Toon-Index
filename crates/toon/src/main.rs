@@ -9,13 +9,27 @@ mod ui;
 use std::sync::Arc;
 
 fn main() -> eframe::Result {
-    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).init();
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("runtime");
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .init();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
     let engine = Arc::new(engine::Engine::default());
     engine::start(engine.clone(), &runtime);
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default().with_title("Toon Index").with_inner_size([1280.0, 820.0]).with_min_inner_size([900.0, 600.0]),
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_title("Toon Index")
+            .with_inner_size([1280.0, 820.0])
+            .with_min_inner_size([900.0, 600.0]),
         ..Default::default()
     };
-    eframe::run_native("Toon Index", options, Box::new(move |cc| Ok(Box::new(ui::App::new(cc, engine, runtime)))))
+    eframe::run_native(
+        "Toon Index",
+        options,
+        Box::new(move |cc| Ok(Box::new(ui::App::new(cc, engine, runtime)))),
+    )
 }

@@ -60,7 +60,11 @@ fn bare(url: &str) -> String {
 }
 
 fn format_of(url: &str) -> Format {
-    if is_novel_url(url) { Format::Novel } else { Format::Comic }
+    if is_novel_url(url) {
+        Format::Novel
+    } else {
+        Format::Comic
+    }
 }
 
 fn work_of(url: &str, title: &str, work_url: Option<&str>) -> (Option<Work>, String, Option<f64>) {
@@ -70,17 +74,43 @@ fn work_of(url: &str, title: &str, work_url: Option<&str>) -> (Option<Work>, Str
     if let Some(w) = work_url {
         pages.push(bare(w));
     }
-    let by_source = works.iter().find(|w| w.sources().iter().any(|s| pages.iter().any(|p| p.starts_with(&bare(s))))).cloned();
-    let by_name = if parsed.work.is_empty() { None } else { find_work(&works, &parsed.work, format_of(url)).cloned() };
+    let by_source = works
+        .iter()
+        .find(|w| {
+            w.sources()
+                .iter()
+                .any(|s| pages.iter().any(|p| p.starts_with(&bare(s))))
+        })
+        .cloned();
+    let by_name = if parsed.work.is_empty() {
+        None
+    } else {
+        find_work(&works, &parsed.work, format_of(url)).cloned()
+    };
     let work = by_source.or(by_name);
-    let name = work.as_ref().map(|w| display_name(w.name())).unwrap_or(parsed.work);
+    let name = work
+        .as_ref()
+        .map(|w| display_name(w.name()))
+        .unwrap_or(parsed.work);
     (work, name, parsed.chapter)
 }
 
 pub fn page_info(url: &str, title: &str, work_url: Option<&str>) -> PageInfo {
     let (work, name, chapter) = work_of(url, title, work_url);
-    let records: Vec<reading::Record> = work.as_ref().map(|w| reading::list().into_iter().filter(|r| r.work_id == w.id).collect()).unwrap_or_default();
-    let read_up_to = records.iter().filter(|r| r.status == Status::Read).map(|r| r.chapter).reduce(f64::max);
+    let records: Vec<reading::Record> = work
+        .as_ref()
+        .map(|w| {
+            reading::list()
+                .into_iter()
+                .filter(|r| r.work_id == w.id)
+                .collect()
+        })
+        .unwrap_or_default();
+    let read_up_to = records
+        .iter()
+        .filter(|r| r.status == Status::Read)
+        .map(|r| r.chapter)
+        .reduce(f64::max);
     PageInfo {
         work_id: work.as_ref().map(|w| w.id.clone()),
         name,
@@ -88,11 +118,19 @@ pub fn page_info(url: &str, title: &str, work_url: Option<&str>) -> PageInfo {
         shelf: work.as_ref().and_then(|w| w.shelf_of(!records.is_empty())),
         favorite: work.as_ref().is_some_and(|w| w.favorite),
         read_up_to,
-        in_library: work.as_ref().map(|w| list_library().iter().filter(|e| e.work_id == w.id).count()).unwrap_or(0),
+        in_library: work
+            .as_ref()
+            .map(|w| list_library().iter().filter(|e| e.work_id == w.id).count())
+            .unwrap_or(0),
     }
 }
 
-pub fn bookmark_page(url: &str, title: &str, patch: &Bookmark, work_url: Option<&str>) -> anyhow::Result<PageInfo> {
+pub fn bookmark_page(
+    url: &str,
+    title: &str,
+    patch: &Bookmark,
+    work_url: Option<&str>,
+) -> anyhow::Result<PageInfo> {
     let (work, name, chapter) = work_of(url, title, work_url);
     if work.is_none() && name.is_empty() {
         anyhow::bail!("Não deu para saber o nome da obra nesta página.");
@@ -102,7 +140,11 @@ pub fn bookmark_page(url: &str, title: &str, patch: &Bookmark, work_url: Option<
         None => library::index_work(&name, format_of(url), false)?,
     };
     if chapter.is_none() {
-        let shown = list_works().into_iter().find(|w| w.id == work_id).map(|w| w.name().to_string()).unwrap_or(name);
+        let shown = list_works()
+            .into_iter()
+            .find(|w| w.id == work_id)
+            .map(|w| w.name().to_string())
+            .unwrap_or(name);
         library::add_work_source(&shown, url)?;
     } else if let Some(w) = work_url {
         library::add_work_source_to(&work_id, w)?;
@@ -114,16 +156,30 @@ pub fn bookmark_page(url: &str, title: &str, patch: &Bookmark, work_url: Option<
 /// Todos os capítulos até o desta página marcados como lidos.
 pub fn read_up_to_page(url: &str, title: &str, work_url: Option<&str>) -> anyhow::Result<PageInfo> {
     let (work, name, chapter) = work_of(url, title, work_url);
-    let Some(chapter) = chapter else { anyhow::bail!("Esta página não diz o capítulo.") };
+    let Some(chapter) = chapter else {
+        anyhow::bail!("Esta página não diz o capítulo.")
+    };
     let work_id = match work {
         Some(w) => w.id,
         None if !name.is_empty() => library::index_work(&name, format_of(url), false)?,
         None => anyhow::bail!("Não deu para saber o nome da obra nesta página."),
     };
-    let records: Vec<reading::Record> = reading::list().into_iter().filter(|r| r.work_id == work_id).collect();
-    let read: Vec<f64> = records.iter().filter(|r| r.status == Status::Read).map(|r| r.chapter).collect();
+    let records: Vec<reading::Record> = reading::list()
+        .into_iter()
+        .filter(|r| r.work_id == work_id)
+        .collect();
+    let read: Vec<f64> = records
+        .iter()
+        .filter(|r| r.status == Status::Read)
+        .map(|r| r.chapter)
+        .collect();
     let mut chapters: Vec<f64> = (1..=chapter.floor() as i64).map(|n| n as f64).collect();
-    chapters.extend(records.iter().filter(|r| r.chapter <= chapter).map(|r| r.chapter));
+    chapters.extend(
+        records
+            .iter()
+            .filter(|r| r.chapter <= chapter)
+            .map(|r| r.chapter),
+    );
     chapters.push(chapter);
     chapters.sort_by(f64::total_cmp);
     chapters.dedup();
@@ -145,11 +201,28 @@ pub fn continue_list(limit: usize) -> Vec<ContinueItem> {
         if own.is_empty() || matches!(shelf, Some(Shelf::Done | Shelf::Dropped)) {
             continue;
         }
-        let up_to = own.iter().filter(|r| r.status == Status::Read).map(|r| r.chapter).fold(f64::MIN, f64::max);
-        let current = own.iter().filter(|r| r.status == Status::Reading && r.chapter > up_to).max_by_key(|r| r.updated_at);
-        let last = current.or_else(|| own.iter().filter(|r| !r.url.is_empty()).max_by(|a, b| a.chapter.total_cmp(&b.chapter)));
-        let Some(last) = last.filter(|r| !r.url.is_empty()) else { continue };
-        let latest = fresh.iter().find(|u| u.work_id == work.id).map(|u| Latest { chapter: u.latest, url: u.url.clone(), recent: u.is_recent() });
+        let up_to = own
+            .iter()
+            .filter(|r| r.status == Status::Read)
+            .map(|r| r.chapter)
+            .fold(f64::MIN, f64::max);
+        let current = own
+            .iter()
+            .filter(|r| r.status == Status::Reading && r.chapter > up_to)
+            .max_by_key(|r| r.updated_at);
+        let last = current.or_else(|| {
+            own.iter()
+                .filter(|r| !r.url.is_empty())
+                .max_by(|a, b| a.chapter.total_cmp(&b.chapter))
+        });
+        let Some(last) = last.filter(|r| !r.url.is_empty()) else {
+            continue;
+        };
+        let latest = fresh.iter().find(|u| u.work_id == work.id).map(|u| Latest {
+            chapter: u.latest,
+            url: u.url.clone(),
+            recent: u.is_recent(),
+        });
         items.push(ContinueItem {
             work_id: work.id.clone(),
             name: display_name(work.name()),

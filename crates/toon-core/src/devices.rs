@@ -8,9 +8,9 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::now_ms;
 use crate::paths::data_dir;
 use crate::store::{read_json, write_json};
-use crate::now_ms;
 
 const PAIRING_MINUTES: i64 = 10;
 const MAX_FAILURES: u32 = 5;
@@ -62,7 +62,11 @@ fn hash(token: &str) -> String {
 }
 
 fn random_hex(bytes: usize) -> String {
-    (0..bytes.div_ceil(16)).flat_map(|_| *uuid::Uuid::new_v4().as_bytes()).take(bytes).map(|b| format!("{b:02x}")).collect()
+    (0..bytes.div_ceil(16))
+        .flat_map(|_| *uuid::Uuid::new_v4().as_bytes())
+        .take(bytes)
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Se o app atende celulares na rede (desligado: só este PC, para a extensão).
@@ -95,7 +99,10 @@ pub fn addresses() -> Vec<Address> {
         let [x, y, ..] = ip.octets();
         let tailscale = x == 100 && (64..128).contains(&y);
         if tailscale || x == 192 || x == 10 || (x == 172 && (16..32).contains(&y)) {
-            found.push(Address { address: ip.to_string(), kind: if tailscale { "tailscale" } else { "lan" } });
+            found.push(Address {
+                address: ip.to_string(),
+                kind: if tailscale { "tailscale" } else { "lan" },
+            });
         }
     }
     found.sort_by_key(|a| a.kind == "tailscale");
@@ -105,15 +112,19 @@ pub fn addresses() -> Vec<Address> {
 /// Os IPs locais, pelo truque de abrir um socket UDP para fora (nada é enviado) e pelos nomes do PC.
 fn local_ips() -> Vec<IpAddr> {
     let mut ips = Vec::new();
-    for target in ["192.168.0.1:9", "10.0.0.1:9", "100.100.100.100:9", "8.8.8.8:9"] {
-        if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0") {
-            if s.connect(target).is_ok() {
-                if let Ok(a) = s.local_addr() {
-                    if !ips.contains(&a.ip()) && !a.ip().is_unspecified() {
-                        ips.push(a.ip());
-                    }
-                }
-            }
+    for target in [
+        "192.168.0.1:9",
+        "10.0.0.1:9",
+        "100.100.100.100:9",
+        "8.8.8.8:9",
+    ] {
+        if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0")
+            && s.connect(target).is_ok()
+            && let Ok(a) = s.local_addr()
+            && !ips.contains(&a.ip())
+            && !a.ip().is_unspecified()
+        {
+            ips.push(a.ip());
         }
     }
     ips
@@ -127,18 +138,33 @@ pub struct PairingCode {
 }
 
 pub fn new_pairing_code(port: u16) -> PairingCode {
-    let n = u32::from_le_bytes(uuid::Uuid::new_v4().as_bytes()[..4].try_into().unwrap()) % 1_000_000;
+    let n =
+        u32::from_le_bytes(uuid::Uuid::new_v4().as_bytes()[..4].try_into().unwrap()) % 1_000_000;
     let code = format!("{n:06}");
     let expires_at = now_ms() + PAIRING_MINUTES * 60_000;
-    *PAIRING.lock() = Some(Pairing { code: code.clone(), expires_at, failures: 0 });
+    *PAIRING.lock() = Some(Pairing {
+        code: code.clone(),
+        expires_at,
+        failures: 0,
+    });
     let hosts: Vec<String> = addresses().into_iter().map(|a| a.address).collect();
-    let qr_text = serde_json::json!({ "app": "manga-index", "port": port, "code": code, "hosts": hosts }).to_string();
-    PairingCode { code, expires_at, qr_text }
+    let qr_text =
+        serde_json::json!({ "app": "manga-index", "port": port, "code": code, "hosts": hosts })
+            .to_string();
+    PairingCode {
+        code,
+        expires_at,
+        qr_text,
+    }
 }
 
 /// Compara sem parar no primeiro caractere diferente, para o tempo de resposta não entregar o código.
 fn same(a: &str, b: &str) -> bool {
-    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
 }
 
 /// O celular manda o código mostrado no PC; recebe o token dele.
@@ -159,10 +185,22 @@ pub fn pair(code: &str, name: &str) -> Option<(String, Device)> {
     drop(slot);
     let token = random_hex(32);
     let name: String = name.trim().chars().take(60).collect();
-    let device = Device { id: uuid::Uuid::new_v4().to_string(), name: if name.is_empty() { "Celular".into() } else { name }, paired_at: now_ms(), last_seen: None };
+    let device = Device {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: if name.is_empty() {
+            "Celular".into()
+        } else {
+            name
+        },
+        paired_at: now_ms(),
+        last_seen: None,
+    };
     let _g = LOCK.lock();
     let mut s = load();
-    s.devices.push(StoredDevice { device: device.clone(), token_hash: hash(&token) });
+    s.devices.push(StoredDevice {
+        device: device.clone(),
+        token_hash: hash(&token),
+    });
     write_json(&path(), &s).ok()?;
     Some((token, device))
 }
@@ -173,7 +211,10 @@ pub fn device_for(token: &str) -> Option<Device> {
     let _g = LOCK.lock();
     let mut s = load();
     let d = s.devices.iter_mut().find(|d| same(&d.token_hash, &h))?;
-    if d.device.last_seen.is_none_or(|seen| now_ms() - seen > 60_000) {
+    if d.device
+        .last_seen
+        .is_none_or(|seen| now_ms() - seen > 60_000)
+    {
         d.device.last_seen = Some(now_ms());
         let device = d.device.clone();
         let _ = write_json(&path(), &s);

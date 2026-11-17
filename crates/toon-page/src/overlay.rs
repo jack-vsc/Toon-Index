@@ -7,7 +7,7 @@ use toon_ai::{BlockKind, FontRole, TextBlock};
 
 use crate::detect::IBox;
 use crate::fonts::{Coverage, FACES, Pen};
-use crate::glyphs::{components, dilate, erode, is_glyph, odd, quantile, round, FLAT_TOLERANCE};
+use crate::glyphs::{FLAT_TOLERANCE, components, dilate, erode, is_glyph, odd, quantile, round};
 
 const MIN_FONT: f32 = 8.0;
 const INK_STRONG: i32 = 45;
@@ -43,11 +43,15 @@ struct Glyphs {
 
 /// Placas e narração só sobre o desenho vão numa nota embaixo do quadro, não por cima da arte.
 fn is_footnote(block: &TextBlock) -> bool {
-    block.kind == BlockKind::Signage || (block.kind == BlockKind::Narration && block.ink_boxes.is_none())
+    block.kind == BlockKind::Signage
+        || (block.kind == BlockKind::Narration && block.ink_boxes.is_none())
 }
 
 pub fn normalize_text(text: &str) -> String {
-    text.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+    text.to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
 }
 
 /// Coeficiente de Dice em pares de letras, ou um texto contido no outro (bloco cortado na faixa).
@@ -56,7 +60,11 @@ pub fn similar_text(a: &str, b: &str) -> bool {
     if x.is_empty() || y.is_empty() {
         return false;
     }
-    let (short, long) = if x.chars().count() <= y.chars().count() { (&x, &y) } else { (&y, &x) };
+    let (short, long) = if x.chars().count() <= y.chars().count() {
+        (&x, &y)
+    } else {
+        (&y, &x)
+    };
     if long.contains(short.as_str()) {
         return short.chars().count() as f32 >= 8f32.min(long.chars().count() as f32 * 0.4);
     }
@@ -69,8 +77,13 @@ pub fn similar_text(a: &str, b: &str) -> bool {
         m
     };
     let (gx, gy) = (grams(&x), grams(&y));
-    let common: i32 = gx.iter().map(|(g, n)| *n.min(gy.get(g).unwrap_or(&0))).sum();
-    let total = (x.chars().count() + y.chars().count()).saturating_sub(2).max(1);
+    let common: i32 = gx
+        .iter()
+        .map(|(g, n)| *n.min(gy.get(g).unwrap_or(&0)))
+        .sum();
+    let total = (x.chars().count() + y.chars().count())
+        .saturating_sub(2)
+        .max(1);
     2.0 * common as f32 / total as f32 > 0.6
 }
 
@@ -78,8 +91,17 @@ fn estimate_letter(block: &TextBlock) -> f32 {
     let tb = block.text_box;
     let (w, h) = (tb[2] - tb[0], tb[3] - tb[1]);
     let lines = block.original.split('\n').count().max(1) as f32;
-    let chars = block.original.chars().filter(|c| !c.is_whitespace()).count().max(1) as f32;
-    if lines > 1.0 { h / lines / 1.25 } else { (h / 1.25).min((w * h / (chars * 0.7 * 1.3)).sqrt()) }
+    let chars = block
+        .original
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .count()
+        .max(1) as f32;
+    if lines > 1.0 {
+        h / lines / 1.25
+    } else {
+        (h / 1.25).min((w * h / (chars * 0.7 * 1.3)).sqrt())
+    }
 }
 
 fn to_ibox(b: [f32; 4], w: usize, h: usize) -> IBox {
@@ -104,7 +126,9 @@ pub fn draw_overlay(image: &mut RgbImage, blocks: &[TextBlock]) -> Vec<Drawn> {
     for (i, block) in blocks.iter().enumerate() {
         // Interjeições e nomes que se escrevem igual nos dois idiomas ficam com o letreiro original.
         let text = normalize_text(&block.translation);
-        if block.kind != BlockKind::Watermark && (text.is_empty() || text == normalize_text(&block.original)) {
+        if block.kind != BlockKind::Watermark
+            && (text.is_empty() || text == normalize_text(&block.original))
+        {
             kept[i] = true;
         }
         // Posto pela caixa do próprio modelo e sem letreiro ali: escrever cobriria o desenho.
@@ -114,9 +138,16 @@ pub fn draw_overlay(image: &mut RgbImage, blocks: &[TextBlock]) -> Vec<Drawn> {
     }
     let copies = duplicates(blocks, &found, &kept);
     let mut skip_draw: Vec<bool> = (0..blocks.len())
-        .map(|i| kept[i] || copies[i] || is_footnote(&blocks[i]) || blocks[i].kind == BlockKind::Watermark)
+        .map(|i| {
+            kept[i]
+                || copies[i]
+                || is_footnote(&blocks[i])
+                || blocks[i].kind == BlockKind::Watermark
+        })
         .collect();
-    let skip_erase: Vec<bool> = (0..blocks.len()).map(|i| skip_draw[i] && (blocks[i].kind != BlockKind::Watermark || kept[i])).collect();
+    let skip_erase: Vec<bool> = (0..blocks.len())
+        .map(|i| skip_draw[i] && (blocks[i].kind != BlockKind::Watermark || kept[i]))
+        .collect();
     for (i, g) in found.iter().enumerate() {
         if !skip_erase[i] {
             erase(image, g);
@@ -131,7 +162,12 @@ pub fn draw_overlay(image: &mut RgbImage, blocks: &[TextBlock]) -> Vec<Drawn> {
         .collect();
     let mut result = Vec::new();
     for (i, block) in blocks.iter().enumerate() {
-        let mut drawn = Drawn { drawn: !skip_draw[i], skipped: None, letter_height: found[i].letter_height, font_size: None };
+        let mut drawn = Drawn {
+            drawn: !skip_draw[i],
+            skipped: None,
+            letter_height: found[i].letter_height,
+            font_size: None,
+        };
         if skip_draw[i] {
             drawn.skipped = Some(if kept[i] {
                 "kept"
@@ -168,14 +204,26 @@ fn duplicates(blocks: &[TextBlock], glyphs: &[Glyphs], ignored: &[bool]) -> Vec<
     let mut drop = vec![false; blocks.len()];
     for i in 0..blocks.len() {
         for j in i + 1..blocks.len() {
-            if ignored[i] || ignored[j] || blocks[i].kind == BlockKind::Watermark || blocks[j].kind == BlockKind::Watermark {
+            if ignored[i]
+                || ignored[j]
+                || blocks[i].kind == BlockKind::Watermark
+                || blocks[j].kind == BlockKind::Watermark
+            {
                 continue;
             }
             let (a, b) = (&glyphs[i], &glyphs[j]);
-            let loser = if blocks[i].original.len() >= blocks[j].original.len() { j } else { i };
+            let loser = if blocks[i].original.len() >= blocks[j].original.len() {
+                j
+            } else {
+                i
+            };
             match (a.bbox, b.bbox) {
-                (Some(x), Some(y)) if overlap(x, y) > 0.5 * area(x).min(area(y)) => drop[loser] = true,
-                (Some(_), None) | (None, Some(_)) if similar_text(&blocks[i].original, &blocks[j].original) => {
+                (Some(x), Some(y)) if overlap(x, y) > 0.5 * area(x).min(area(y)) => {
+                    drop[loser] = true
+                }
+                (Some(_), None) | (None, Some(_))
+                    if similar_text(&blocks[i].original, &blocks[j].original) =>
+                {
                     drop[if a.bbox.is_some() { j } else { i }] = true;
                 }
                 _ => {}
@@ -191,7 +239,8 @@ fn gray_window(image: &RgbImage, win: IBox) -> (Vec<u8>, usize, usize) {
     for y in 0..wh {
         for x in 0..ww {
             let p = image.get_pixel((win[0] + x) as u32, (win[1] + y) as u32);
-            gray[y * ww + x] = ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8;
+            gray[y * ww + x] =
+                ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8;
         }
     }
     (gray, ww, wh)
@@ -205,15 +254,30 @@ fn find_glyphs(image: &RgbImage, block: &TextBlock, w: usize, h: usize) -> Glyph
     let margin = (w as f32 * 0.05).max((tbh * 1.5).min(w as f32 * 0.15));
     // Um texto maior do que a caixa comporta continua em linhas que o detector não marcou: a busca
     // desce (e sobe) o tanto dessas linhas.
-    let line = block.letter_height.unwrap_or_else(|| estimate_letter(block)).max(4.0);
-    let letters = block.original.chars().filter(|c| c.is_alphanumeric()).count() as f32;
+    let line = block
+        .letter_height
+        .unwrap_or_else(|| estimate_letter(block))
+        .max(4.0);
+    let letters = block
+        .original
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .count() as f32;
     let lines = (letters * line * 0.6 / tbw.max(1.0)).ceil();
     let rows = tbh / (line * 1.3);
     let margin_y = margin.max((lines - rows).max(0.0) * line * 1.8 + margin);
     let around = toon_ai::prompt::union(tb, block.area_box);
     let win = to_ibox(expand(around, margin, margin_y), w, h);
     let (ww, wh) = (win[2].saturating_sub(win[0]), win[3].saturating_sub(win[1]));
-    let empty = |ink: Vec<u8>| Glyphs { win, ww, wh, mask: vec![0; ww * wh], ink, bbox: None, letter_height: 0.0 };
+    let empty = |ink: Vec<u8>| Glyphs {
+        win,
+        ww,
+        wh,
+        mask: vec![0; ww * wh],
+        ink,
+        bbox: None,
+        letter_height: 0.0,
+    };
     if ww < 8 || wh < 8 {
         return empty(vec![0; ww * wh]);
     }
@@ -223,24 +287,58 @@ fn find_glyphs(image: &RgbImage, block: &TextBlock, w: usize, h: usize) -> Glyph
     let closing = erode(&dilate(&gray, ww, wh, k), ww, wh, k);
     let opening = dilate(&erode(&gray, ww, wh, k), ww, wh, k);
     let contrasts: [Vec<u8>; 2] = [
-        gray.iter().zip(&closing).map(|(g, c)| c.saturating_sub(*g)).collect(),
-        gray.iter().zip(&opening).map(|(g, o)| g.saturating_sub(*o)).collect(),
+        gray.iter()
+            .zip(&closing)
+            .map(|(g, c)| c.saturating_sub(*g))
+            .collect(),
+        gray.iter()
+            .zip(&opening)
+            .map(|(g, o)| g.saturating_sub(*o))
+            .collect(),
     ];
-    let strokes: Vec<u8> = (0..ww * wh).map(|p| (contrasts[0][p] as i32 > INK_WEAK || contrasts[1][p] as i32 > INK_WEAK) as u8).collect();
+    let strokes: Vec<u8> = (0..ww * wh)
+        .map(|p| (contrasts[0][p] as i32 > INK_WEAK || contrasts[1][p] as i32 > INK_WEAK) as u8)
+        .collect();
     let local = |b: [f32; 4]| -> IBox {
-        to_ibox([b[0] - win[0] as f32, b[1] - win[1] as f32, b[2] - win[0] as f32, b[3] - win[1] as f32], ww, wh)
+        to_ibox(
+            [
+                b[0] - win[0] as f32,
+                b[1] - win[1] as f32,
+                b[2] - win[0] as f32,
+                b[3] - win[1] as f32,
+            ],
+            ww,
+            wh,
+        )
     };
-    let ink_boxes: Vec<IBox> = block.ink_boxes.iter().flatten().map(|b| local(*b)).filter(|b| b[2] > b[0] && b[3] > b[1]).collect();
+    let ink_boxes: Vec<IBox> = block
+        .ink_boxes
+        .iter()
+        .flatten()
+        .map(|b| local(*b))
+        .filter(|b| b[2] > b[0] && b[3] > b[1])
+        .collect();
     let lh = block.letter_height.unwrap_or(letter).max(3.0);
     let mut mask = vec![0u8; ww * wh];
     let bbox = if !ink_boxes.is_empty() {
         add_ink_boxes(&mut mask, ww, wh, &ink_boxes, &contrasts, &gray, lh);
         let mut b = ink_boxes[0];
         for x in &ink_boxes {
-            b = [b[0].min(x[0]), b[1].min(x[1]), b[2].max(x[2]), b[3].max(x[3])];
+            b = [
+                b[0].min(x[0]),
+                b[1].min(x[1]),
+                b[2].max(x[2]),
+                b[3].max(x[3]),
+            ];
         }
-        let expected = block.original.chars().filter(|c| c.is_alphanumeric()).count();
-        Some(grow_lines(&mut mask, ww, wh, b, &contrasts, &gray, lh, expected))
+        let expected = block
+            .original
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .count();
+        Some(grow_lines(
+            &mut mask, ww, wh, b, &contrasts, &gray, lh, expected,
+        ))
     } else {
         // Sem caixas do detector: as letras são os traços fortes com fundo liso em volta, perto da caixa do modelo.
         let near = local(expand(tb, tbw * 0.15, tbh * 0.3));
@@ -258,9 +356,19 @@ fn find_glyphs(image: &RgbImage, block: &TextBlock, w: usize, h: usize) -> Glyph
     }
 }
 
-fn components_of(contrast: &[u8], ww: usize, wh: usize) -> (Vec<u8>, Vec<i32>, Vec<crate::glyphs::Comp>) {
-    let ink: Vec<u8> = contrast.iter().map(|&c| (c as i32 > INK_WEAK) as u8).collect();
-    let strong: Vec<u8> = contrast.iter().map(|&c| (c as i32 > INK_STRONG) as u8).collect();
+fn components_of(
+    contrast: &[u8],
+    ww: usize,
+    wh: usize,
+) -> (Vec<u8>, Vec<i32>, Vec<crate::glyphs::Comp>) {
+    let ink: Vec<u8> = contrast
+        .iter()
+        .map(|&c| (c as i32 > INK_WEAK) as u8)
+        .collect();
+    let strong: Vec<u8> = contrast
+        .iter()
+        .map(|&c| (c as i32 > INK_STRONG) as u8)
+        .collect();
     let (labels, comps) = components(&strong, ww, wh);
     (ink, labels, comps)
 }
@@ -281,9 +389,27 @@ fn median_gray(c: &crate::glyphs::Comp, labels: &[i32], gray: &[u8], ww: usize) 
 /// Marca as letras dentro das caixas do detector, com a tinta fraca em volta (bordas suavizadas). A
 /// polaridade com mais traços do tamanho de letra é o letreiro; a outra só conta onde encosta nele
 /// (contorno, brilho).
-fn add_ink_boxes(mask: &mut [u8], ww: usize, wh: usize, boxes: &[IBox], contrasts: &[Vec<u8>; 2], gray: &[u8], letter_height: f32) {
+fn add_ink_boxes(
+    mask: &mut [u8],
+    ww: usize,
+    wh: usize,
+    boxes: &[IBox],
+    contrasts: &[Vec<u8>; 2],
+    gray: &[u8],
+    letter_height: f32,
+) {
     let pad = round(letter_height as f64 * 0.25);
-    let zones: Vec<IBox> = boxes.iter().map(|b| [b[0].saturating_sub(pad), b[1].saturating_sub(pad), (b[2] + pad).min(ww), (b[3] + pad).min(wh)]).collect();
+    let zones: Vec<IBox> = boxes
+        .iter()
+        .map(|b| {
+            [
+                b[0].saturating_sub(pad),
+                b[1].saturating_sub(pad),
+                (b[2] + pad).min(ww),
+                (b[3] + pad).min(wh),
+            ]
+        })
+        .collect();
     let mut samples = Vec::new();
     for b in boxes {
         let step = round((((b[2] - b[0]) * (b[3] - b[1])) as f64 / 2000.0).sqrt()).max(1);
@@ -313,7 +439,10 @@ fn add_ink_boxes(mask: &mut [u8], ww: usize, wh: usize, boxes: &[IBox], contrast
                     if (median_gray(c, &labels, gray, ww) - bg).abs() < 40 {
                         return false;
                     }
-                    if boxes.iter().any(|b| c.x0 >= b[0] && c.y0 >= b[1] && c.x1 <= b[2] && c.y1 <= b[3]) {
+                    if boxes
+                        .iter()
+                        .any(|b| c.x0 >= b[0] && c.y0 >= b[1] && c.x1 <= b[2] && c.y1 <= b[3])
+                    {
                         return true;
                     }
                     let inside = zones.iter().any(|z| {
@@ -336,10 +465,19 @@ fn add_ink_boxes(mask: &mut [u8], ww: usize, wh: usize, boxes: &[IBox], contrast
                 }
             }
             let mass = glyphs.iter().map(|c| c.count).sum();
-            Found { glyphs, labels, own, mass }
+            Found {
+                glyphs,
+                labels,
+                own,
+                mass,
+            }
         })
         .collect();
-    let (main, other) = if found[0].mass >= found[1].mass { (&found[0], &found[1]) } else { (&found[1], &found[0]) };
+    let (main, other) = if found[0].mass >= found[1].mass {
+        (&found[0], &found[1])
+    } else {
+        (&found[1], &found[0])
+    };
     let touch = dilate(&main.own, ww, wh, 3);
     for p in 0..mask.len() {
         if main.own[p] != 0 {
@@ -347,7 +485,9 @@ fn add_ink_boxes(mask: &mut [u8], ww: usize, wh: usize, boxes: &[IBox], contrast
         }
     }
     for c in &other.glyphs {
-        let touching = (c.y0..c.y1).any(|y| (c.x0..c.x1).any(|x| other.labels[y * ww + x] == c.id && touch[y * ww + x] != 0));
+        let touching = (c.y0..c.y1).any(|y| {
+            (c.x0..c.x1).any(|x| other.labels[y * ww + x] == c.id && touch[y * ww + x] != 0)
+        });
         if !touching {
             continue;
         }
@@ -366,8 +506,19 @@ fn add_ink_boxes(mask: &mut [u8], ww: usize, wh: usize, boxes: &[IBox], contrast
 /// bem mais letras do que as caixas, as linhas logo acima e abaixo, de letras do mesmo tamanho, entram
 /// também, uma de cada vez.
 #[allow(clippy::too_many_arguments)]
-fn grow_lines(mask: &mut [u8], ww: usize, wh: usize, start: IBox, contrasts: &[Vec<u8>; 2], gray: &[u8], lh: f32, expected: usize) -> IBox {
-    let letter = |c: &crate::glyphs::Comp| (c.h as f32) >= lh * 0.6 && (c.h as f32) <= lh * 1.7 && c.count >= 3;
+fn grow_lines(
+    mask: &mut [u8],
+    ww: usize,
+    wh: usize,
+    start: IBox,
+    contrasts: &[Vec<u8>; 2],
+    gray: &[u8],
+    lh: f32,
+    expected: usize,
+) -> IBox {
+    let letter = |c: &crate::glyphs::Comp| {
+        (c.h as f32) >= lh * 0.6 && (c.h as f32) <= lh * 1.7 && c.count >= 3
+    };
     let centre_in = |c: &crate::glyphs::Comp, b: IBox| {
         let (x, y) = ((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2);
         x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]
@@ -376,13 +527,18 @@ fn grow_lines(mask: &mut [u8], ww: usize, wh: usize, start: IBox, contrasts: &[V
     let mut best: Option<(usize, Vec<crate::glyphs::Comp>, Vec<i32>, Vec<u8>)> = None;
     for contrast in contrasts {
         let (ink, labels, comps) = components_of(contrast, ww, wh);
-        let comps: Vec<_> = comps.into_iter().filter(|c| letter(c) && is_glyph(c, gray, &ink, &labels, ww, wh, FLAT_TOLERANCE)).collect();
+        let comps: Vec<_> = comps
+            .into_iter()
+            .filter(|c| letter(c) && is_glyph(c, gray, &ink, &labels, ww, wh, FLAT_TOLERANCE))
+            .collect();
         let inside = comps.iter().filter(|c| centre_in(c, start)).count();
         if best.as_ref().is_none_or(|(n, ..)| inside > *n) {
             best = Some((inside, comps, labels, ink));
         }
     }
-    let Some((inside, comps, labels, ink)) = best else { return start };
+    let Some((inside, comps, labels, ink)) = best else {
+        return start;
+    };
     // Letras grudadas contam como uma peça: só cresce com folga clara.
     if inside == 0 || (expected as f32) < inside as f32 * 1.6 {
         return start;
@@ -400,7 +556,10 @@ fn grow_lines(mask: &mut [u8], ww: usize, wh: usize, start: IBox, contrasts: &[V
                 let c = &comps[i];
                 let gap = (c.y0 as f32 - b[3] as f32).max(b[1] as f32 - c.y1 as f32);
                 let cx = (c.x0 + c.x1) as f32 / 2.0;
-                gap >= -lh * 0.5 && gap <= lh * 2.2 && cx >= b[0] as f32 - width * 0.3 && cx <= b[2] as f32 + width * 0.3
+                gap >= -lh * 0.5
+                    && gap <= lh * 2.2
+                    && cx >= b[0] as f32 - width * 0.3
+                    && cx <= b[2] as f32 + width * 0.3
             })
             .collect();
         if near.len() < 2 || pieces as f32 >= expected as f32 * 1.15 {
@@ -410,7 +569,12 @@ fn grow_lines(mask: &mut [u8], ww: usize, wh: usize, start: IBox, contrasts: &[V
             let c = comps[i];
             taken[i] = true;
             pieces += 1;
-            b = [b[0].min(c.x0), b[1].min(c.y0), b[2].max(c.x1), b[3].max(c.y1)];
+            b = [
+                b[0].min(c.x0),
+                b[1].min(c.y0),
+                b[2].max(c.x1),
+                b[3].max(c.y1),
+            ];
             for y in c.y0.saturating_sub(pad)..(c.y1 + pad).min(wh) {
                 for x in c.x0.saturating_sub(pad)..(c.x1 + pad).min(ww) {
                     let p = y * ww + x;
@@ -425,7 +589,15 @@ fn grow_lines(mask: &mut [u8], ww: usize, wh: usize, start: IBox, contrasts: &[V
 }
 
 /// Letras perto da caixa do modelo: componentes fortes do tamanho de letra sobre fundo liso.
-fn letters_near(mask: &mut [u8], ww: usize, wh: usize, near: IBox, contrasts: &[Vec<u8>; 2], gray: &[u8], letter: f32) -> Option<IBox> {
+fn letters_near(
+    mask: &mut [u8],
+    ww: usize,
+    wh: usize,
+    near: IBox,
+    contrasts: &[Vec<u8>; 2],
+    gray: &[u8],
+    letter: f32,
+) -> Option<IBox> {
     let mut best: Option<(usize, Vec<crate::glyphs::Comp>, Vec<i32>, Vec<u8>)> = None;
     for contrast in contrasts {
         let (ink, labels, comps) = components_of(contrast, ww, wh);
@@ -452,7 +624,12 @@ fn letters_near(mask: &mut [u8], ww: usize, wh: usize, near: IBox, contrasts: &[
     let pad = round(letter as f64 * 0.25);
     let mut b = [usize::MAX, usize::MAX, 0, 0];
     for c in &letters {
-        b = [b[0].min(c.x0), b[1].min(c.y0), b[2].max(c.x1), b[3].max(c.y1)];
+        b = [
+            b[0].min(c.x0),
+            b[1].min(c.y0),
+            b[2].max(c.x1),
+            b[3].max(c.y1),
+        ];
         for y in c.y0.saturating_sub(pad)..(c.y1 + pad).min(wh) {
             for x in c.x0.saturating_sub(pad)..(c.x1 + pad).min(ww) {
                 let p = y * ww + x;
@@ -481,12 +658,23 @@ fn erase(image: &mut RgbImage, g: &Glyphs) {
             data.push([p[0] as f32, p[1] as f32, p[2] as f32]);
         }
     }
-    fill_masked(&mut data, g.ww, g.wh, &mask, &g.ink, round(g.letter_height as f64 * 0.6).max(3));
+    fill_masked(
+        &mut data,
+        g.ww,
+        g.wh,
+        &mask,
+        &g.ink,
+        round(g.letter_height as f64 * 0.6).max(3),
+    );
     for y in 0..g.wh {
         for x in 0..g.ww {
             if mask[y * g.ww + x] != 0 {
                 let c = data[y * g.ww + x];
-                image.put_pixel((g.win[0] + x) as u32, (g.win[1] + y) as u32, image::Rgb([c[0].round() as u8, c[1].round() as u8, c[2].round() as u8]));
+                image.put_pixel(
+                    (g.win[0] + x) as u32,
+                    (g.win[1] + y) as u32,
+                    image::Rgb([c[0].round() as u8, c[1].round() as u8, c[2].round() as u8]),
+                );
             }
         }
     }
@@ -501,7 +689,13 @@ fn fill_masked(d: &mut [[f32; 3]], ww: usize, wh: usize, mask: &[u8], ink: &[u8]
     if masked.is_empty() {
         return;
     }
-    let known = integrals(d, ww, wh, |p| if mask[p] != 0 || ink[p] != 0 { 0.0 } else { 1.0 });
+    let known = integrals(d, ww, wh, |p| {
+        if mask[p] != 0 || ink[p] != 0 {
+            0.0
+        } else {
+            1.0
+        }
+    });
     let mut colors = vec![[0f32; 3]; masked.len()];
     let mut filled = vec![false; masked.len()];
     let mut todo: Vec<usize> = (0..masked.len()).collect();
@@ -514,7 +708,11 @@ fn fill_masked(d: &mut [[f32; 3]], ww: usize, wh: usize, mask: &[u8], ink: &[u8]
                 next.push(n);
                 continue;
             }
-            colors[n] = [(s[0] / s[3]) as f32, (s[1] / s[3]) as f32, (s[2] / s[3]) as f32];
+            colors[n] = [
+                (s[0] / s[3]) as f32,
+                (s[1] / s[3]) as f32,
+                (s[2] / s[3]) as f32,
+            ];
             filled[n] = true;
         }
         todo = next;
@@ -538,7 +736,12 @@ fn fill_masked(d: &mut [[f32; 3]], ww: usize, wh: usize, mask: &[u8], ink: &[u8]
                 for dy in -1..=1i64 {
                     for dx in -1..=1i64 {
                         let (nx, ny) = (x + dx, y + dy);
-                        if (dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= ww as i64 || ny >= wh as i64 {
+                        if (dx == 0 && dy == 0)
+                            || nx < 0
+                            || ny < 0
+                            || nx >= ww as i64
+                            || ny >= wh as i64
+                        {
                             continue;
                         }
                         let q = ny as usize * ww + nx as usize;
@@ -583,7 +786,13 @@ fn fill_masked(d: &mut [[f32; 3]], ww: usize, wh: usize, mask: &[u8], ink: &[u8]
         // O que o preenchimento não alcançou (desenho carregado atrás das letras) viraria mancha escura.
         d[p] = if filled[n] { colors[n] } else { [255.0; 3] };
     }
-    let flat = integrals(d, ww, wh, |p| if mask[p] != 0 || ink[p] == 0 { 1.0 } else { 0.0 });
+    let flat = integrals(d, ww, wh, |p| {
+        if mask[p] != 0 || ink[p] == 0 {
+            1.0
+        } else {
+            0.0
+        }
+    });
     let smooth = (radius >> 1).max(1);
     for (n, &p) in masked.iter().enumerate() {
         if !filled[n] {
@@ -591,7 +800,11 @@ fn fill_masked(d: &mut [[f32; 3]], ww: usize, wh: usize, mask: &[u8], ink: &[u8]
         }
         let s = box_sum(&flat, ww, wh, p % ww, p / ww, smooth);
         if s[3] > 0.0 {
-            d[p] = [(s[0] / s[3]) as f32, (s[1] / s[3]) as f32, (s[2] / s[3]) as f32];
+            d[p] = [
+                (s[0] / s[3]) as f32,
+                (s[1] / s[3]) as f32,
+                (s[2] / s[3]) as f32,
+            ];
         }
     }
 }
@@ -623,7 +836,12 @@ fn box_sum(t: &[[f64; 4]], ww: usize, wh: usize, x: usize, y: usize, r: usize) -
     let stride = ww + 1;
     let (x0, y0) = (x.saturating_sub(r), y.saturating_sub(r));
     let (x1, y1) = ((x + r + 1).min(ww), (y + r + 1).min(wh));
-    let (a, b, c, e) = (t[y0 * stride + x0], t[y0 * stride + x1], t[y1 * stride + x0], t[y1 * stride + x1]);
+    let (a, b, c, e) = (
+        t[y0 * stride + x0],
+        t[y0 * stride + x1],
+        t[y1 * stride + x0],
+        t[y1 * stride + x1],
+    );
     [0, 1, 2, 3].map(|k| e[k] - b[k] - c[k] + a[k])
 }
 
@@ -705,7 +923,15 @@ fn measure_room(image: &RgbImage, text_box: IBox, cap: f32) -> (Room, [u8; 3]) {
     }
     let widths: Vec<f32> = widths[a..=b].to_vec();
     let bg_rgb = [bg[0] as u8, bg[1] as u8, bg[2] as u8];
-    (Room { cx, cy, top: (top + a as i64) as f32, widths }, bg_rgb)
+    (
+        Room {
+            cx,
+            cy,
+            top: (top + a as i64) as f32,
+            widths,
+        },
+        bg_rgb,
+    )
 }
 
 struct Layout {
@@ -731,9 +957,16 @@ fn layout_at(pen: &Pen, text: &str, room: &Room, cap: f32, pitch: f32) -> Option
         }
         let top = room.cy - height / 2.0;
         let ys: Vec<f32> = (0..count).map(|i| top + i as f32 * line_h).collect();
-        let limits: Vec<f32> = ys.iter().map(|y| room.width_at(*y - cap * 0.2, *y + cap * 1.2) * FILL).collect();
+        let limits: Vec<f32> = ys
+            .iter()
+            .map(|y| room.width_at(*y - cap * 0.2, *y + cap * 1.2) * FILL)
+            .collect();
         if let Some(lines) = fill_lines(pen, &words, &limits) {
-            return Some(Layout { size: pen.size, lines, ys });
+            return Some(Layout {
+                size: pen.size,
+                lines,
+                ys,
+            });
         }
     }
     None
@@ -780,12 +1013,19 @@ fn luminance(c: [u8; 3]) -> f32 {
 }
 
 fn match_case(translation: &str, original: &str) -> String {
-    let letters: Vec<char> = original.chars().filter(|c| c.is_lowercase() || c.is_uppercase()).collect();
+    let letters: Vec<char> = original
+        .chars()
+        .filter(|c| c.is_lowercase() || c.is_uppercase())
+        .collect();
     if letters.len() < 3 {
         return translation.to_string();
     }
     let upper = letters.iter().filter(|c| c.is_uppercase()).count();
-    if upper as f32 / letters.len() as f32 > 0.85 { translation.to_uppercase() } else { translation.to_string() }
+    if upper as f32 / letters.len() as f32 > 0.85 {
+        translation.to_uppercase()
+    } else {
+        translation.to_string()
+    }
 }
 
 fn role_of(block: &TextBlock) -> FontRole {
@@ -801,8 +1041,14 @@ fn role_of(block: &TextBlock) -> FontRole {
 fn typeset(image: &mut RgbImage, block: &TextBlock, g: &Glyphs) -> Option<f32> {
     let text = match_case(&block.translation, &block.original);
     let w = image.width() as usize;
-    let text_box = g.bbox.unwrap_or_else(|| to_ibox(block.text_box, w, image.height() as usize));
-    let cap = block.letter_height.unwrap_or(g.letter_height).max(estimate_letter(block) * 0.5).max(6.0);
+    let text_box = g
+        .bbox
+        .unwrap_or_else(|| to_ibox(block.text_box, w, image.height() as usize));
+    let cap = block
+        .letter_height
+        .unwrap_or(g.letter_height)
+        .max(estimate_letter(block) * 0.5)
+        .max(6.0);
     let (room, bg) = measure_room(image, text_box, cap);
     if room.widths.is_empty() {
         return None;
@@ -810,21 +1056,42 @@ fn typeset(image: &mut RgbImage, block: &TextBlock, g: &Glyphs) -> Option<f32> {
     let role = role_of(block);
     let shout = block.kind == BlockKind::Shout;
     let font = FACES.face(role, shout || role == FontRole::Comic);
-    let fill = block.color.as_deref().and_then(from_hex).unwrap_or(if luminance(bg) > 128.0 { [0, 0, 0] } else { [255, 255, 255] });
+    let fill = block
+        .color
+        .as_deref()
+        .and_then(from_hex)
+        .unwrap_or(if luminance(bg) > 128.0 {
+            [0, 0, 0]
+        } else {
+            [255, 255, 255]
+        });
     let mut stroke = block.outline.as_deref().and_then(from_hex);
     // Comentários pequenos atravessam a borda do balão: um contorno da cor do papel mantém legível.
     if block.kind == BlockKind::Aside && stroke.is_none() {
-        stroke = Some(if luminance(fill) > 140.0 { [0, 0, 0] } else { [255, 255, 255] });
+        stroke = Some(if luminance(fill) > 140.0 {
+            [0, 0, 0]
+        } else {
+            [255, 255, 255]
+        });
     }
     let cap_ratio = Pen { font, size: 100.0 }.cap_ratio().max(0.4);
     // Sussurros e comentários vêm um pouco menores que o original, como nas scans.
-    let quiet = if matches!(block.kind, BlockKind::Whisper | BlockKind::Aside) { 0.8 } else { 1.0 };
-    let max_font = (quiet * cap / cap_ratio).min((w as f32 / 10.0).max(14.0)).max(MIN_FONT);
+    let quiet = if matches!(block.kind, BlockKind::Whisper | BlockKind::Aside) {
+        0.8
+    } else {
+        1.0
+    };
+    let max_font = (quiet * cap / cap_ratio)
+        .min((w as f32 / 10.0).max(14.0))
+        .max(MIN_FONT);
     let (mut lo, mut hi) = (MIN_FONT as i32, max_font.floor() as i32);
     let mut best = None;
     while lo <= hi {
         let size = (lo + hi) / 2;
-        let pen = Pen { font, size: size as f32 };
+        let pen = Pen {
+            font,
+            size: size as f32,
+        };
         match layout_at(&pen, &text, &room, cap_ratio * size as f32, LINE_PITCH) {
             Some(layout) => {
                 best = Some(layout);
@@ -838,19 +1105,38 @@ fn typeset(image: &mut RgbImage, block: &TextBlock, g: &Glyphs) -> Option<f32> {
         let lines: Vec<String> = text.split_whitespace().map(str::to_string).collect();
         let c = cap_ratio * MIN_FONT;
         let height = c + c * LINE_PITCH * (lines.len().max(1) - 1) as f32;
-        let ys = (0..lines.len()).map(|i| room.cy - height / 2.0 + i as f32 * c * LINE_PITCH).collect();
-        Layout { size: MIN_FONT, lines, ys }
+        let ys = (0..lines.len())
+            .map(|i| room.cy - height / 2.0 + i as f32 * c * LINE_PITCH)
+            .collect();
+        Layout {
+            size: MIN_FONT,
+            lines,
+            ys,
+        }
     });
-    let pen = Pen { font, size: layout.size };
+    let pen = Pen {
+        font,
+        size: layout.size,
+    };
     let c = cap_ratio * layout.size;
     let italic = block.italic.unwrap_or(false);
     let slant = if italic { 0.2 } else { 0.0 };
     let margin = (c * 1.5) as i64 + 4;
-    let widest = layout.lines.iter().map(|l| pen.width(l)).fold(0.0, f32::max);
+    let widest = layout
+        .lines
+        .iter()
+        .map(|l| pen.width(l))
+        .fold(0.0, f32::max);
     let x0 = (room.cx - widest / 2.0) as i64 - margin;
     let y0 = layout.ys.first().copied().unwrap_or(room.cy) as i64 - margin;
-    let height = (layout.ys.last().copied().unwrap_or(room.cy) - layout.ys[0] + c) as i64 + 2 * margin;
-    let mut cover = Coverage::new(x0, y0, (widest as i64 + 2 * margin) as usize, height.max(1) as usize);
+    let height =
+        (layout.ys.last().copied().unwrap_or(room.cy) - layout.ys[0] + c) as i64 + 2 * margin;
+    let mut cover = Coverage::new(
+        x0,
+        y0,
+        (widest as i64 + 2 * margin) as usize,
+        height.max(1) as usize,
+    );
     for (line, y) in layout.lines.iter().zip(&layout.ys) {
         let lw = pen.width(line);
         pen.rasterize(&mut cover, line, room.cx - lw / 2.0, y + c, slant);
@@ -868,13 +1154,20 @@ fn append_footnotes(image: &mut RgbImage, notes: &[String]) {
     let pad = (w as f32 * 0.02).round();
     let size = (w as f32 / 52.0).round().max(13.0);
     let line_h = size * 1.35;
-    let pen = Pen { font: FACES.face(FontRole::Sans, false), size };
+    let pen = Pen {
+        font: FACES.face(FontRole::Sans, false),
+        size,
+    };
     let max_w = w as f32 - 2.0 * pad;
     let mut lines = Vec::new();
     for note in notes {
         let mut line = String::new();
         for word in format!("*{note}").split_whitespace() {
-            let next = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+            let next = if line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{line} {word}")
+            };
             if !line.is_empty() && pen.width(&next) > max_w {
                 lines.push(std::mem::replace(&mut line, word.to_string()));
             } else {
@@ -892,7 +1185,13 @@ fn append_footnotes(image: &mut RgbImage, notes: &[String]) {
     }
     let mut cover = Coverage::new(0, old_h as i64, w as usize, band as usize);
     for (i, line) in lines.iter().enumerate() {
-        pen.rasterize(&mut cover, line, pad, old_h as f32 + pad + i as f32 * line_h + size * 0.8, 0.15);
+        pen.rasterize(
+            &mut cover,
+            line,
+            pad,
+            old_h as f32 + pad + i as f32 * line_h + size * 0.8,
+            0.15,
+        );
     }
     cover.paint(&mut grown, [33, 33, 33]);
     *image = grown;

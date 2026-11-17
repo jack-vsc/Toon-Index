@@ -41,7 +41,10 @@ fn keep_image(img: &PageImage) -> anyhow::Result<(String, [u32; 2])> {
     hash.update(img.base64.as_bytes());
     let file = format!("{}.jpg", &hex::encode(hash.finalize())[..24]);
     let scale = (STORED_SIDE as f32 / img.width.max(img.height) as f32).min(1.0);
-    let stored = [(img.width as f32 * scale).round() as u32, (img.height as f32 * scale).round() as u32];
+    let stored = [
+        (img.width as f32 * scale).round() as u32,
+        (img.height as f32 * scale).round() as u32,
+    ];
     let path = dataset_dir().join("images").join(&file);
     if !path.exists() {
         let bytes = base64::engine::general_purpose::STANDARD.decode(&img.base64)?;
@@ -50,7 +53,8 @@ fn keep_image(img: &PageImage) -> anyhow::Result<(String, [u32; 2])> {
             image = image.resize_exact(stored[0], stored[1], image::imageops::FilterType::Triangle);
         }
         let mut out = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, STORED_QUALITY).encode_image(&image.to_rgb8())?;
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, STORED_QUALITY)
+            .encode_image(&image.to_rgb8())?;
         fs::write(path, out)?;
     }
     Ok((file, stored))
@@ -58,14 +62,29 @@ fn keep_image(img: &PageImage) -> anyhow::Result<(String, [u32; 2])> {
 
 /// Nome de capítulo vira nome de arquivo: sai o que o Windows recusa.
 fn file_name(chapter: &str) -> String {
-    let clean: String = chapter.chars().map(|c| if "<>:\"/\\|?*".contains(c) || c < ' ' { ' ' } else { c }).collect();
+    let clean: String = chapter
+        .chars()
+        .map(|c| {
+            if "<>:\"/\\|?*".contains(c) || c < ' ' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
     let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
     let clean: String = clean.chars().take(150).collect();
-    if clean.is_empty() { "sem-nome".into() } else { clean }
+    if clean.is_empty() {
+        "sem-nome".into()
+    } else {
+        clean
+    }
 }
 
 pub fn record(ex: Example) {
-    if std::env::var("MI_DATASET").as_deref() == Ok("0") || !ex.model.to_lowercase().contains("claude") {
+    if std::env::var("MI_DATASET").as_deref() == Ok("0")
+        || !ex.model.to_lowercase().contains("claude")
+    {
         return;
     }
     // O conjunto de treino é um subproduto: disco cheio ou arquivo travado não param a tradução.
@@ -78,7 +97,9 @@ fn try_record(ex: &Example) -> anyhow::Result<()> {
     let root = dataset_dir();
     let mut guard = RECORDED.lock().unwrap();
     let keys = guard.get_or_insert_with(|| {
-        fs::read_to_string(root.join("recorded.txt")).map(|t| t.lines().map(str::to_string).collect()).unwrap_or_else(|_| HashSet::new())
+        fs::read_to_string(root.join("recorded.txt"))
+            .map(|t| t.lines().map(str::to_string).collect())
+            .unwrap_or_else(|_| HashSet::new())
     });
     if keys.contains(ex.key) {
         return Ok(());
@@ -107,9 +128,15 @@ fn try_record(ex: &Example) -> anyhow::Result<()> {
         "answer": ex.answer,
         "at": now_iso(),
     });
-    let mut out = OpenOptions::new().create(true).append(true).open(root.join("annotations").join(format!("{}.jsonl", file_name(&chapter))))?;
+    let mut out = OpenOptions::new().create(true).append(true).open(
+        root.join("annotations")
+            .join(format!("{}.jsonl", file_name(&chapter))),
+    )?;
     writeln!(out, "{line}")?;
-    let mut done = OpenOptions::new().create(true).append(true).open(root.join("recorded.txt"))?;
+    let mut done = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("recorded.txt"))?;
     writeln!(done, "{}", ex.key)?;
     keys.insert(ex.key.to_string());
     Ok(())
@@ -132,5 +159,8 @@ fn now_iso() -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let mo = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if mo <= 2 { y + 1 } else { y };
-    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}.{:03}Z", ms.rem_euclid(1000))
+    format!(
+        "{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}.{:03}Z",
+        ms.rem_euclid(1000)
+    )
 }

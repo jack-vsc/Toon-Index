@@ -9,7 +9,8 @@ use toon_ai::FontRole;
 
 macro_rules! face {
     ($file:literal) => {
-        FontArc::try_from_slice(include_bytes!(concat!("../../../assets/fonts/", $file))).expect($file)
+        FontArc::try_from_slice(include_bytes!(concat!("../../../assets/fonts/", $file)))
+            .expect($file)
     };
 }
 
@@ -24,7 +25,11 @@ pub struct Faces {
 }
 
 pub static FACES: LazyLock<Faces> = LazyLock::new(|| Faces {
-    comic: [face!("comic-neue-300.ttf"), face!("comic-neue-400.ttf"), face!("comic-neue-700.ttf")],
+    comic: [
+        face!("comic-neue-300.ttf"),
+        face!("comic-neue-400.ttf"),
+        face!("comic-neue-700.ttf"),
+    ],
     brush: face!("bangers-400.ttf"),
     condensed: [
         face!("oswald-200.ttf"),
@@ -36,10 +41,13 @@ pub static FACES: LazyLock<Faces> = LazyLock::new(|| Faces {
     sans: [face!("roboto-400.ttf"), face!("roboto-700.ttf")],
     serif: [face!("noto-serif-400.ttf"), face!("noto-serif-700.ttf")],
     handwritten: [face!("kalam-400.ttf"), face!("kalam-700.ttf")],
-    fallback: ["C:\\Windows\\Fonts\\segoeui.ttf", "C:\\Windows\\Fonts\\arial.ttf"]
-        .iter()
-        .find_map(|p| std::fs::read(p).ok())
-        .and_then(|b| FontArc::try_from_vec(b).ok()),
+    fallback: [
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+    ]
+    .iter()
+    .find_map(|p| std::fs::read(p).ok())
+    .and_then(|b| FontArc::try_from_vec(b).ok()),
 });
 
 impl Faces {
@@ -68,10 +76,11 @@ pub struct Pen<'a> {
 
 impl Pen<'_> {
     fn pick(&self, c: char) -> &FontArc {
-        if self.font.glyph_id(c).0 == 0 && !c.is_whitespace() {
-            if let Some(f) = FACES.fallback().filter(|f| f.glyph_id(c).0 != 0) {
-                return f;
-            }
+        if self.font.glyph_id(c).0 == 0
+            && !c.is_whitespace()
+            && let Some(f) = FACES.fallback().filter(|f| f.glyph_id(c).0 != 0)
+        {
+            return f;
         }
         self.font
     }
@@ -79,7 +88,10 @@ impl Pen<'_> {
     /// Altura das maiúsculas sobre o tamanho da fonte.
     pub fn cap_ratio(&self) -> f32 {
         let glyph = self.font.glyph_id('H').with_scale(PxScale::from(100.0));
-        self.font.outline_glyph(glyph).map(|g| g.px_bounds().height() / 100.0).unwrap_or(0.7)
+        self.font
+            .outline_glyph(glyph)
+            .map(|g| g.px_bounds().height() / 100.0)
+            .unwrap_or(0.7)
     }
 
     pub fn width(&self, text: &str) -> f32 {
@@ -89,10 +101,10 @@ impl Pen<'_> {
             let font = self.pick(c);
             let scaled = font.as_scaled(PxScale::from(self.size));
             let id = font.glyph_id(c);
-            if let Some((p, f)) = prev {
-                if std::ptr::eq(f, font) {
-                    x += scaled.kern(p, id);
-                }
+            if let Some((p, f)) = prev
+                && std::ptr::eq(f, font)
+            {
+                x += scaled.kern(p, id);
             }
             x += scaled.h_advance(id);
             prev = Some((id, font as *const _));
@@ -108,7 +120,8 @@ impl Pen<'_> {
             let font = self.pick(c);
             let scaled = font.as_scaled(PxScale::from(self.size));
             let id = font.glyph_id(c);
-            let glyph: Glyph = id.with_scale_and_position(PxScale::from(self.size), point(caret, baseline));
+            let glyph: Glyph =
+                id.with_scale_and_position(PxScale::from(self.size), point(caret, baseline));
             if let Some(outlined) = font.outline_glyph(glyph) {
                 let b = outlined.px_bounds();
                 outlined.draw(|gx, gy, v| {
@@ -134,7 +147,13 @@ pub struct Coverage {
 
 impl Coverage {
     pub fn new(x0: i64, y0: i64, w: usize, h: usize) -> Self {
-        Coverage { x0, y0, w, h, v: vec![0.0; w * h] }
+        Coverage {
+            x0,
+            y0,
+            w,
+            h,
+            v: vec![0.0; w * h],
+        }
     }
 
     fn add(&mut self, x: i64, y: i64, a: f32) {

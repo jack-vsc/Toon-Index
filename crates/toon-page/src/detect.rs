@@ -51,7 +51,11 @@ pub fn detect_text(gray: &Gray) -> Vec<TextRegion> {
         let mut ink = vec![0u8; w * h];
         let mut strong = vec![0u8; w * h];
         for p in 0..g.len() {
-            let c = if dark { closing[p] as i32 - g[p] as i32 } else { g[p] as i32 - opening[p] as i32 };
+            let c = if dark {
+                closing[p] as i32 - g[p] as i32
+            } else {
+                g[p] as i32 - opening[p] as i32
+            };
             ink[p] = (c > INK_WEAK) as u8;
             strong[p] = (c > INK_STRONG) as u8;
         }
@@ -76,10 +80,15 @@ pub fn detect_text(gray: &Gray) -> Vec<TextRegion> {
                     && !is_tip(c, g, &ink, &labels, w, h)
             })
             .collect();
-        let clean: HashSet<i32> =
-            shapes.iter().filter(|c| is_glyph(c, g, &ink, &labels, w, h, GLYPH_TOLERANCE)).map(|c| c.id).collect();
+        let clean: HashSet<i32> = shapes
+            .iter()
+            .filter(|c| is_glyph(c, g, &ink, &labels, w, h, GLYPH_TOLERANCE))
+            .map(|c| c.id)
+            .collect();
         for block in group_blocks(&shapes, &clean) {
-            if is_text_block(&block, g, &ink, w, h) && !beside_own_colour(&block, dark, g, &labels, w, h) {
+            if is_text_block(&block, g, &ink, w, h)
+                && !beside_own_colour(&block, dark, g, &labels, w, h)
+            {
                 found.push(block.region);
             }
         }
@@ -87,7 +96,11 @@ pub fn detect_text(gray: &Gray) -> Vec<TextRegion> {
     let mut regions = join_bubbles(merge_regions(found), g, w, h);
     regions.sort_by(|a, b| b.glyphs.cmp(&a.glyphs));
     regions.truncate(MAX_REGIONS);
-    regions.sort_by(|a, b| a.r#box[1].cmp(&b.r#box[1]).then(a.r#box[0].cmp(&b.r#box[0])));
+    regions.sort_by(|a, b| {
+        a.r#box[1]
+            .cmp(&b.r#box[1])
+            .then(a.r#box[0].cmp(&b.r#box[0]))
+    });
     regions
 }
 
@@ -117,7 +130,9 @@ fn bounds_of(list: &[Comp]) -> IBox {
 }
 
 fn gap_x(a: &Comp, b: &Comp) -> f64 {
-    (b.x0 as f64 - a.x1 as f64).max(a.x0 as f64 - b.x1 as f64).max(0.0)
+    (b.x0 as f64 - a.x1 as f64)
+        .max(a.x0 as f64 - b.x1 as f64)
+        .max(0.0)
 }
 
 /// Letras parecidas lado a lado, depois linhas de altura parecida empilhadas e alinhadas. Brilho ou
@@ -136,7 +151,8 @@ fn group_blocks(shapes: &[Comp], clean: &HashSet<i32>) -> Vec<Block> {
             }
             let lo = a.h.min(b.h) as f64;
             let hi = a.h.max(b.h) as f64;
-            let same_row = (a.y1.min(b.y1) as f64 - a.y0.max(b.y0) as f64) >= 0.5 * lo && hi <= 1.8 * lo;
+            let same_row =
+                (a.y1.min(b.y1) as f64 - a.y0.max(b.y0) as f64) >= 0.5 * lo && hi <= 1.8 * lo;
             if same_row && gap_x(&a, &b) <= 0.9 * hi {
                 let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
                 parent[ri] = rj;
@@ -195,7 +211,8 @@ fn group_blocks(shapes: &[Comp], clean: &HashSet<i32>) -> Vec<Block> {
             }
             let overlap_x = a.b[2].min(b.b[2]) as f64 - a.b[0].max(b.b[0]) as f64;
             let (wa, wb) = ((a.b[2] - a.b[0]) as f64, (b.b[2] - b.b[0]) as f64);
-            let centred = ((a.b[0] + a.b[2]) as f64 / 2.0 - (b.b[0] + b.b[2]) as f64 / 2.0).abs() <= wa.max(wb) * 0.25;
+            let centred = ((a.b[0] + a.b[2]) as f64 / 2.0 - (b.b[0] + b.b[2]) as f64 / 2.0).abs()
+                <= wa.max(wb) * 0.25;
             if overlap_x >= 0.3 * wa.min(wb) || centred {
                 let (ri, rj) = (find(&mut stack, i), find(&mut stack, j));
                 stack[ri] = rj;
@@ -215,7 +232,11 @@ fn group_blocks(shapes: &[Comp], clean: &HashSet<i32>) -> Vec<Block> {
         .map(|(_, list)| {
             let heights: Vec<f64> = list.iter().map(|c| c.h as f64).collect();
             Block {
-                region: TextRegion { r#box: bounds_of(&list), letter_height: quantile(&heights, 0.6).max(3.0), glyphs: list.len() },
+                region: TextRegion {
+                    r#box: bounds_of(&list),
+                    letter_height: quantile(&heights, 0.6).max(3.0),
+                    glyphs: list.len(),
+                },
                 list,
             }
         })
@@ -288,7 +309,12 @@ fn is_aligned(list: &[Comp], h: f64) -> bool {
     if list.len() >= 3 {
         let heights: Vec<f64> = list.iter().map(|c| c.h as f64).collect();
         let mid = quantile(&heights, 0.5);
-        if (heights.iter().filter(|&&x| (x - mid).abs() <= mid * 0.2).count() as f64) < list.len() as f64 * 0.6 {
+        if (heights
+            .iter()
+            .filter(|&&x| (x - mid).abs() <= mid * 0.2)
+            .count() as f64)
+            < list.len() as f64 * 0.6
+        {
             return false;
         }
     }
@@ -302,12 +328,24 @@ fn is_aligned(list: &[Comp], h: f64) -> bool {
         sxy += (cx[i] - mx) * (cy[i] - my);
         sxx += (cx[i] - mx).powi(2);
     }
-    let slope = if list.len() >= 3 && sxx > 0.0 { sxy / sxx } else { 0.0 };
+    let slope = if list.len() >= 3 && sxx > 0.0 {
+        sxy / sxx
+    } else {
+        0.0
+    };
     if slope.abs() > 0.25 {
         return false;
     }
-    let tops: Vec<f64> = list.iter().zip(&cx).map(|(c, x)| c.y0 as f64 - slope * (x - mx)).collect();
-    let bottoms: Vec<f64> = list.iter().zip(&cx).map(|(c, x)| c.y1 as f64 - slope * (x - mx)).collect();
+    let tops: Vec<f64> = list
+        .iter()
+        .zip(&cx)
+        .map(|(c, x)| c.y0 as f64 - slope * (x - mx))
+        .collect();
+    let bottoms: Vec<f64> = list
+        .iter()
+        .zip(&cx)
+        .map(|(c, x)| c.y1 as f64 - slope * (x - mx))
+        .collect();
     let max_b = bottoms.iter().cloned().fold(f64::MIN, f64::max);
     let min_t = tops.iter().cloned().fold(f64::MAX, f64::min);
     if max_b - min_t > 1.8 * h {
@@ -316,15 +354,24 @@ fn is_aligned(list: &[Comp], h: f64) -> bool {
     let top = quantile(&tops, 0.5);
     let bottom = quantile(&bottoms, 0.5);
     let tol = (h * 0.2).max(2.0);
-    let aligned = (0..list.len()).filter(|&i| (tops[i] - top).abs() <= tol || (bottoms[i] - bottom).abs() <= tol).count();
-    if list.len() == 2 { aligned == 2 } else { aligned as f64 >= list.len() as f64 * 0.7 }
+    let aligned = (0..list.len())
+        .filter(|&i| (tops[i] - top).abs() <= tol || (bottoms[i] - bottom).abs() <= tol)
+        .count();
+    if list.len() == 2 {
+        aligned == 2
+    } else {
+        aligned as f64 >= list.len() as f64 * 0.7
+    }
 }
 
 /// Letreiro é uma sequência de letras de altura parecida sobre uma cor lisa (balão, caixa de
 /// narração); grupos tirados do desenho têm poucas peças desiguais sobre fundo carregado.
 fn is_text_block(block: &Block, gray: &[u8], ink: &[u8], ww: usize, wh: usize) -> bool {
     let list = &block.list;
-    let widest = list.iter().map(|c| c.w as f64 / c.h as f64).fold(0.0, f64::max);
+    let widest = list
+        .iter()
+        .map(|c| c.w as f64 / c.h as f64)
+        .fold(0.0, f64::max);
     if list.len() < 3 && widest < 2.5 {
         return false;
     }
@@ -377,7 +424,11 @@ fn flat_between(block: &TextRegion, gray: &[u8], ink: &[u8], ww: usize, wh: usiz
         return false;
     }
     let median = quantile(&around, 0.5);
-    around.iter().filter(|&&v| (v - median).abs() <= BLOCK_TOLERANCE).count() as f64 >= around.len() as f64 * 0.7
+    around
+        .iter()
+        .filter(|&&v| (v - median).abs() <= BLOCK_TOLERANCE)
+        .count() as f64
+        >= around.len() as f64 * 0.7
 }
 
 /// A margem em volta do bloco, uma faixa por lado, cada uma julgada sozinha (degradês passam).
@@ -397,7 +448,11 @@ fn flat_around(block: &TextRegion, gray: &[u8], ww: usize, wh: usize) -> bool {
         let Some(r) = clip(s, ww, wh) else { continue };
         let values = sample(gray, ww, r, 200.0);
         let median = quantile(&values, 0.5);
-        score += values.iter().filter(|&&v| (v - median).abs() <= BLOCK_TOLERANCE).count() as f64 / values.len() as f64;
+        score += values
+            .iter()
+            .filter(|&&v| (v - median).abs() <= BLOCK_TOLERANCE)
+            .count() as f64
+            / values.len() as f64;
         sides += 1;
     }
     sides > 0 && score / sides as f64 >= 0.75
@@ -405,7 +460,14 @@ fn flat_around(block: &TextRegion, gray: &[u8], ww: usize, wh: usize) -> bool {
 
 /// As pontas de um balão de grito (e os vãos brancos entre elas) se alinham como letras, mas um lado
 /// delas é uma massa da mesma cor. Letreiro tem fundo em todos os lados.
-fn beside_own_colour(block: &Block, dark: bool, gray: &[u8], labels: &[i32], ww: usize, wh: usize) -> bool {
+fn beside_own_colour(
+    block: &Block,
+    dark: bool,
+    gray: &[u8],
+    labels: &[i32],
+    ww: usize,
+    wh: usize,
+) -> bool {
     let mut values = Vec::new();
     for c in &block.list {
         let step = round((c.count as f64 / 50.0).sqrt()).max(1);
@@ -426,10 +488,17 @@ fn beside_own_colour(block: &Block, dark: bool, gray: &[u8], labels: &[i32], ww:
     let far = (round(lh * 0.9) as i64).max(near + 2);
     let [bx0, by0, bx1, by1] = block.region.r#box.map(|v| v as i64);
     // Só em cima e embaixo: as pontas se alinham no alto e no pé do balão.
-    for s in [[bx0, by0 - far, bx1, by0 - near], [bx0, by1 + near, bx1, by1 + far]] {
+    for s in [
+        [bx0, by0 - far, bx1, by0 - near],
+        [bx0, by1 + near, bx1, by1 + far],
+    ] {
         let Some(r) = clip(s, ww, wh) else { continue };
         let median = quantile(&sample(gray, ww, r, 200.0), 0.5);
-        if if dark { median <= own + 35 } else { median >= own - 35 } {
+        if if dark {
+            median <= own + 35
+        } else {
+            median >= own - 35
+        } {
             return true;
         }
     }
@@ -451,7 +520,9 @@ fn merge_regions(mut regions: Vec<TextRegion>) -> Vec<TextRegion> {
     regions.sort_by(|a, b| b.glyphs.cmp(&a.glyphs));
     let mut out: Vec<TextRegion> = Vec::new();
     for region in regions {
-        match out.iter_mut().find(|o| overlap_area(o.r#box, region.r#box) > 0.3 * area(o.r#box).min(area(region.r#box))) {
+        match out.iter_mut().find(|o| {
+            overlap_area(o.r#box, region.r#box) > 0.3 * area(o.r#box).min(area(region.r#box))
+        }) {
             Some(twin) => {
                 twin.r#box = [
                     twin.r#box[0].min(region.r#box[0]),
@@ -517,7 +588,12 @@ fn join_bubbles(regions: Vec<TextRegion>, gray: &[u8], w: usize, h: usize) -> Ve
             let list = &groups[&root];
             let mut b = list[0].r#box;
             for r in list {
-                b = [b[0].min(r.r#box[0]), b[1].min(r.r#box[1]), b[2].max(r.r#box[2]), b[3].max(r.r#box[3])];
+                b = [
+                    b[0].min(r.r#box[0]),
+                    b[1].min(r.r#box[1]),
+                    b[2].max(r.r#box[2]),
+                    b[3].max(r.r#box[3]),
+                ];
             }
             TextRegion {
                 r#box: b,
@@ -540,7 +616,11 @@ fn same_background(a: IBox, b: IBox, letter_height: f64, gray: &[u8], w: usize, 
         let (x, y) = (x as i64, y as i64);
         let [b0, b1, b2, b3] = bx.map(|v| v as i64);
         let p = pad as i64;
-        x >= b0 - p && x < b2 + p && y >= b1 - p && y < b3 + p && !(x >= b0 && x < b2 && y >= b1 && y < b3)
+        x >= b0 - p
+            && x < b2 + p
+            && y >= b1 - p
+            && y < b3 + p
+            && !(x >= b0 && x < b2 && y >= b1 && y < b3)
     };
     let mut ring_a = Vec::new();
     let mut ring_b = Vec::new();
@@ -557,8 +637,17 @@ fn same_background(a: IBox, b: IBox, letter_height: f64, gray: &[u8], w: usize, 
     if ring_a.is_empty() || ring_b.is_empty() {
         return false;
     }
-    let bg = quantile(&ring_a.iter().map(|&p| gray[p] as i32).collect::<Vec<_>>(), 0.5);
-    if (quantile(&ring_b.iter().map(|&p| gray[p] as i32).collect::<Vec<_>>(), 0.5) - bg).abs() > BLOCK_TOLERANCE {
+    let bg = quantile(
+        &ring_a.iter().map(|&p| gray[p] as i32).collect::<Vec<_>>(),
+        0.5,
+    );
+    if (quantile(
+        &ring_b.iter().map(|&p| gray[p] as i32).collect::<Vec<_>>(),
+        0.5,
+    ) - bg)
+        .abs()
+        > BLOCK_TOLERANCE
+    {
         return false;
     }
     let target: HashSet<usize> = ring_b.into_iter().collect();
@@ -576,7 +665,12 @@ fn same_background(a: IBox, b: IBox, letter_height: f64, gray: &[u8], w: usize, 
     }
     while let Some(p) = queue.pop() {
         let (x, y) = (p % w, p / w);
-        let neighbours = [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)];
+        let neighbours = [
+            (x.wrapping_sub(1), y),
+            (x + 1, y),
+            (x, y.wrapping_sub(1)),
+            (x, y + 1),
+        ];
         for (nx, ny) in neighbours {
             if nx < x0 || nx >= x1 || ny < y0 || ny >= y1 {
                 continue;

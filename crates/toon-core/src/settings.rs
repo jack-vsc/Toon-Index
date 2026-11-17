@@ -37,7 +37,11 @@ pub fn language_label(value: &str) -> &str {
     if value == AUTO_LANGUAGE {
         return "Detectar automaticamente";
     }
-    LANGUAGES.iter().find(|(v, _)| *v == value).map(|(_, l)| *l).unwrap_or(value)
+    LANGUAGES
+        .iter()
+        .find(|(v, _)| *v == value)
+        .map(|(_, l)| *l)
+        .unwrap_or(value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -167,19 +171,27 @@ impl Default for Settings {
 
 impl Settings {
     pub fn active_profile(&self) -> Option<&ApiProfile> {
-        self.profiles.iter().find(|p| p.id == self.active_profile_id).or(self.profiles.first())
+        self.profiles
+            .iter()
+            .find(|p| p.id == self.active_profile_id)
+            .or(self.profiles.first())
     }
 
     fn normalized(mut self) -> Self {
         self.profiles.retain(|p| !p.id.is_empty());
         for p in &mut self.profiles {
             p.model = p.model.trim().to_string();
-            if p.kind == ProviderKind::Openai && !p.model.is_empty() && !p.models.contains(&p.model) {
+            if p.kind == ProviderKind::Openai && !p.model.is_empty() && !p.models.contains(&p.model)
+            {
                 p.models.push(p.model.clone());
             }
         }
         if !self.profiles.iter().any(|p| p.id == self.active_profile_id) {
-            self.active_profile_id = self.profiles.first().map(|p| p.id.clone()).unwrap_or_default();
+            self.active_profile_id = self
+                .profiles
+                .first()
+                .map(|p| p.id.clone())
+                .unwrap_or_default();
         }
         let known = |l: &str| LANGUAGES.iter().any(|(v, _)| *v == l);
         if self.source_language != AUTO_LANGUAGE && !known(&self.source_language) {
@@ -211,7 +223,10 @@ struct StoredFile {
 
 fn read_store() -> StoredFile {
     let store: StoredFile = crate::store::read_json(&settings_file());
-    StoredFile { settings: store.settings.normalized(), keys: store.keys }
+    StoredFile {
+        settings: store.settings.normalized(),
+        keys: store.keys,
+    }
 }
 
 pub fn load() -> Settings {
@@ -221,7 +236,11 @@ pub fn load() -> Settings {
 /// A chave do perfil, aberta só na hora de usar.
 pub fn api_key(profile_id: &str) -> Option<String> {
     let entry = read_store().keys.remove(profile_id)?;
-    if entry.encrypted { secrets::decrypt(&entry.value).ok() } else { Some(entry.value) }
+    if entry.encrypted {
+        secrets::decrypt(&entry.value).ok()
+    } else {
+        Some(entry.value)
+    }
 }
 
 /// Os últimos 4 caracteres de cada chave, para a pessoa ver qual está guardada.
@@ -233,7 +252,14 @@ pub fn key_hints() -> BTreeMap<String, String> {
         .iter()
         .filter_map(|p| {
             let key = api_key(&p.id)?;
-            let tail: String = key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail: String = key
+                .chars()
+                .rev()
+                .take(4)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             Some((p.id.clone(), tail))
         })
         .collect()
@@ -243,7 +269,12 @@ pub fn key_hints() -> BTreeMap<String, String> {
 pub fn save(settings: Settings, keys: &BTreeMap<String, String>) -> anyhow::Result<Settings> {
     let mut store = read_store();
     store.settings = settings.normalized();
-    let ids: Vec<&str> = store.settings.profiles.iter().map(|p| p.id.as_str()).collect();
+    let ids: Vec<&str> = store
+        .settings
+        .profiles
+        .iter()
+        .map(|p| p.id.as_str())
+        .collect();
     store.keys.retain(|id, _| ids.contains(&id.as_str()));
     for (id, key) in keys {
         if !ids.contains(&id.as_str()) {
@@ -253,7 +284,13 @@ pub fn save(settings: Settings, keys: &BTreeMap<String, String>) -> anyhow::Resu
         if key.is_empty() {
             store.keys.remove(id);
         } else {
-            store.keys.insert(id.clone(), StoredKey { value: secrets::encrypt(key)?, encrypted: true });
+            store.keys.insert(
+                id.clone(),
+                StoredKey {
+                    value: secrets::encrypt(key)?,
+                    encrypted: true,
+                },
+            );
         }
     }
     write_json(&settings_file(), &store)?;

@@ -16,7 +16,11 @@ pub fn parse_lenient(text: &str) -> Result<Value, serde_json::Error> {
                 return Ok(v);
             }
             let blocks = salvage_blocks(&repaired);
-            if blocks.is_empty() { Err(err) } else { Ok(serde_json::json!({ "blocks": blocks })) }
+            if blocks.is_empty() {
+                Err(err)
+            } else {
+                Ok(serde_json::json!({ "blocks": blocks }))
+            }
         }
     }
 }
@@ -24,7 +28,8 @@ pub fn parse_lenient(text: &str) -> Result<Value, serde_json::Error> {
 static LITERAL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)").unwrap());
 static CLOSES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^\s*(?:$|[:}\]]|,\s*(?:$|["{\[\]}\d-]|true|false|null)|"[^"\\\n]*"\s*:)"#).unwrap()
+    Regex::new(r#"^\s*(?:$|[:}\]]|,\s*(?:$|["{\[\]}\d-]|true|false|null)|"[^"\\\n]*"\s*:)"#)
+        .unwrap()
 });
 
 /// Reescreve `text` (a partir do primeiro colchete) em JSON válido onde a intenção é clara.
@@ -116,7 +121,9 @@ fn trim_trailing_comma(out: &mut String) {
 /// Põe a vírgula que o modelo esqueceu entre dois valores.
 fn separate(out: &mut String) {
     let trimmed = out.trim_end();
-    if trimmed.ends_with(['"', '}', ']', 'e', 'l']) || trimmed.ends_with(|c: char| c.is_ascii_digit()) {
+    if trimmed.ends_with(['"', '}', ']', 'e', 'l'])
+        || trimmed.ends_with(|c: char| c.is_ascii_digit())
+    {
         out.truncate(trimmed.len());
         out.push(',');
     }
@@ -126,7 +133,9 @@ fn separate(out: &mut String) {
 /// pontos, colchete fechando, vírgula antes da próxima chave ou valor). A aspa de uma fala vem com
 /// mais texto depois.
 fn closes_string(chars: &[char], from: usize) -> bool {
-    let rest: String = chars[from.min(chars.len())..chars.len().min(from + 200)].iter().collect();
+    let rest: String = chars[from.min(chars.len())..chars.len().min(from + 200)]
+        .iter()
+        .collect();
     CLOSES.is_match(&rest)
 }
 
@@ -149,16 +158,15 @@ fn salvage_blocks(text: &str) -> Vec<Value> {
             in_string = true;
         } else if c == b'{' {
             starts.push(i);
-        } else if c == b'}' {
-            if let Some(start) = starts.pop() {
-                let chunk = &text[start..=i];
-                if chunk.contains("\"translation\"") {
-                    if let Ok(item @ Value::Object(_)) = serde_json::from_str::<Value>(chunk) {
-                        if item.get("translation").is_some() {
-                            found.push(item);
-                        }
-                    }
-                }
+        } else if c == b'}'
+            && let Some(start) = starts.pop()
+        {
+            let chunk = &text[start..=i];
+            if chunk.contains("\"translation\"")
+                && let Ok(item @ Value::Object(_)) = serde_json::from_str::<Value>(chunk)
+                && item.get("translation").is_some()
+            {
+                found.push(item);
             }
         }
         i += 1;
