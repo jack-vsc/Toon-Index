@@ -5,6 +5,7 @@ pub mod cancel;
 pub mod dataset;
 pub mod error;
 pub mod json;
+pub mod local;
 pub mod prompt;
 pub mod providers;
 pub mod translate;

@@ -24,3 +24,4 @@ url.workspace = true
 rand = "0.9"
 image.workspace = true
 sha1 = "0.10"
+parking_lot.workspace = true

@@ -2,7 +2,9 @@
 //! Toon Index: traduz capítulos de mangá e webtoon com IA, guarda na biblioteca e acompanha a leitura,
 //! no PC, no celular (pelo app Flutter em `mobile/`) e no navegador (pela extensão em `extension/`).
 
+mod cloud;
 mod engine;
+mod notify;
 mod tasks;
 mod ui;
 
@@ -27,9 +29,12 @@ fn main() -> eframe::Result {
             .with_min_inner_size([900.0, 600.0]),
         ..Default::default()
     };
-    eframe::run_native(
+    let result = eframe::run_native(
         "Toon Index",
         options,
         Box::new(move |cc| Ok(Box::new(ui::App::new(cc, engine, runtime)))),
-    )
+    );
+    // O modelo local não fica ocupando a placa de vídeo depois que a janela fecha.
+    toon_ai::local::stop();
+    result
 }

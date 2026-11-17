@@ -2,7 +2,17 @@
 #[tokio::main]
 async fn main() {
     let name = std::env::args().nth(1).unwrap_or_default();
-    let settings = toon_core::settings::load();
+    let mut settings = toon_core::settings::load();
+    // "local:<modelo>" testa o modelo próprio do app, como o perfil "Neste PC".
+    if let Some(model) = name.strip_prefix("local:") {
+        settings.profiles.push(toon_core::settings::ApiProfile {
+            id: toon_core::settings::LOCAL_AI_PROFILE_ID.into(),
+            name: name.clone(),
+            base_url: toon_core::settings::LOCAL_AI_BASE_URL.into(),
+            model: model.into(),
+            ..Default::default()
+        });
+    }
     let Some(profile) = settings.profiles.iter().find(|p| p.name == name) else {
         eprintln!("perfil não encontrado");
         std::process::exit(1);

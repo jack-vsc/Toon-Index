@@ -132,6 +132,12 @@ impl Ready {
         cancel: &Cancel,
         temperature: f32,
     ) -> Result<String, AiError> {
+        // O modelo próprio do app ("Neste PC") liga antes do pedido.
+        if self.profile.id == toon_core::settings::LOCAL_AI_PROFILE_ID {
+            crate::local::ensure(&self.profile.model, self.settings.ai_device == "cpu")
+                .await
+                .map_err(|e| AiError::app("network", e.to_string()))?;
+        }
         providers::call_model(Call {
             profile: &self.profile,
             api_key: &self.api_key,
@@ -335,6 +341,11 @@ pub async fn test_api(profile: &ApiProfile, typed_key: Option<String>) -> Result
         .filter(|k| !k.trim().is_empty())
         .or_else(|| settings::api_key(&profile.id));
     let api_key = check_profile(profile, key)?;
+    if profile.id == toon_core::settings::LOCAL_AI_PROFILE_ID {
+        crate::local::ensure(&profile.model, false)
+            .await
+            .map_err(|e| AiError::app("network", e.to_string()))?;
+    }
     let cancel = Cancel::default();
     let started = std::time::Instant::now();
     let images = [providers::test_image()];
