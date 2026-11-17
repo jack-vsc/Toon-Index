@@ -45,6 +45,9 @@ pub trait App: Send + Sync + 'static {
     fn checking(&self) -> bool;
     /// O APK mais novo do celular, quando foi gerado neste PC: versão, build e arquivo.
     fn phone_release(&self) -> Option<(String, u32, std::path::PathBuf)>;
+    /// O que o celular precisa para entrar na sincronização pela internet (nulo quando desligada).
+    fn cloud_for_phone(&self) -> Value;
+    async fn join_cloud(&self, uid: &str) -> anyhow::Result<()>;
 }
 
 type Shared = Arc<dyn App>;
@@ -295,10 +298,14 @@ async fn handle(
     };
     Ok(match (method.as_str(), path) {
         ("GET", "/api/status") => ok(json!({ "app": "Toon Index", "device": device })),
-        ("GET", "/api/cloud") => ok(json!({ "configured": false })),
-        ("POST", "/api/cloud/join") => {
-            bad("A sincronização pela internet ainda não existe nesta versão.")
-        }
+        ("GET", "/api/cloud") => ok(app.cloud_for_phone()),
+        ("POST", "/api/cloud/join") => match b()["uid"].as_str() {
+            Some(uid) => {
+                app.join_cloud(uid).await?;
+                ok(json!({ "ok": true }))
+            }
+            None => bad("uid."),
+        },
         ("GET", "/api/library") => {
             let chapters: Vec<Value> = library::list_library()
                 .into_iter()

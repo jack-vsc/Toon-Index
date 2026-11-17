@@ -47,6 +47,12 @@ struct Pairing {
 }
 
 static PAIRING: Mutex<Option<Pairing>> = Mutex::new(None);
+/// O token com que o próprio app (a sincronização pela internet) chama o servidor; muda a cada abertura.
+static INTERNAL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| random_hex(32));
+
+pub fn internal_token() -> &'static str {
+    &INTERNAL
+}
 static LOCK: Mutex<()> = Mutex::new(());
 
 fn path() -> PathBuf {
@@ -207,6 +213,14 @@ pub fn pair(code: &str, name: &str) -> Option<(String, Device)> {
 
 /// O aparelho dono do token, com o "visto por último" atualizado de minuto em minuto.
 pub fn device_for(token: &str) -> Option<Device> {
+    if same(token, &INTERNAL) {
+        return Some(Device {
+            id: "cloud".into(),
+            name: "Celular (pela internet)".into(),
+            paired_at: 0,
+            last_seen: None,
+        });
+    }
     let h = hash(token);
     let _g = LOCK.lock();
     let mut s = load();

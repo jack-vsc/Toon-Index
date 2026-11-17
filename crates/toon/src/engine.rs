@@ -30,6 +30,8 @@ pub struct Engine {
     pub dirty: Mutex<bool>,
     /// O que aconteceu por último, para a barra de status.
     pub status: Mutex<String>,
+    /// Quando cada obra sem capa foi procurada por uma (nesta abertura do app).
+    pub covers_tried: Mutex<HashMap<String, i64>>,
 }
 
 impl Engine {
@@ -60,6 +62,9 @@ pub fn start(engine: Arc<Engine>, runtime: &tokio::runtime::Runtime) {
     let _ = jobs::requeue_interrupted();
     runtime.spawn(run_queue(engine.clone()));
     runtime.spawn(check_loop(engine.clone()));
+    runtime.spawn(crate::cloud::run(
+        toon_core::devices::internal_token().to_string(),
+    ));
     let app: Arc<dyn toon_server::App> = Arc::new(ServerHooks { engine });
     runtime.spawn(async move {
         if let Err(e) = toon_server::serve(app).await {
@@ -236,7 +241,10 @@ async fn run_job(
         skip_end: settings.skip_end as usize,
         concurrency: settings.concurrency as usize,
         chapter: name.clone(),
-        layers: Some(format!("{}|sfx:{}", settings.target_language, settings.translate_sfx)),
+        layers: Some(format!(
+            "{}|sfx:{}",
+            settings.target_language, settings.translate_sfx
+        )),
         reuse_layers: settings.reuse_layers,
     };
     let out = chapter::translate_chapter(
@@ -313,6 +321,12 @@ async fn translate_novel_job(
 }
 
 async fn check_loop(engine: Arc<Engine>) {
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            toon_ai::local::stop_if_idle();
+        }
+    });
     // Espera a janela abrir antes da primeira rodada.
     tokio::time::sleep(Duration::from_secs(60)).await;
     loop {
@@ -336,6 +350,12 @@ pub async fn check_now(engine: &Engine) {
         *checking = true;
     }
     engine.say("Procurando capítulos novos");
+    // Antes, as obras ainda não procuradas nos sites e as capas que faltam.
+    toon_web::details::auto_link().await;
+    let covers = toon_web::details::auto_covers(&engine.covers_tried).await;
+    if covers > 0 {
+        engine.touch();
+    }
     let mut sources: Vec<String> = library::list_works()
         .into_iter()
         .flat_map(|w| w.sources.unwrap_or_default())
@@ -365,6 +385,7 @@ pub async fn check_now(engine: &Engine) {
         let _ = updates::record_check(source, check);
     }
     let _ = updates::change(|s| s.last_run = Some(toon_core::now_ms()));
+    crate::notify::announce().await;
     *engine.checking.lock() = false;
     let fresh = updates::unread().iter().filter(|u| u.is_recent()).count();
     engine.say(if fresh > 0 {
@@ -397,34 +418,25 @@ impl toon_server::App for ServerHooks {
         )?)
     }
 
-    async fn refresh_work(&self, _work_id: &str) -> anyhow::Result<()> {
-        anyhow::bail!("Atualizar os dados da obra ainda não existe nesta versão.")
-    }
-
     async fn link_work(&self, work_id: &str, matches: Value) -> anyhow::Result<()> {
         let matches: Vec<catalog::Match> = serde_json::from_value(matches)?;
-        let found = library::CatalogFound {
-            title: None,
-            names: matches
-                .iter()
-                .flat_map(|m| std::iter::once(m.title.clone()).chain(m.alt_names.clone()))
-                .collect(),
-            sources: matches.iter().map(|m| m.url.clone()).collect(),
-            sites: matches
-                .iter()
-                .map(|m| {
-                    serde_json::to_value(m.site)
-                        .ok()
-                        .and_then(|v| v.as_str().map(str::to_string))
-                        .unwrap_or_default()
-                })
-                .collect(),
-            cover: None,
-            info: None,
-        };
-        library::apply_catalog(work_id, found)?;
+        toon_web::details::link_work(work_id, &matches).await?;
         self.engine.touch();
         Ok(())
+    }
+
+    async fn refresh_work(&self, work_id: &str) -> anyhow::Result<()> {
+        toon_web::details::refresh_work(work_id).await?;
+        self.engine.touch();
+        Ok(())
+    }
+
+    fn cloud_for_phone(&self) -> Value {
+        crate::cloud::for_phone()
+    }
+
+    async fn join_cloud(&self, uid: &str) -> anyhow::Result<()> {
+        crate::cloud::join(uid).await
     }
 
     fn check_updates(&self) {
