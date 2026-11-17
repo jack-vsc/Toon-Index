@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Toon Index</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <span class="logo">漫</span>
+      <strong>Toon Index</strong>
+      <span id="app" class="muted"></span>
+    </header>
+
+    <section id="page" hidden>
+      <div class="label">NESTA PÁGINA</div>
+      <div id="work" class="work"></div>
+      <div id="where" class="muted small"></div>
+      <div class="row">
+        <select id="shelf" title="Lista de leitura"></select>
+        <button id="favorite" class="ghost" title="Favoritar">☆</button>
+      </div>
+      <div class="row">
+        <button id="markRead" hidden></button>
+        <button id="readUpTo" class="ghost" hidden title="Este capítulo e todos os anteriores, desde o 1"></button>
+      </div>
+      <div id="pageError" class="error small" hidden></div>
+    </section>
+
+    <section>
+      <div class="label">CONTINUAR LENDO</div>
+      <div id="continue"></div>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

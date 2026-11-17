@@ -1,0 +1,151 @@
+/* The app's colors: MangaDex's dark theme and orange. */
+:root {
+  --bg: #131315;
+  --panel: #1e1e22;
+  --panel-2: #29292e;
+  --border: #33333a;
+  --text: #ededf0;
+  --muted: #9e9ea8;
+  --accent: #ff6740;
+  --ok: #4ccf8a;
+  --err: #ff6b6b;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  width: 340px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px 'Segoe UI', system-ui, sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#app {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+}
+
+section {
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.label {
+  font: 700 10px Consolas, monospace;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.work {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.error {
+  color: var(--err);
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+select {
+  flex: 1;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font: inherit;
+}
+
+button {
+  font: inherit;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button.ghost {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+
+#favorite.on {
+  color: #ffc940;
+}
+
+#markRead {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+.item:first-child {
+  border-top: none;
+}
+
+.item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item button {
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.new {
+  font: 700 10px Consolas, monospace;
+  color: var(--accent);
+}
