@@ -4146,6 +4146,7 @@ dependencies = [
  "hex",
  "image",
  "lopdf",
+ "regex",
  "serde",
  "serde_json",
  "sha2",

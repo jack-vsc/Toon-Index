@@ -146,9 +146,26 @@ async fn run_job(
     let (pages, name, source) = match job.kind {
         Kind::Pdf => {
             let bytes = pdf.ok_or_else(|| anyhow::anyhow!("O PDF enviado sumiu do PC."))?;
+            // Uma novel (PDF com texto) vai pela camada de texto, não pelas imagens.
+            let novel = match settings.content_type {
+                settings::ContentType::Novel => true,
+                settings::ContentType::Comic => false,
+                settings::ContentType::Auto => {
+                    let probe = bytes.clone();
+                    tokio::task::spawn_blocking(move || {
+                        toon_page::novel::looks_like_novel(&toon_page::novel::page_texts(&probe))
+                    })
+                    .await
+                    .unwrap_or(false)
+                }
+            };
+            let name = job.name.trim_end_matches(".pdf").to_string();
+            if novel {
+                return translate_novel_job(engine, job, &settings, bytes, &name, cancel).await;
+            }
             let pages =
                 tokio::task::spawn_blocking(move || toon_page::pdf::read_pages(&bytes)).await??;
-            (pages, job.name.trim_end_matches(".pdf").to_string(), None)
+            (pages, name, None)
         }
         Kind::Link => {
             let url = job.url.clone().unwrap_or_default();
@@ -245,6 +262,45 @@ async fn run_job(
             cover_jpeg: &out.cover_jpeg,
             downloaded: false,
             novel: false,
+            source_language: &settings.source_language,
+            target_language: &settings.target_language,
+            model: &model,
+        })?;
+        Ok(e.id)
+    })
+    .await??;
+    engine.touch();
+    Ok(saved)
+}
+
+/// Uma novel: o texto traduzido em lotes e composto de novo, salvo numa obra de novel.
+async fn translate_novel_job(
+    engine: &Engine,
+    job: &Job,
+    settings: &settings::Settings,
+    bytes: Vec<u8>,
+    name: &str,
+    cancel: &Cancel,
+) -> anyhow::Result<String> {
+    let ready = toon_ai::ready(settings.clone())?;
+    let id = job.id.clone();
+    let out = toon_page::novel::translate_novel(&ready, bytes, name, cancel, move |p| {
+        progress(&id, "Traduzindo o texto", p.done, p.total)
+    })
+    .await?;
+    let model = ready.profile.model.clone();
+    let (file_name, settings) = (format!("{name}.pdf"), settings.clone());
+    let saved = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        let e = library::save_to_library(SaveInput {
+            file_name: &file_name,
+            source: None,
+            page_count: out.translated_pages as u32,
+            translated_pages: out.translated_pages as u32,
+            original: &out.original_pdf,
+            translated: &out.translated_pdf,
+            cover_jpeg: &out.cover_jpeg,
+            downloaded: false,
+            novel: true,
             source_language: &settings.source_language,
             target_language: &settings.target_language,
             model: &model,
