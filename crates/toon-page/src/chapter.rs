@@ -46,6 +46,10 @@ pub struct Options {
     pub skip_end: usize,
     pub concurrency: usize,
     pub chapter: String,
+    /// O idioma e as opções da tradução, que entram no nome das camadas; `None` não usa camadas.
+    pub layers: Option<String>,
+    /// Usar as camadas já guardadas (desligado, traduz de novo do zero e guarda as novas).
+    pub reuse_layers: bool,
 }
 
 pub struct Output {
@@ -107,6 +111,39 @@ pub fn cover_of(page: &PdfPage) -> anyhow::Result<Vec<u8>> {
     encode_jpeg(&thumb, 80)
 }
 
+/// Uma página: da camada guardada quando existe, senão traduzida (e a camada guardada para a próxima vez).
+async fn page_with_layers(
+    ready: &Ready,
+    page: &PdfPage,
+    index: usize,
+    chapter: String,
+    cancel: &Cancel,
+    tag: Option<&str>,
+    reuse: bool,
+) -> Result<RgbImage, AiError> {
+    let original = render(page);
+    let key = tag.map(|t| crate::layers::key(&original, t));
+    if let (Some(k), true) = (&key, reuse) {
+        if let Some(layer) = crate::layers::read(k) {
+            let mut image = original.clone();
+            if crate::layers::apply(&mut image, &layer) {
+                return Ok(image);
+            }
+        }
+    }
+    let done = translate_page(ready, page, index as u32 + 1, Some(chapter), cancel).await?;
+    if let Some(k) = key {
+        let image = done.image.clone();
+        let count = done.blocks.len();
+        tokio::task::spawn_blocking(move || {
+            if let Some(layer) = crate::layers::extract(&original, &image, count) {
+                let _ = crate::layers::save(&k, &layer);
+            }
+        });
+    }
+    Ok(done.image)
+}
+
 /// Traduz as páginas; uma página com erro sai como estava (e conta em `errors`), um erro de conta
 /// (chave, cota, créditos) para tudo.
 pub async fn translate_chapter(
@@ -132,13 +169,13 @@ pub async fn translate_chapter(
             let pages = pages.clone();
             let cancel = cancel.clone();
             let chapter = options.chapter.clone();
+            let tag = options.layers.clone();
+            let reuse = options.reuse_layers;
             async move {
                 if skip(i) {
                     return (i, Ok(None));
                 }
-                let r =
-                    translate_page(&ready, &pages[i], i as u32 + 1, Some(chapter), &cancel).await;
-                (i, r.map(|t| Some(t.image)))
+                (i, page_with_layers(&ready, &pages[i], i, chapter, &cancel, tag.as_deref(), reuse).await.map(Some))
             }
         })
         .buffer_unordered(options.concurrency.max(1));

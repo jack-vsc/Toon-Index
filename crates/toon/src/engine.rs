@@ -219,6 +219,8 @@ async fn run_job(
         skip_end: settings.skip_end as usize,
         concurrency: settings.concurrency as usize,
         chapter: name.clone(),
+        layers: Some(format!("{}|sfx:{}", settings.target_language, settings.translate_sfx)),
+        reuse_layers: settings.reuse_layers,
     };
     let out = chapter::translate_chapter(
         ready.clone(),

@@ -5,6 +5,7 @@ pub mod chapter;
 pub mod detect;
 pub mod fonts;
 pub mod glyphs;
+pub mod layers;
 pub mod marks;
 pub mod overlay;
 pub mod page;
