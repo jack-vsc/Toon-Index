@@ -9,3 +9,4 @@ pub mod overlay;
 pub mod page;
 pub mod pdf;
 pub mod slicing;
+pub mod chapter;
