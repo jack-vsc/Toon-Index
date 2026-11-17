@@ -36,7 +36,9 @@ pub struct Patch {
 /// O nome do arquivo de uma página: o idioma e as opções de tradução, o tamanho e uma cópia reduzida
 /// dos pixels. A mesma página do mesmo capítulo dá sempre o mesmo nome.
 pub fn key(image: &RgbImage, tag: &str) -> String {
-    let h = ((image.height() as f32 / image.width() as f32) * 256.0).round().max(1.0) as u32;
+    let h = ((image.height() as f32 / image.width() as f32) * 256.0)
+        .round()
+        .max(1.0) as u32;
     let small = image::imageops::resize(image, 256, h, image::imageops::FilterType::Triangle);
     let mut hash = Sha256::new();
     hash.update(format!("rust|{tag}|{}x{}|", image.width(), image.height()).as_bytes());
@@ -86,7 +88,8 @@ pub fn extract(before: &RgbImage, after: &RgbImage, block_count: usize) -> Optio
         if !changed[start] || seen[start] {
             continue;
         }
-        let (mut x0, mut y0, mut x1, mut y1) = (start % cols, start / cols, start % cols, start / cols);
+        let (mut x0, mut y0, mut x1, mut y1) =
+            (start % cols, start / cols, start % cols, start / cols);
         let mut stack = vec![start];
         seen[start] = true;
         while let Some(cell) = stack.pop() {
@@ -110,10 +113,21 @@ pub fn extract(before: &RgbImage, after: &RgbImage, block_count: usize) -> Optio
         let h = height.min((y1 as u32 + 1) * CELL) - y;
         let piece = image::imageops::crop_imm(after, x, y, w, h).to_image();
         let mut bytes = Vec::new();
-        image::codecs::webp::WebPEncoder::new_lossless(Cursor::new(&mut bytes)).encode(piece.as_raw(), w, h, image::ExtendedColorType::Rgb8).ok()?;
-        patches.push(Patch { x, y, webp: B64.encode(bytes) });
+        image::codecs::webp::WebPEncoder::new_lossless(Cursor::new(&mut bytes))
+            .encode(piece.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+            .ok()?;
+        patches.push(Patch {
+            x,
+            y,
+            webp: B64.encode(bytes),
+        });
     }
-    Some(PageLayer { width, height, block_count, patches })
+    Some(PageLayer {
+        width,
+        height,
+        block_count,
+        patches,
+    })
 }
 
 /// Põe os pedaços guardados sobre a página; `false` quando a camada é de outro tamanho.
@@ -122,8 +136,12 @@ pub fn apply(image: &mut RgbImage, layer: &PageLayer) -> bool {
         return false;
     }
     for patch in &layer.patches {
-        let Ok(bytes) = B64.decode(&patch.webp) else { return false };
-        let Ok(piece) = image::load_from_memory(&bytes) else { return false };
+        let Ok(bytes) = B64.decode(&patch.webp) else {
+            return false;
+        };
+        let Ok(piece) = image::load_from_memory(&bytes) else {
+            return false;
+        };
         image::imageops::replace(image, &piece.to_rgb8(), patch.x as i64, patch.y as i64);
     }
     true

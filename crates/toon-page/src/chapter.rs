@@ -175,7 +175,20 @@ pub async fn translate_chapter(
                 if skip(i) {
                     return (i, Ok(None));
                 }
-                (i, page_with_layers(&ready, &pages[i], i, chapter, &cancel, tag.as_deref(), reuse).await.map(Some))
+                (
+                    i,
+                    page_with_layers(
+                        &ready,
+                        &pages[i],
+                        i,
+                        chapter,
+                        &cancel,
+                        tag.as_deref(),
+                        reuse,
+                    )
+                    .await
+                    .map(Some),
+                )
             }
         })
         .buffer_unordered(options.concurrency.max(1));

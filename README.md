@@ -113,16 +113,32 @@ Nenhum desses arquivos entra no repositório. `TOON_DATA_DIR` aponta o app para 
 
 Mais detalhes em [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
+## Também no app
+
+- **Novels em PDF de texto**: o texto sai da camada de texto do PDF (inclusive os mapas ToUnicode das
+  edições da Yen Press e da Kobo), vai para a IA parágrafo por parágrafo e é composto de novo nas
+  páginas do mesmo tamanho, com as ilustrações no lugar.
+- **Camadas**: cada página traduzida guarda só o que mudou; traduzir o mesmo capítulo de novo põe as
+  páginas de volta em segundos, sem a IA.
+- **Modelo próprio no PC**: o perfil "Neste PC" liga o `llama-server` do llama.cpp com o modelo
+  instalado em `local-ai` e desliga depois de cinco minutos sem uso.
+- **Ficha da obra** ("Atualizar dados"): nome, sinopse, gêneros, situação, ano e capa pelo MangaDex ou
+  pela página da obra; obras novas são procuradas nos sites sozinhas e ganham capa.
+- **Histórico dos navegadores**: os capítulos lidos no Chrome, Brave, Opera e Edge viram leitura.
+- **Avisos de capítulo novo**: no Windows, no celular pelo Firebase (com a chave da conta de serviço)
+  ou pelo ntfy.sh; obras marcadas para "traduzir sozinho" ou "baixar sozinho" entram na fila.
+- **Sincronização pela internet**: a mesma conta e o mesmo espaço do Firebase de antes, pela API REST;
+  o celular lê a biblioteca e manda pedidos quando não alcança o PC.
+
 ## Limites
 
-Esta versão ainda não tem tudo o que a versão em Electron tinha:
-
-- perfis do Cursor (o SDK dele só existe em Node);
-- novels em PDF de texto e PDFs sem imagem por página;
-- os modelos de visão locais (detecção de balão e LaMa) e o modelo de tradução local próprio;
-- a sincronização pela internet (Firebase) e as notificações de capítulo novo no celular;
-- reaproveitar as camadas de páginas já traduzidas, a importação do histórico dos navegadores, a busca
-  nos sites próprios e a ficha da obra ("Atualizar dados").
+- Perfis do Cursor não funcionam: o Cursor só tem SDK em Node. Use a mesma conta pelo OpenRouter ou
+  pela API da Anthropic.
+- O servidor de visão em Python (detecção de balões e LaMa) não foi trazido: o detector e o apagador
+  próprios do app fazem esse trabalho.
+- As camadas e as respostas guardadas pela versão em Electron continuam no disco, mas não são
+  reaproveitadas: o nome de cada uma vem dos pixels da página como o pdf.js desenhava. Os capítulos
+  já traduzidos estão todos na biblioteca.
 
 ## Licença
 

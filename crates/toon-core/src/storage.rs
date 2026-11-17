@@ -22,11 +22,15 @@ pub struct Usage {
 }
 
 fn size_of(path: &Path) -> u64 {
-    let Ok(meta) = std::fs::symlink_metadata(path) else { return 0 };
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
     if meta.is_file() {
         return meta.len();
     }
-    std::fs::read_dir(path).map(|dirs| dirs.flatten().map(|d| size_of(&d.path())).sum()).unwrap_or(0)
+    std::fs::read_dir(path)
+        .map(|dirs| dirs.flatten().map(|d| size_of(&d.path())).sum())
+        .unwrap_or(0)
 }
 
 pub fn usage() -> Usage {
@@ -45,7 +49,10 @@ pub fn clear(area: &str) -> anyhow::Result<Usage> {
     let dir = match area {
         "layers" => layers_dir(),
         "aiCache" => translation_cache_dir(),
-        "appCache" => data_dir().join("browser-profile").join("Default").join("Cache"),
+        "appCache" => data_dir()
+            .join("browser-profile")
+            .join("Default")
+            .join("Cache"),
         _ => anyhow::bail!("Área desconhecida."),
     };
     if dir.exists() {
@@ -63,5 +70,9 @@ pub fn human(bytes: u64) -> String {
         value /= 1024.0;
         unit += 1;
     }
-    if unit == 0 { format!("{bytes} B") } else { format!("{value:.1} {}", units[unit]).replace('.', ",") }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", units[unit]).replace('.', ",")
+    }
 }

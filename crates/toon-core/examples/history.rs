@@ -4,7 +4,12 @@ fn main() {
     println!("{} obras no histórico", works.len());
     for w in works.iter().take(8) {
         let last = w.chapters.last().map(|c| c.chapter).unwrap_or_default();
-        println!("  {} ({} capítulos, último {last}, {:?})", w.name, w.chapters.len(), w.browsers);
+        println!(
+            "  {} ({} capítulos, último {last}, {:?})",
+            w.name,
+            w.chapters.len(),
+            w.browsers
+        );
     }
     for p in problems {
         println!("  problema: {p}");

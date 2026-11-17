@@ -33,20 +33,34 @@ impl FontMap {
 }
 
 fn hex_to_string(hex: &str) -> String {
-    let units: Vec<u16> = hex.as_bytes().chunks(4).filter_map(|c| u16::from_str_radix(std::str::from_utf8(c).ok()?, 16).ok()).collect();
+    let units: Vec<u16> = hex
+        .as_bytes()
+        .chunks(4)
+        .filter_map(|c| u16::from_str_radix(std::str::from_utf8(c).ok()?, 16).ok())
+        .collect();
     String::from_utf16_lossy(&units)
 }
 
 /// Lê `bfchar` e `bfrange` de um CMap ToUnicode.
 fn parse_cmap(text: &str) -> (usize, HashMap<u32, String>) {
-    static SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"begincodespacerange\s*<([0-9A-Fa-f]+)>").unwrap());
-    static CHARS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)beginbfchar(.*?)endbfchar").unwrap());
-    static CHAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>").unwrap());
-    static RANGES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)beginbfrange(.*?)endbfrange").unwrap());
-    static RANGE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(<([0-9A-Fa-f]*)>|\[([^\]]*)\])").unwrap());
+    static SPACE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"begincodespacerange\s*<([0-9A-Fa-f]+)>").unwrap());
+    static CHARS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?s)beginbfchar(.*?)endbfchar").unwrap());
+    static CHAR: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>").unwrap());
+    static RANGES: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?s)beginbfrange(.*?)endbfrange").unwrap());
+    static RANGE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(<([0-9A-Fa-f]*)>|\[([^\]]*)\])")
+            .unwrap()
+    });
     static ITEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([0-9A-Fa-f]*)>").unwrap());
-    let width = SPACE.captures(text).map(|c| c[1].len() / 2).unwrap_or(2).max(1);
+    let width = SPACE
+        .captures(text)
+        .map(|c| c[1].len() / 2)
+        .unwrap_or(2)
+        .max(1);
     let mut map = HashMap::new();
     for block in CHARS.captures_iter(text) {
         for c in CHAR.captures_iter(&block[1]) {
@@ -57,7 +71,12 @@ fn parse_cmap(text: &str) -> (usize, HashMap<u32, String>) {
     }
     for block in RANGES.captures_iter(text) {
         for c in RANGE.captures_iter(&block[1]) {
-            let (Ok(lo), Ok(hi)) = (u32::from_str_radix(&c[1], 16), u32::from_str_radix(&c[2], 16)) else { continue };
+            let (Ok(lo), Ok(hi)) = (
+                u32::from_str_radix(&c[1], 16),
+                u32::from_str_radix(&c[2], 16),
+            ) else {
+                continue;
+            };
             if hi < lo || hi - lo > 0xFFFF {
                 continue;
             }
@@ -83,13 +102,25 @@ fn parse_cmap(text: &str) -> (usize, HashMap<u32, String>) {
 
 fn font_maps(doc: &Document, page: ObjectId) -> HashMap<Vec<u8>, FontMap> {
     let mut maps = HashMap::new();
-    let Ok(fonts) = doc.get_page_fonts(page) else { return maps };
+    let Ok(fonts) = doc.get_page_fonts(page) else {
+        return maps;
+    };
     for (name, font) in fonts {
-        let cid = font.get(b"Subtype").and_then(Object::as_name).is_ok_and(|s| s == b"Type0");
+        let cid = font
+            .get(b"Subtype")
+            .and_then(Object::as_name)
+            .is_ok_and(|s| s == b"Type0");
         let mut width = if cid { 2 } else { 1 };
         let mut map = HashMap::new();
-        if let Ok(stream) = font.get(b"ToUnicode").and_then(Object::as_reference).and_then(|r| doc.get_object(r)).and_then(Object::as_stream) {
-            let data = stream.decompressed_content().unwrap_or_else(|_| stream.content.clone());
+        if let Ok(stream) = font
+            .get(b"ToUnicode")
+            .and_then(Object::as_reference)
+            .and_then(|r| doc.get_object(r))
+            .and_then(Object::as_stream)
+        {
+            let data = stream
+                .decompressed_content()
+                .unwrap_or_else(|_| stream.content.clone());
             let (w, m) = parse_cmap(&String::from_utf8_lossy(&data));
             width = w;
             map = m;
@@ -100,18 +131,29 @@ fn font_maps(doc: &Document, page: ObjectId) -> HashMap<Vec<u8>, FontMap> {
 }
 
 fn bytes_of(o: &Object) -> Option<&[u8]> {
-    if let Object::String(b, _) = o { Some(b) } else { None }
+    if let Object::String(b, _) = o {
+        Some(b)
+    } else {
+        None
+    }
 }
 
 fn number(o: &Object) -> f32 {
-    o.as_float().ok().or_else(|| o.as_i64().ok().map(|v| v as f32)).unwrap_or(0.0)
+    o.as_float()
+        .ok()
+        .or_else(|| o.as_i64().ok().map(|v| v as f32))
+        .unwrap_or(0.0)
 }
 
 /// O texto de uma página, uma linha por linha do PDF; um recuo no começo da linha vira dois espaços.
 pub fn page_text(doc: &Document, page: ObjectId) -> String {
     let fonts = font_maps(doc, page);
-    let Ok(data) = doc.get_page_content(page) else { return String::new() };
-    let Ok(content) = Content::decode(&data) else { return String::new() };
+    let Ok(data) = doc.get_page_content(page) else {
+        return String::new();
+    };
+    let Ok(content) = Content::decode(&data) else {
+        return String::new();
+    };
     let mut out = String::new();
     let mut font: Option<&FontMap> = None;
     let mut size = 10.0f32;
@@ -131,7 +173,10 @@ pub fn page_text(doc: &Document, page: ObjectId) -> String {
         let args = &op.operands;
         match op.operator.as_str() {
             "Tf" => {
-                font = args.first().and_then(|o| o.as_name().ok()).and_then(|n| fonts.get(n));
+                font = args
+                    .first()
+                    .and_then(|o| o.as_name().ok())
+                    .and_then(|n| fonts.get(n));
                 size = args.get(1).map(number).unwrap_or(size).abs().max(1.0);
             }
             "Td" | "TD" => {
@@ -157,7 +202,12 @@ pub fn page_text(doc: &Document, page: ObjectId) -> String {
                 }
                 let Some(f) = font else { continue };
                 if op.operator == "TJ" {
-                    for item in args.first().and_then(|a| a.as_array().ok()).into_iter().flatten() {
+                    for item in args
+                        .first()
+                        .and_then(|a| a.as_array().ok())
+                        .into_iter()
+                        .flatten()
+                    {
                         if let Some(b) = bytes_of(item) {
                             current.push_str(&f.decode(b));
                         } else if number(item) < -250.0 && !current.ends_with(' ') {
@@ -184,8 +234,13 @@ pub fn page_text(doc: &Document, page: ObjectId) -> String {
 }
 
 pub fn pages_text(bytes: &[u8]) -> Vec<String> {
-    let Ok(doc) = Document::load_mem(bytes) else { return Vec::new() };
-    doc.get_pages().values().map(|id| page_text(&doc, *id)).collect()
+    let Ok(doc) = Document::load_mem(bytes) else {
+        return Vec::new();
+    };
+    doc.get_pages()
+        .values()
+        .map(|id| page_text(&doc, *id))
+        .collect()
 }
 
 #[cfg(test)]
@@ -198,6 +253,9 @@ mod tests {
         let (w, m) = parse_cmap(cmap);
         assert_eq!(w, 2);
         let f = FontMap { width: w, map: m };
-        assert_eq!(f.decode(&[0, 0x24, 0, 3, 0, 0x44, 0, 0x45, 0, 0x46]), "A abc");
+        assert_eq!(
+            f.decode(&[0, 0x24, 0, 3, 0, 0x44, 0, 0x45, 0, 0x46]),
+            "A abc"
+        );
     }
 }
