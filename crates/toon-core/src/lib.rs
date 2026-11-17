@@ -3,6 +3,7 @@
 
 pub mod browsing;
 pub mod devices;
+pub mod history;
 pub mod jobs;
 pub mod library;
 pub mod names;
@@ -10,6 +11,7 @@ pub mod paths;
 pub mod reading;
 pub mod secrets;
 pub mod settings;
+pub mod storage;
 pub mod store;
 pub mod updates;
 pub mod works;

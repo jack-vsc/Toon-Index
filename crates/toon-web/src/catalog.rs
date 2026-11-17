@@ -194,6 +194,19 @@ pub async fn search(query: &str) -> Vec<SiteResult> {
     results
 }
 
+/// Procura só nos sites pedidos (os que ainda não acharam a obra).
+pub async fn search_sites(query: &str, sites: &[Site]) -> Vec<SiteResult> {
+    let mut results = Vec::new();
+    for &site in sites {
+        results.push(match site {
+            Site::Mangadex => attempt(site, search_mangadex(query)).await,
+            Site::Link => continue,
+            other => attempt(other, search_site(other, query)).await,
+        });
+    }
+    results
+}
+
 async fn attempt(
     site: Site,
     search: impl Future<Output = anyhow::Result<Vec<Match>>>,
@@ -212,7 +225,7 @@ async fn attempt(
     }
 }
 
-async fn search_mangadex(query: &str) -> anyhow::Result<Vec<Match>> {
+pub async fn search_mangadex(query: &str) -> anyhow::Result<Vec<Match>> {
     let q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
     let found = get_json(&format!(
         "{MANGADEX}/manga?title={q}&limit=8&includes[]=cover_art&{RATINGS}"

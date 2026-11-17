@@ -3,5 +3,6 @@
 
 pub mod browser;
 pub mod catalog;
+pub mod details;
 pub mod download;
 pub mod logins;
