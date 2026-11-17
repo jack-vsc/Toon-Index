@@ -1,6 +1,9 @@
-//! Os dados do Toon Index, no mesmo formato que a versão em Electron gravava em
+﻿//! Os dados do Toon Index, no mesmo formato que a versão em Electron gravava em
 //! `%APPDATA%\Manga Index`: quem já usava o app abre a biblioteca como estava.
 
+pub mod browsing;
+pub mod devices;
+pub mod jobs;
 pub mod library;
 pub mod names;
 pub mod paths;
@@ -8,6 +11,7 @@ pub mod reading;
 pub mod secrets;
 pub mod settings;
 pub mod store;
+pub mod updates;
 pub mod works;
 
 /// Milissegundos desde 1970, como o `Date.now()` que gravou os arquivos.
