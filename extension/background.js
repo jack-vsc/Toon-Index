@@ -1,13 +1,22 @@
-// Passes what content.js saw to the Manga Index app on this computer. While the app is closed the
+// Passes what content.js saw to the Toon Index app on this computer. While the app is closed the
 // reports wait here and go once it is open again, so nothing read in the meantime is lost. It also
 // shows the new chapters the app found on the works' sites.
 
 const APP = 'http://127.0.0.1:47321'
 const QUEUE_LIMIT = 1000
 
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (message?.type !== 'reading') return
-  deliver(message.report, sender.tab?.id)
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === 'reading') deliver(message.report, sender.tab?.id)
+  // The "Quero ler" button on a work's page: where it stands, and putting it on a list.
+  if (message?.type === 'page' || message?.type === 'bookmark') {
+    fetch(`${APP}/${message.type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(message.page) })
+      .then(async (response) => {
+        const data = await response.json()
+        reply(response.ok ? data : { error: data.error ?? `HTTP ${response.status}` })
+      })
+      .catch(() => reply({ error: 'Abra o Toon Index no PC para marcar a obra.' }))
+    return true
+  }
 })
 
 chrome.runtime.onStartup.addListener(() => {
@@ -21,9 +30,26 @@ chrome.runtime.onInstalled.addListener(() => {
   checkUpdates()
 })
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'flush') flush()
+  if (alarm.name === 'flush') {
+    flush()
+    reloadIfUpdated()
+  }
   if (alarm.name === 'updates') checkUpdates()
 })
+
+/**
+ * Loaded from the app's folder ("Carregar sem compactação"), the browser keeps running the old copy
+ * after the files change: once the folder's manifest has another version, the extension reloads
+ * itself with the new files. Every change to the extension raises that version.
+ */
+async function reloadIfUpdated() {
+  try {
+    const onDisk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json()
+    if (onDisk.version && onDisk.version !== chrome.runtime.getManifest().version) chrome.runtime.reload()
+  } catch {
+    // Mid-write: next minute.
+  }
+}
 
 /** Each new chapter once: the app also announces it in Windows, so this only covers what it has not shown here. */
 async function checkUpdates() {
@@ -82,7 +108,7 @@ async function deliver(report, tabId) {
     if (tabId !== undefined) {
       chrome.action.setBadgeText({ tabId, text: '!' })
       chrome.action.setBadgeBackgroundColor({ tabId, color: '#777' })
-      chrome.action.setTitle({ tabId, title: 'Manga Index fechado: este capítulo será marcado quando o app abrir.' })
+      chrome.action.setTitle({ tabId, title: 'Toon Index fechado: este capítulo será marcado quando o app abrir.' })
     }
   }
 }

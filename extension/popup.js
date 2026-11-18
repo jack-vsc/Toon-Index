@@ -20,6 +20,20 @@ async function call(path, body) {
 const label = (n) => String(n).replace('.', ',')
 
 let tab = null
+/** The page as its tracker reads it: the work and chapter from the page itself, and the work's own page. */
+let seen = { title: '', workUrl: null }
+
+const page = () => ({ url: tab.url, title: seen.title || tab.title || '', ...(seen.workUrl && { workUrl: seen.workUrl }) })
+
+/** What the tracker in the tab reads; the tab's title when it cannot answer (a page opened before the extension). */
+async function readPage() {
+  try {
+    const answer = await chrome.tabs.sendMessage(tab.id, { type: 'page' })
+    if (answer?.title) seen = answer
+  } catch {
+    seen = { title: tab.title ?? '', workUrl: null }
+  }
+}
 
 function showPage(info) {
   $('page').hidden = false
@@ -48,6 +62,10 @@ function showPage(info) {
   const unread = info.chapter !== null && (info.readUpTo === null || info.chapter > info.readUpTo)
   mark.hidden = !unread
   mark.textContent = `Marcar o capítulo ${label(info.chapter ?? 0)} como lido`
+  // As on the PC and the phone: this chapter and every one before it.
+  const upTo = $('readUpTo')
+  upTo.hidden = !unread || info.chapter <= 1
+  upTo.textContent = 'Lidos até aqui'
 }
 
 function pageError(message) {
@@ -57,7 +75,7 @@ function pageError(message) {
 
 async function bookmark(patch) {
   try {
-    showPage(await call('/bookmark', { url: tab.url, title: tab.title, ...patch }))
+    showPage(await call('/bookmark', { ...page(), ...patch }))
     loadContinue()
   } catch (err) {
     pageError(err.message)
@@ -68,8 +86,16 @@ $('shelf').addEventListener('change', (e) => bookmark({ shelf: e.target.value ||
 $('favorite').addEventListener('click', () => bookmark({ favorite: !$('favorite').dataset.on }))
 $('markRead').addEventListener('click', async () => {
   try {
-    await call('/reading', { url: tab.url, title: tab.title, progress: 1, finished: true, at: Date.now() })
-    showPage(await call('/page', { url: tab.url, title: tab.title }))
+    await call('/reading', { ...page(), progress: 1, finished: true, at: Date.now() })
+    showPage(await call('/page', page()))
+    loadContinue()
+  } catch (err) {
+    pageError(err.message)
+  }
+})
+$('readUpTo').addEventListener('click', async () => {
+  try {
+    showPage(await call('/read-up-to', page()))
     loadContinue()
   } catch (err) {
     pageError(err.message)
@@ -101,10 +127,11 @@ async function loadContinue() {
       const where = document.createElement('div')
       where.className = 'muted small'
       where.textContent = `cap. ${label(item.chapter)}${item.shelf && item.shelf !== 'reading' ? ` · ${SHELVES[item.shelf]}` : ''}`
+      // New only when it came out in the last 7 days, as in the app's Novidades; older ones are just there.
       if (item.latest) {
         const fresh = document.createElement('span')
-        fresh.className = 'new'
-        fresh.textContent = ` · NOVO ${label(item.latest.chapter)}`
+        fresh.className = item.latest.recent ? 'new' : 'muted'
+        fresh.textContent = item.latest.recent ? ` · NOVO ${label(item.latest.chapter)}` : ` · saiu o ${label(item.latest.chapter)}`
         where.append(fresh)
       }
       text.append(name, where)
@@ -131,13 +158,14 @@ async function loadContinue() {
     $('app').style.color = 'var(--ok)'
   } catch {
     $('app').textContent = 'app fechado'
-    $('continue').innerHTML = '<div class="muted">Abra o Manga Index no PC para ver suas obras e marcar esta página.</div>'
+    $('continue').innerHTML = '<div class="muted">Abra o Toon Index no PC para ver suas obras e marcar esta página.</div>'
     return
   }
   ;[tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   if (tab?.url && /^https?:/.test(tab.url)) {
     try {
-      showPage(await call('/page', { url: tab.url, title: tab.title ?? '' }))
+      await readPage()
+      showPage(await call('/page', page()))
     } catch (err) {
       pageError(err.message)
     }

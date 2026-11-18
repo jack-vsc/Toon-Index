@@ -2,13 +2,13 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <title>Manga Index</title>
+    <title>Toon Index</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <header>
       <span class="logo">漫</span>
-      <strong>Manga Index</strong>
+      <strong>Toon Index</strong>
       <span id="app" class="muted"></span>
     </header>
 
@@ -20,7 +20,10 @@
         <select id="shelf" title="Lista de leitura"></select>
         <button id="favorite" class="ghost" title="Favoritar">☆</button>
       </div>
-      <button id="markRead" hidden></button>
+      <div class="row">
+        <button id="markRead" hidden></button>
+        <button id="readUpTo" class="ghost" hidden title="Este capítulo e todos os anteriores, desde o 1"></button>
+      </div>
       <div id="pageError" class="error small" hidden></div>
     </section>
 
