@@ -134,6 +134,14 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Aberto com o Windows (--minimized): fica na barra de tarefas, atendendo o celular e a
+        // extensão.
+        static STARTED: std::sync::Once = std::sync::Once::new();
+        STARTED.call_once(|| {
+            if std::env::args().any(|a| a == "--minimized") {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+        });
         self.screenshot(ctx);
         if std::mem::take(&mut *self.engine.dirty.lock()) {
             self.reload();
