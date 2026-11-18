@@ -68,7 +68,7 @@ impl App {
                     for r in &self.results {
                         ui.label(RichText::new(r.site.label()).strong().color(ACCENT));
                         if let Some(e) = &r.error {
-                            ui.colored_label(Color32::LIGHT_RED, e);
+                            ui.colored_label(theme::ERR, e);
                         }
                         if r.matches.is_empty() && r.error.is_none() {
                             ui.label(RichText::new("Nada encontrado.").weak());
@@ -153,7 +153,10 @@ impl App {
             };
             if !portuguese
                 && ui
-                    .button(format!("Traduzir {} capítulos", picked.len()))
+                    .add(theme::primary(&format!(
+                        "Traduzir {} capítulos",
+                        picked.len()
+                    )))
                     .clicked()
             {
                 self.queue_batch(&work, &site, &picked, false);
@@ -205,6 +208,8 @@ impl App {
     // --- Fila -------------------------------------------------------------------------------------
 
     pub(super) fn queue_tab(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Fila");
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
             let paused = self.queue.paused;
             if ui
@@ -263,8 +268,8 @@ impl App {
                     let (label, color) = match j.status {
                         Status::Running => ("traduzindo", ACCENT),
                         Status::Queued => ("na fila", Color32::GRAY),
-                        Status::Failed => ("falhou", Color32::LIGHT_RED),
-                        Status::Done => ("pronto", Color32::LIGHT_GREEN),
+                        Status::Failed => ("falhou", theme::ERR),
+                        Status::Done => ("pronto", theme::OK),
                     };
                     ui.colored_label(color, label);
                     ui.label(RichText::new(&j.name).strong());
@@ -351,7 +356,7 @@ impl App {
                     .hint_text("Link da página de leitura do capítulo")
                     .desired_width(420.0),
             );
-            if ui.button("Traduzir").clicked() {
+            if ui.add(theme::primary("Traduzir")).clicked() {
                 match jobs::add_link(self.query.trim(), "PC", None) {
                     Ok(_) => {
                         self.queue = jobs::queue();
@@ -447,13 +452,14 @@ impl App {
             ui.heading("APIs de tradução");
             let mut remove = None;
             for (i, p) in self.settings.profiles.iter_mut().enumerate() {
-                ui.group(|ui| {
+                ui.add_space(4.0);
+                theme::card(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.radio_value(&mut self.settings.active_profile_id, p.id.clone(), "");
                         ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(160.0));
                         if p.kind == ProviderKind::Cursor {
                             ui.colored_label(
-                                Color32::LIGHT_RED,
+                                theme::ERR,
                                 "Cursor não funciona nesta versão",
                             );
                         }
@@ -587,7 +593,7 @@ impl App {
             if !self.settings.vision_dir.trim().is_empty() {
                 match toon_page::vision::status() {
                     Ok(s) => ui.label(s),
-                    Err(e) => ui.colored_label(Color32::LIGHT_RED, e),
+                    Err(e) => ui.colored_label(theme::ERR, e),
                 };
             }
             ui.horizontal(|ui| {
@@ -598,7 +604,7 @@ impl App {
             });
             ui.separator();
             ui.horizontal(|ui| {
-                if ui.button(RichText::new("Salvar").strong()).clicked() {
+                if ui.add(theme::primary("Salvar")).clicked() {
                     match settings::save(self.settings.clone(), &self.keys) {
                         Ok(s) => {
                             self.settings = s;

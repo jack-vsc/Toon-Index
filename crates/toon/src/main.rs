@@ -18,7 +18,9 @@ fn main() -> eframe::Result {
         )
         .init();
     // Uma cópia só: com o app já aberto (talvez escondido na bandeja), o atalho traz a janela dele.
-    if tray::focus_running_copy() {
+    // As capturas de tela dos testes rodam ao lado do app aberto, com outra pasta de dados.
+    let screenshot = std::env::args().any(|a| a == "--screenshot");
+    if !screenshot && tray::focus_running_copy() {
         return Ok(());
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -39,6 +41,8 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport,
+        // Escondida na bandeja, a janela tem tamanho zero: guardar isso a faria abrir minúscula.
+        persist_window: false,
         ..Default::default()
     };
     let result = eframe::run_native(

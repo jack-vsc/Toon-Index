@@ -17,8 +17,9 @@ use crate::engine::{self, Engine};
 use crate::tasks::Pending;
 
 mod panels;
+pub mod theme;
 
-const ACCENT: Color32 = Color32::from_rgb(0xe8, 0x5d, 0x75);
+const ACCENT: Color32 = theme::ACCENT;
 
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
@@ -69,6 +70,7 @@ pub struct App {
     notice: String,
     /// O ícone perto do relógio; sem ele, fechar a janela fecha o app.
     tray: Option<tray_icon::TrayIcon>,
+    logo: Option<TextureHandle>,
 }
 
 /// O capítulo aberto: as páginas, decodificadas aos poucos.
@@ -85,11 +87,10 @@ impl App {
         engine: Arc<Engine>,
         runtime: tokio::runtime::Runtime,
     ) -> Self {
-        let mut style = (*cc.egui_ctx.style()).clone();
-        style.visuals = egui::Visuals::dark();
-        style.visuals.selection.bg_fill = ACCENT;
-        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
-        cc.egui_ctx.set_style(style);
+        theme::apply(&cc.egui_ctx);
+        let logo = image::load_from_memory(include_bytes!("../../../../assets/icon/icon.png"))
+            .ok()
+            .map(|i| texture(&cc.egui_ctx, "logo", &i.to_rgba8()));
         let mut app = App {
             engine,
             runtime,
@@ -123,6 +124,7 @@ impl App {
             test_result: String::new(),
             notice: String::new(),
             tray: crate::tray::create(cc),
+            logo,
         };
         app.reload();
         app
@@ -159,71 +161,50 @@ impl eframe::App for App {
         if self.queue.jobs.iter().any(|j| j.status == Status::Running) {
             self.queue = jobs::queue();
         }
-        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("Toon Index")
-                        .strong()
-                        .color(ACCENT)
-                        .size(18.0),
-                );
-                ui.separator();
-                for (tab, label) in [
-                    (Tab::Library, "Biblioteca"),
-                    (Tab::Search, "Buscar obra"),
-                    (Tab::Queue, "Fila"),
-                    (Tab::Pdf, "Traduzir PDF"),
-                    (Tab::Phone, "Celular"),
-                    (Tab::Settings, "Configurações"),
-                ] {
-                    let queued = self
-                        .queue
-                        .jobs
-                        .iter()
-                        .filter(|j| matches!(j.status, Status::Queued | Status::Running))
-                        .count();
-                    let text = if tab == Tab::Queue && queued > 0 {
-                        format!("{label} ({queued})")
-                    } else {
-                        label.to_string()
-                    };
-                    if ui.selectable_label(self.tab == tab, text).clicked() {
-                        self.tab = tab;
-                        self.reader = None;
-                    }
-                }
-            });
-        });
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let status = self.engine.status.lock().clone();
-                ui.label(
-                    RichText::new(if self.notice.is_empty() {
-                        status
-                    } else {
-                        self.notice.clone()
-                    })
-                    .weak(),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.engine.is_checking() {
-                        ui.spinner();
-                    } else if ui.small_button("Procurar capítulos novos").clicked() {
-                        let engine = self.engine.clone();
-                        self.runtime
-                            .spawn(async move { engine::check_now(&engine).await });
-                    }
+        self.sidebar(ctx);
+        egui::TopBottomPanel::bottom("status")
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::PANEL)
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+                    .inner_margin(egui::Margin::symmetric(16, 6)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let status = self.engine.status.lock().clone();
+                    ui.label(
+                        RichText::new(if self.notice.is_empty() {
+                            status
+                        } else {
+                            self.notice.clone()
+                        })
+                        .color(theme::MUTED),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.engine.is_checking() {
+                            ui.spinner();
+                        } else if ui.small_button("Procurar capítulos novos").clicked() {
+                            let engine = self.engine.clone();
+                            self.runtime
+                                .spawn(async move { engine::check_now(&engine).await });
+                        }
+                    });
                 });
             });
-        });
-        egui::CentralPanel::default().show(ctx, |ui| match self.tab {
-            Tab::Library => self.library(ui, ctx),
-            Tab::Search => self.search(ui, ctx),
-            Tab::Queue => self.queue_tab(ui),
-            Tab::Pdf => self.pdf_tab(ui),
-            Tab::Phone => self.phone(ui, ctx),
-            Tab::Settings => self.settings_tab(ui, ctx),
-        });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::BG)
+                    .inner_margin(egui::Margin::symmetric(32, 24)),
+            )
+            .show(ctx, |ui| match self.tab {
+                Tab::Library => self.library(ui, ctx),
+                Tab::Search => self.search(ui, ctx),
+                Tab::Queue => self.queue_tab(ui),
+                Tab::Pdf => self.pdf_tab(ui),
+                Tab::Phone => self.phone(ui, ctx),
+                Tab::Settings => self.settings_tab(ui, ctx),
+            });
     }
 }
 
@@ -244,7 +225,7 @@ impl App {
                 "config" => Tab::Settings,
                 _ => Tab::Library,
             };
-            if self.selected.is_none() {
+            if tab == "obra" && self.selected.is_none() {
                 self.selected = self.works.first().map(|w| w.id.clone());
             }
         }
@@ -263,11 +244,29 @@ impl App {
             if let Some(img) = image::RgbaImage::from_raw(w as u32, h as u32, rgba) {
                 let _ = img.save(file);
             }
+            // Fecha de verdade, sem ir para a bandeja.
+            crate::tray::QUITTING.store(true, std::sync::atomic::Ordering::Relaxed);
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else if ctx.input(|i| i.time) > 4.0 {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
         ctx.request_repaint();
+    }
+}
+
+/// O pedaço da capa que enche a caixa sem deformar, como o `object-fit: cover` da versão em
+/// Electron: sobra dos lados é cortada ao meio; sobra embaixo, do topo para baixo (o rosto fica).
+fn cover_uv(image: Vec2, frame: Vec2) -> egui::Rect {
+    let (img_ratio, box_ratio) = (image.x / image.y, frame.x / frame.y);
+    if img_ratio > box_ratio {
+        let w = box_ratio / img_ratio;
+        egui::Rect::from_min_max(
+            egui::pos2((1.0 - w) / 2.0, 0.0),
+            egui::pos2((1.0 + w) / 2.0, 1.0),
+        )
+    } else {
+        let h = img_ratio / box_ratio;
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, h))
     }
 }
 
@@ -304,23 +303,118 @@ impl App {
         tex
     }
 
+    /// O caminho pelo app, descendo pela esquerda como no MangaDex.
+    fn sidebar(&mut self, ctx: &egui::Context) {
+        let queued = self
+            .queue
+            .jobs
+            .iter()
+            .filter(|j| matches!(j.status, Status::Queued | Status::Running))
+            .count();
+        egui::SidePanel::left("nav")
+            .exact_width(220.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::SIDEBAR)
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+                    .inner_margin(egui::Margin::symmetric(10, 14)),
+            )
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                let brand = ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    if let Some(logo) = &self.logo {
+                        ui.add(
+                            egui::Image::new((logo.id(), Vec2::splat(30.0)))
+                                .corner_radius(egui::CornerRadius::same(8)),
+                        );
+                    }
+                    ui.label(theme::heading("Toon Index", 17.0));
+                });
+                if brand.response.interact(egui::Sense::click()).clicked() {
+                    self.tab = Tab::Library;
+                    self.selected = None;
+                    self.reader = None;
+                }
+                ui.add_space(14.0);
+                // A busca em pílula, como na versão em Electron.
+                let search = egui::Button::new(
+                    RichText::new("🔍  Buscar obra")
+                        .color(theme::MUTED)
+                        .size(13.0),
+                )
+                .fill(theme::PANEL)
+                .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+                .corner_radius(egui::CornerRadius::same(255))
+                .min_size(Vec2::new(ui.available_width(), 34.0));
+                if ui.add(search).clicked() {
+                    self.tab = Tab::Search;
+                    self.reader = None;
+                }
+                ui.add_space(10.0);
+                let mut go = None;
+                if theme::nav_item(ui, "📚", "Biblioteca", self.tab == Tab::Library, 0) {
+                    go = Some(Tab::Library);
+                }
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(theme::mono_label("Traduzir"));
+                });
+                ui.add_space(4.0);
+                if theme::nav_item(ui, "📄", "Traduzir PDF", self.tab == Tab::Pdf, 0) {
+                    go = Some(Tab::Pdf);
+                }
+                if theme::nav_item(ui, "⏳", "Fila", self.tab == Tab::Queue, queued) {
+                    go = Some(Tab::Queue);
+                }
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(theme::mono_label("App"));
+                });
+                ui.add_space(4.0);
+                if theme::nav_item(ui, "📱", "Celular", self.tab == Tab::Phone, 0) {
+                    go = Some(Tab::Phone);
+                }
+                if theme::nav_item(ui, "⚙", "Configurações", self.tab == Tab::Settings, 0) {
+                    go = Some(Tab::Settings);
+                }
+                if let Some(tab) = go {
+                    if tab == Tab::Library && self.tab == Tab::Library {
+                        self.selected = None;
+                    }
+                    self.tab = tab;
+                    self.reader = None;
+                }
+            });
+    }
+
     fn library(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if self.reader.is_some() {
             return self.reader_view(ui, ctx);
         }
         let records = reading::list();
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.filter)
-                    .hint_text("Procurar na biblioteca")
-                    .desired_width(260.0),
-            );
-            ui.selectable_value(&mut self.shelf, None, "Todas");
-            for s in Shelf::ALL {
-                ui.selectable_value(&mut self.shelf, Some(s), s.label());
+        if let Some(work) = self
+            .selected
+            .as_ref()
+            .and_then(|id| self.works.iter().find(|w| &w.id == id))
+            .cloned()
+        {
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("← Biblioteca").color(theme::MUTED))
+                        .frame(false),
+                )
+                .clicked()
+            {
+                self.selected = None;
+                return;
             }
-        });
-        ui.separator();
+            ui.add_space(8.0);
+            return self.work_panel(ui, ctx, &work, &records);
+        }
         let filter = toon_core::names::normalize_name(&self.filter);
         let mut works: Vec<Work> = self
             .works
@@ -361,71 +455,162 @@ impl App {
                 .cmp(&a.favorite)
                 .then(last_activity(b).cmp(&last_activity(a)))
         });
-        egui::SidePanel::left("works")
-            .resizable(true)
-            .default_width(420.0)
-            .show_inside(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for w in &works {
-                        let read = records
-                            .iter()
-                            .filter(|r| r.work_id == w.id && r.status == ReadStatus::Read)
-                            .map(|r| r.chapter)
-                            .fold(f64::MIN, f64::max);
-                        let count = self.entries.iter().filter(|e| e.work_id == w.id).count();
-                        let cover = self.cover(ctx, w);
-                        let selected = self.selected.as_deref() == Some(&w.id);
-                        let row = ui.horizontal(|ui| {
-                            if let Some(t) = &cover {
-                                ui.add(egui::Image::new((t.id(), Vec2::new(46.0, 64.0))));
-                            } else {
-                                ui.add_sized([46.0, 64.0], egui::Label::new("📖"));
-                            }
-                            ui.vertical(|ui| {
-                                let name = display_name(w.name());
-                                let title = if w.favorite {
-                                    format!("★ {name}")
-                                } else {
-                                    name
-                                };
-                                if ui
-                                    .selectable_label(selected, RichText::new(title).strong())
-                                    .clicked()
-                                {
-                                    self.selected = Some(w.id.clone());
-                                }
-                                let mut info = Vec::new();
-                                if read > f64::MIN {
-                                    info.push(format!("lido até {}", jobs::number_text(read)));
-                                }
-                                if count > 0 {
-                                    info.push(format!("{count} no PC"));
-                                }
-                                if let Some(s) = w.shelf {
-                                    info.push(s.label().to_string());
-                                }
-                                ui.label(RichText::new(info.join(" · ")).weak());
-                            });
-                        });
-                        if row.response.interact(egui::Sense::click()).clicked() {
-                            self.selected = Some(w.id.clone());
-                        }
-                    }
-                    if works.is_empty() {
-                        ui.label("Nenhuma obra aqui ainda. Busque uma obra ou traduza um PDF.");
-                    }
-                });
+        ui.horizontal(|ui| {
+            ui.label(theme::heading("Biblioteca", 26.0));
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(format!("{} obras", works.len()))
+                    .family(egui::FontFamily::Monospace)
+                    .color(theme::MUTED),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.filter)
+                        .hint_text("Procurar na biblioteca")
+                        .desired_width(260.0)
+                        .margin(egui::Margin::symmetric(10, 7)),
+                );
             });
-        let Some(work) = self
-            .selected
-            .as_ref()
-            .and_then(|id| self.works.iter().find(|w| &w.id == id))
-            .cloned()
-        else {
-            ui.centered_and_justified(|ui| ui.label("Escolha uma obra à esquerda."));
+        });
+        ui.add_space(10.0);
+        ui.horizontal_wrapped(|ui| {
+            if theme::chip(ui, "Todas", self.shelf.is_none()) {
+                self.shelf = None;
+            }
+            for s in Shelf::ALL {
+                if theme::chip(ui, s.label(), self.shelf == Some(s)) {
+                    self.shelf = Some(s);
+                }
+            }
+        });
+        ui.add_space(16.0);
+        if works.is_empty() {
+            ui.label(
+                RichText::new("Nenhuma obra aqui ainda. Busque uma obra ou traduza um PDF.")
+                    .color(theme::MUTED),
+            );
             return;
-        };
-        self.work_panel(ui, ctx, &work, &records);
+        }
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                let gap = 16.0;
+                let full = ui.available_width() - 4.0;
+                let cols = ((full + gap) / (150.0 + gap)).floor().max(1.0) as usize;
+                let width = (full - gap * (cols as f32 - 1.0)) / cols as f32;
+                for row in works.chunks(cols) {
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        for w in row {
+                            let read = records
+                                .iter()
+                                .filter(|r| r.work_id == w.id && r.status == ReadStatus::Read)
+                                .map(|r| r.chapter)
+                                .fold(f64::MIN, f64::max);
+                            let count = self.entries.iter().filter(|e| e.work_id == w.id).count();
+                            let mut info = Vec::new();
+                            if read > f64::MIN {
+                                info.push(format!("CAP. {}", jobs::number_text(read)));
+                            }
+                            if count > 0 {
+                                info.push(format!("{count} NO PC"));
+                            }
+                            if self.poster_card(ui, ctx, w, width, &info.join(" · ")) {
+                                self.selected = Some(w.id.clone());
+                            }
+                        }
+                    });
+                    ui.add_space(16.0);
+                }
+            });
+    }
+
+    /// Uma capa da grade, com o nome embaixo; `true` ao ser clicada.
+    fn poster_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        work: &Work,
+        width: f32,
+        info: &str,
+    ) -> bool {
+        let poster_h = width * 1.5;
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(width, poster_h + 62.0), egui::Sense::click());
+        let lift = if response.hovered() { -3.0 } else { 0.0 };
+        let poster =
+            egui::Rect::from_min_size(rect.min + Vec2::new(0.0, lift), Vec2::new(width, poster_h));
+        let painter = ui.painter_at(rect.expand(4.0));
+        let radius = egui::CornerRadius::same(8);
+        if response.hovered() {
+            painter.rect_filled(
+                poster.translate(Vec2::new(0.0, 6.0)).expand(2.0),
+                radius,
+                Color32::from_black_alpha(90),
+            );
+        }
+        painter.rect_filled(poster, radius, theme::PANEL_2);
+        match self.cover(ctx, work) {
+            Some(t) => {
+                egui::Image::new((t.id(), poster.size()))
+                    .uv(cover_uv(t.size_vec2(), poster.size()))
+                    .corner_radius(radius)
+                    .paint_at(ui, poster);
+            }
+            None => {
+                painter.text(
+                    poster.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "📖",
+                    egui::FontId::proportional(34.0),
+                    theme::MUTED,
+                );
+            }
+        }
+        if work.favorite {
+            let star = egui::Rect::from_min_size(
+                poster.right_top() + Vec2::new(-32.0, 8.0),
+                Vec2::splat(24.0),
+            );
+            painter.rect_filled(
+                star,
+                egui::CornerRadius::same(12),
+                Color32::from_black_alpha(160),
+            );
+            painter.text(
+                star.center(),
+                egui::Align2::CENTER_CENTER,
+                "★",
+                egui::FontId::proportional(13.0),
+                theme::ACCENT,
+            );
+        }
+        let mut job = egui::text::LayoutJob::simple(
+            display_name(work.name()),
+            egui::FontId::new(14.0, theme::bold()),
+            theme::TEXT,
+            width,
+        );
+        job.wrap.max_rows = 2;
+        let title = painter.layout_job(job);
+        let title_h = title.size().y;
+        painter.galley(
+            poster.left_bottom() + Vec2::new(0.0, 6.0),
+            title,
+            theme::TEXT,
+        );
+        if !info.is_empty() {
+            painter.text(
+                poster.left_bottom() + Vec2::new(0.0, 10.0 + title_h),
+                egui::Align2::LEFT_TOP,
+                info,
+                egui::FontId::monospace(11.0),
+                theme::MUTED,
+            );
+        }
+        response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
     }
 
     fn work_panel(
@@ -435,104 +620,164 @@ impl App {
         work: &Work,
         records: &[reading::Record],
     ) {
-        ui.heading(display_name(work.name()));
-        if work.names.len() > 1 {
-            ui.label(RichText::new(work.names[1..].join(" · ")).weak());
-        }
-        ui.horizontal(|ui| {
-            let mut shelf = work.shelf;
-            egui::ComboBox::from_id_salt("shelf")
-                .selected_text(shelf.map_or("Sem lista", |s| s.label()))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut shelf, None, "Sem lista");
-                    for s in Shelf::ALL {
-                        ui.selectable_value(&mut shelf, Some(s), s.label());
+        // A ficha da obra num painel, com a capa ao lado, como a página da obra na versão em Electron.
+        let cover = self.cover(ctx, work);
+        egui::Frame::new()
+            .fill(theme::PANEL)
+            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+            .corner_radius(egui::CornerRadius::same(16))
+            .inner_margin(egui::Margin::same(26))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_top(|ui| {
+                    let poster = Vec2::new(190.0, 285.0);
+                    match &cover {
+                        Some(t) => {
+                            ui.add(
+                                egui::Image::new((t.id(), poster))
+                                    .uv(cover_uv(t.size_vec2(), poster))
+                                    .corner_radius(egui::CornerRadius::same(8)),
+                            );
+                        }
+                        None => {
+                            let (rect, _) = ui.allocate_exact_size(poster, egui::Sense::hover());
+                            ui.painter().rect_filled(
+                                rect,
+                                egui::CornerRadius::same(8),
+                                theme::PANEL_2,
+                            );
+                        }
                     }
+                    ui.add_space(14.0);
+                    ui.vertical(|ui| {
+                        ui.label(theme::heading(display_name(work.name()), 32.0));
+                        if work.names.len() > 1 {
+                            ui.label(
+                                RichText::new(work.names[1..].join(" · ")).color(theme::MUTED),
+                            );
+                        }
+                        ui.add_space(6.0);
+                        let mut tags: Vec<String> = Vec::new();
+                        if let Some(info) = &work.info {
+                            tags.extend(info.status.clone());
+                            tags.extend(info.year.map(|y| y.to_string()));
+                            tags.extend(info.tags.clone().unwrap_or_default());
+                        }
+                        if work.favorite {
+                            tags.insert(0, "★ Favorita".into());
+                        }
+                        if !tags.is_empty() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+                                for t in &tags {
+                                    egui::Frame::new()
+                                        .fill(Color32::from_white_alpha(26))
+                                        .corner_radius(egui::CornerRadius::same(5))
+                                        .inner_margin(egui::Margin::symmetric(8, 3))
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                RichText::new(t.to_uppercase())
+                                                    .family(egui::FontFamily::Monospace)
+                                                    .size(11.0)
+                                                    .color(theme::TEXT),
+                                            );
+                                        });
+                                }
+                            });
+                            ui.add_space(6.0);
+                        }
+                        if let Some(synopsis) = work.info.as_ref().and_then(|i| i.synopsis.clone())
+                        {
+                            ui.label(RichText::new(synopsis).color(Color32::from_gray(0xd6)));
+                            ui.add_space(6.0);
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            let mut shelf = work.shelf;
+                            egui::ComboBox::from_id_salt("shelf")
+                                .selected_text(shelf.map_or("Sem lista", |s| s.label()))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut shelf, None, "Sem lista");
+                                    for s in Shelf::ALL {
+                                        ui.selectable_value(&mut shelf, Some(s), s.label());
+                                    }
+                                });
+                            if shelf != work.shelf {
+                                let _ = library::set_work_shelf(&work.id, Some(shelf), None);
+                                self.reload();
+                            }
+                            if ui
+                                .button(if work.favorite {
+                                    "★ Favorita"
+                                } else {
+                                    "☆ Favoritar"
+                                })
+                                .clicked()
+                            {
+                                let _ =
+                                    library::set_work_shelf(&work.id, None, Some(!work.favorite));
+                                self.reload();
+                            }
+                            if let Some(source) = work.sources().first()
+                                && ui.button("Abrir no site").clicked()
+                            {
+                                let _ = open::that(source);
+                            }
+                            if let Some(done) = self.refreshing.as_ref().and_then(Pending::take) {
+                                self.refreshing = None;
+                                self.notice = match done {
+                                    Ok(()) => "Dados da obra atualizados.".into(),
+                                    Err(e) => e,
+                                };
+                                self.covers.remove(&work.id);
+                                self.reload();
+                            }
+                            if self.refreshing.is_some() {
+                                ui.spinner();
+                            } else if ui.button("Atualizar dados").clicked() {
+                                let id = work.id.clone();
+                                self.refreshing =
+                                    Some(Pending::spawn(&self.runtime, ctx, async move {
+                                        toon_web::details::refresh_work(&id)
+                                            .await
+                                            .map(|_| ())
+                                            .map_err(|e| e.to_string())
+                                    }));
+                            }
+                            let mut auto = work.auto;
+                            egui::ComboBox::from_id_salt("auto")
+                                .selected_text(match auto {
+                                    None => "Capítulo novo: só avisar",
+                                    Some(toon_core::works::Auto::Translate) => {
+                                        "Capítulo novo: traduzir"
+                                    }
+                                    Some(toon_core::works::Auto::Download) => {
+                                        "Capítulo novo: baixar"
+                                    }
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut auto, None, "Só avisar");
+                                    ui.selectable_value(
+                                        &mut auto,
+                                        Some(toon_core::works::Auto::Translate),
+                                        "Traduzir sozinho",
+                                    );
+                                    ui.selectable_value(
+                                        &mut auto,
+                                        Some(toon_core::works::Auto::Download),
+                                        "Baixar sozinho",
+                                    );
+                                });
+                            if auto != work.auto {
+                                let _ = library::set_work_auto(&work.id, auto);
+                                self.reload();
+                            }
+                        });
+                    });
                 });
-            if shelf != work.shelf {
-                let _ = library::set_work_shelf(&work.id, Some(shelf), None);
-                self.reload();
-            }
-            if ui
-                .button(if work.favorite {
-                    "★ Favorita"
-                } else {
-                    "☆ Favoritar"
-                })
-                .clicked()
-            {
-                let _ = library::set_work_shelf(&work.id, None, Some(!work.favorite));
-                self.reload();
-            }
-            if let Some(source) = work.sources().first()
-                && ui.button("Abrir no site").clicked()
-            {
-                let _ = open::that(source);
-            }
-            if let Some(done) = self.refreshing.as_ref().and_then(Pending::take) {
-                self.refreshing = None;
-                self.notice = match done {
-                    Ok(()) => "Dados da obra atualizados.".into(),
-                    Err(e) => e,
-                };
-                self.covers.remove(&work.id);
-                self.reload();
-            }
-            if self.refreshing.is_some() {
-                ui.spinner();
-            } else if ui.button("Atualizar dados").clicked() {
-                let id = work.id.clone();
-                self.refreshing = Some(Pending::spawn(&self.runtime, ctx, async move {
-                    toon_web::details::refresh_work(&id)
-                        .await
-                        .map(|_| ())
-                        .map_err(|e| e.to_string())
-                }));
-            }
-            let mut auto = work.auto;
-            egui::ComboBox::from_id_salt("auto")
-                .selected_text(match auto {
-                    None => "Capítulo novo: só avisar",
-                    Some(toon_core::works::Auto::Translate) => "Capítulo novo: traduzir",
-                    Some(toon_core::works::Auto::Download) => "Capítulo novo: baixar",
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut auto, None, "Só avisar");
-                    ui.selectable_value(
-                        &mut auto,
-                        Some(toon_core::works::Auto::Translate),
-                        "Traduzir sozinho",
-                    );
-                    ui.selectable_value(
-                        &mut auto,
-                        Some(toon_core::works::Auto::Download),
-                        "Baixar sozinho",
-                    );
-                });
-            if auto != work.auto {
-                let _ = library::set_work_auto(&work.id, auto);
-                self.reload();
-            }
-        });
-        if let Some(info) = &work.info {
-            let mut facts = Vec::new();
-            if let Some(s) = &info.status {
-                facts.push(s.clone());
-            }
-            if let Some(y) = info.year {
-                facts.push(y.to_string());
-            }
-            if let Some(t) = &info.tags {
-                facts.push(t.join(", "));
-            }
-            if !facts.is_empty() {
-                ui.label(RichText::new(facts.join(" · ")).weak());
-            }
-        }
-        if let Some(synopsis) = work.info.as_ref().and_then(|i| i.synopsis.clone()) {
-            ui.label(RichText::new(synopsis).weak());
-        }
-        ui.separator();
+            });
+        ui.add_space(22.0);
+        ui.label(theme::heading("Capítulos", 20.0));
+        ui.add_space(8.0);
         let mut entries: Vec<Entry> = self
             .entries
             .iter()
@@ -655,7 +900,7 @@ impl App {
             ui.heading(&reader.title);
         });
         if let Some(e) = &reader.error {
-            ui.colored_label(Color32::LIGHT_RED, e);
+            ui.colored_label(theme::ERR, e);
         } else if reader.textures.is_empty() {
             ui.spinner();
         }
