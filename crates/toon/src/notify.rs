@@ -140,6 +140,11 @@ pub async fn announce() {
     }
 }
 
+/// Um aviso do Windows.
+pub fn toast(title: &str, body: &str) {
+    windows_toast(title, body);
+}
+
 fn windows_toast(title: &str, body: &str) {
     if let Err(e) = notify_rust::Notification::new()
         .summary(title)

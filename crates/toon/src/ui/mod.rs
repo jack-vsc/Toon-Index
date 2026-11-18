@@ -67,6 +67,8 @@ pub struct App {
     testing: Option<Pending<String>>,
     test_result: String,
     notice: String,
+    /// O ícone perto do relógio; sem ele, fechar a janela fecha o app.
+    tray: Option<tray_icon::TrayIcon>,
 }
 
 /// O capítulo aberto: as páginas, decodificadas aos poucos.
@@ -120,6 +122,7 @@ impl App {
             testing: None,
             test_result: String::new(),
             notice: String::new(),
+            tray: crate::tray::create(cc),
         };
         app.reload();
         app
@@ -134,14 +137,19 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Aberto com o Windows (--minimized): fica na barra de tarefas, atendendo o celular e a
-        // extensão.
-        static STARTED: std::sync::Once = std::sync::Once::new();
-        STARTED.call_once(|| {
-            if std::env::args().any(|a| a == "--minimized") {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-        });
+        // Aberto com o Windows: o eframe mostra a janela depois do primeiro quadro, e ela volta para
+        // a bandeja.
+        if self.tray.is_some() && ctx.cumulative_pass_nr() < 3 && crate::tray::starts_hidden() {
+            crate::tray::hide_quietly();
+        }
+        // Fechar a janela só a esconde: o app segue na bandeja até "Sair".
+        if ctx.input(|i| i.viewport().close_requested())
+            && self.tray.is_some()
+            && !crate::tray::QUITTING.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            crate::tray::hide();
+        }
         self.screenshot(ctx);
         if std::mem::take(&mut *self.engine.dirty.lock()) {
             self.reload();

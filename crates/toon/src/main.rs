@@ -6,6 +6,7 @@ mod cloud;
 mod engine;
 mod notify;
 mod tasks;
+mod tray;
 mod ui;
 
 use std::sync::Arc;
@@ -16,17 +17,28 @@ fn main() -> eframe::Result {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
+    // Uma cópia só: com o app já aberto (talvez escondido na bandeja), o atalho traz a janela dele.
+    if tray::focus_running_copy() {
+        return Ok(());
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("runtime");
     let engine = Arc::new(engine::Engine::default());
     engine::start(engine.clone(), &runtime);
+    // Aberto com o Windows (--minimized): começa escondido na bandeja, como a versão em Electron.
+    let hidden = tray::starts_hidden();
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_title(tray::TITLE)
+        .with_inner_size([1280.0, 820.0])
+        .with_min_inner_size([900.0, 600.0])
+        .with_visible(!hidden);
+    if let Some(icon) = tray::window_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("Toon Index")
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([900.0, 600.0]),
+        viewport,
         ..Default::default()
     };
     let result = eframe::run_native(
