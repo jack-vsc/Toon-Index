@@ -4,12 +4,13 @@
 use image::RgbImage;
 use toon_ai::{Cancel, MarkedRegion, PageImage, Ready, TextBlock, TranslateRequest};
 
-use crate::detect::{TextRegion, detect_text};
+use crate::detect::{IBox, TextRegion, detect_text};
 use crate::glyphs::Gray;
 use crate::marks::{KeyRegion, Mark, draw_key, draw_marks};
 use crate::overlay::{draw_overlay, normalize_text, similar_text};
 use crate::pdf::{PdfPage, is_tall};
 use crate::slicing::{Slice, plan_slices};
+use crate::vision::{self, Scene};
 
 /// Largura de saída das páginas, em pixels.
 pub const OUTPUT_WIDTH: u32 = 1400;
@@ -87,14 +88,21 @@ fn text_rows(image: &RgbImage, slice_height: u32, long_side: u32) -> Vec<(f32, f
 }
 
 /// Corta a página nas faixas mandadas ao modelo e acha o texto em cada uma.
-pub fn prepare_slices(image: &RgbImage, tall: bool) -> Vec<PreparedSlice> {
+pub fn prepare_slices(image: &RgbImage, tall: bool, scene: Option<&Scene>) -> Vec<PreparedSlice> {
     let slice_height = (image.width() as f32 * SLICE_ASPECT).round() as u32;
     let long_side = if tall {
         AI_LONG_SIDE_TALL
     } else {
         AI_LONG_SIDE
     };
-    let keep = text_rows(image, slice_height, long_side);
+    let keep = match scene {
+        Some(scene) => scene
+            .blocks
+            .iter()
+            .map(|b| (b.bbox[1] - b.letter_height, b.bbox[3] + b.letter_height))
+            .collect(),
+        None => text_rows(image, slice_height, long_side),
+    };
     let slices: Vec<Slice> = plan_slices(
         image,
         slice_height,
@@ -107,13 +115,26 @@ pub fn prepare_slices(image: &RgbImage, tall: bool) -> Vec<PreparedSlice> {
             let crop = crop(image, s.y0, s.y1, long_side);
             let scale = image.width() as f32 / crop.width() as f32;
             let (cut_top, cut_bottom) = (s.y0 > 0, s.y1 < image.height());
-            let regions = detect_text(&Gray::from_rgb(&crop))
+            let found: Vec<TextRegion> = detect_text(&Gray::from_rgb(&crop))
                 .into_iter()
                 .filter(|r| {
                     !(cut_top && r.r#box[1] <= 2)
                         && !(cut_bottom && r.r#box[3] + 2 >= crop.height() as usize)
                 })
                 .collect();
+            // Os modelos acham o texto; o detector próprio só acrescenta o que escapou deles
+            // (comentários pequenos), e o modelo de tradução pula as caixas sem texto.
+            let regions = match scene {
+                Some(scene) => {
+                    let (y0, y1) = (s.y0 as f32, s.y1 as f32);
+                    with_extras(
+                        vision::regions_in_slice(scene, y0, y1, scale, false),
+                        &vision::regions_in_slice(scene, y0, y1, scale, true),
+                        found,
+                    )
+                }
+                None => found,
+            };
             PreparedSlice {
                 crop,
                 regions,
@@ -124,6 +145,27 @@ pub fn prepare_slices(image: &RgbImage, tall: bool) -> Vec<PreparedSlice> {
         .collect();
     box_once(&mut prepared);
     prepared
+}
+
+/// `around` também tem os blocos dos modelos cortados pela borda da faixa: as linhas deles achadas aqui
+/// não são extras.
+fn with_extras(
+    mut models: Vec<TextRegion>,
+    around: &[TextRegion],
+    extra: Vec<TextRegion>,
+) -> Vec<TextRegion> {
+    let area = |b: IBox| ((b[2] - b[0]) * (b[3] - b[1])).max(1) as f32;
+    let overlaps = |a: IBox, b: IBox| {
+        let ix = a[2].min(b[2]) as f32 - a[0].max(b[0]) as f32;
+        let iy = a[3].min(b[3]) as f32 - a[1].max(b[1]) as f32;
+        ix > 0.0 && iy > 0.0 && ix * iy > 0.2 * area(a).min(area(b))
+    };
+    models.extend(
+        extra
+            .into_iter()
+            .filter(|e| !around.iter().any(|m| overlaps(m.r#box, e.r#box))),
+    );
+    models
 }
 
 /// Texto na sobra entre duas faixas é achado nas duas, às vezes cortado numa. Cada texto fica só com a
@@ -337,15 +379,19 @@ pub async fn translate_page(
 ) -> Result<Translated, toon_ai::AiError> {
     let mut image = render(page);
     let tall = is_tall(page.width_pt, page.height_pt);
-    let prepared = {
+    // Os modelos de visão (quando ligados) olham a página inteira uma vez: as faixas e o apagar usam.
+    let (prepared, scene) = {
         let image = image.clone();
-        tokio::task::spawn_blocking(move || prepare_slices(&image, tall))
-            .await
-            .expect("faixas")
+        tokio::task::spawn_blocking(move || {
+            let scene = vision::detect(&image);
+            (prepare_slices(&image, tall, scene.as_ref()), scene)
+        })
+        .await
+        .expect("faixas")
     };
     let blocks = translate_slices(ready, &prepared, page_number, chapter, cancel).await?;
     let (image, blocks) = tokio::task::spawn_blocking(move || {
-        draw_overlay(&mut image, &blocks);
+        draw_overlay(&mut image, &blocks, scene.as_ref());
         (image, blocks)
     })
     .await

@@ -142,6 +142,9 @@ pub struct Settings {
     pub gpu_sharing: String,
     pub ai_device: String,
     pub vision_device: String,
+    /// A pasta do servidor de visão em Python: com `.venv` (o Python com torch e ultralytics) e
+    /// `models/pretrained`. Vazia, o app usa o detector e o apagador próprios.
+    pub vision_dir: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -164,6 +167,7 @@ impl Default for Settings {
             gpu_sharing: "auto".into(),
             ai_device: "gpu".into(),
             vision_device: "gpu".into(),
+            vision_dir: String::new(),
             extra: Map::new(),
         }
     }

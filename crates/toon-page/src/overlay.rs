@@ -8,6 +8,7 @@ use toon_ai::{BlockKind, FontRole, TextBlock};
 use crate::detect::IBox;
 use crate::fonts::{Coverage, FACES, Pen};
 use crate::glyphs::{FLAT_TOLERANCE, components, dilate, erode, is_glyph, odd, quantile, round};
+use crate::vision::{self, GlyphMask, Scene, SfxShape};
 
 const MIN_FONT: f32 = 8.0;
 const INK_STRONG: i32 = 45;
@@ -119,9 +120,34 @@ fn expand(b: [f32; 4], px: f32, py: f32) -> [f32; 4] {
 
 /// Escreve as traduções na página. Devolve o que fez com cada bloco; a página pode crescer embaixo
 /// (notas das placas).
-pub fn draw_overlay(image: &mut RgbImage, blocks: &[TextBlock]) -> Vec<Drawn> {
+///
+/// Com a `scene` dos modelos de visão, o LaMa repinta embaixo do texto e as onomatopeias são apagadas
+/// pelo desenho das letras; sem ela (ou com o servidor falhando), o preenchimento próprio apaga.
+pub fn draw_overlay(
+    image: &mut RgbImage,
+    blocks: &[TextBlock],
+    scene: Option<&Scene>,
+) -> Vec<Drawn> {
     let (w, h) = (image.width() as usize, image.height() as usize);
     let found: Vec<Glyphs> = blocks.iter().map(|b| find_glyphs(image, b, w, h)).collect();
+    // Onomatopeias são traços de pincel sobre o desenho: a forma delas vem da máscara dos modelos.
+    let sfx: Vec<Option<SfxShape>> = blocks
+        .iter()
+        .enumerate()
+        .map(|(i, block)| {
+            let scene = scene?;
+            if block.kind != BlockKind::Sfx {
+                return None;
+            }
+            let b = found[i].page_box().unwrap_or(block.text_box);
+            let pad = (b[2] - b[0]).max(b[3] - b[1]) * 0.1;
+            Some(vision::sfx_shape(
+                scene,
+                expand(b, pad, pad),
+                found[i].bbox.map(|_| found[i].glyph_mask()),
+            ))
+        })
+        .collect();
     let mut kept = vec![false; blocks.len()];
     for (i, block) in blocks.iter().enumerate() {
         // Interjeições e nomes que se escrevem igual nos dois idiomas ficam com o letreiro original.
@@ -132,8 +158,28 @@ pub fn draw_overlay(image: &mut RgbImage, blocks: &[TextBlock]) -> Vec<Drawn> {
             kept[i] = true;
         }
         // Posto pela caixa do próprio modelo e sem letreiro ali: escrever cobriria o desenho.
-        if block.ink_boxes.is_none() && found[i].bbox.is_none() && !is_footnote(block) {
+        if block.ink_boxes.is_none()
+            && found[i].bbox.is_none()
+            && !is_footnote(block)
+            && sfx[i].is_none()
+        {
             kept[i] = true;
+        }
+        if let Some(scene) = scene {
+            // Uma marca d'água encostada num balão pode dividir a caixa com a fala dele: apagar
+            // levaria a linha junto.
+            if block.kind == BlockKind::Watermark
+                && vision::touches_speech(image, scene, block.text_box)
+            {
+                kept[i] = true;
+            }
+            // Uma onomatopeia em que os modelos não veem letreiro fica como está.
+            if sfx[i]
+                .as_ref()
+                .is_some_and(|s| s.coverage < vision::SFX_MIN_COVERAGE)
+            {
+                kept[i] = true;
+            }
         }
     }
     let copies = duplicates(blocks, &found, &kept);
@@ -148,9 +194,13 @@ pub fn draw_overlay(image: &mut RgbImage, blocks: &[TextBlock]) -> Vec<Drawn> {
     let skip_erase: Vec<bool> = (0..blocks.len())
         .map(|i| skip_draw[i] && (blocks[i].kind != BlockKind::Watermark || kept[i]))
         .collect();
-    for (i, g) in found.iter().enumerate() {
-        if !skip_erase[i] {
-            erase(image, g);
+    let erased = scene
+        .is_some_and(|scene| erase_with_models(image, scene, blocks, &found, &sfx, &skip_erase));
+    if !erased {
+        for (i, g) in found.iter().enumerate() {
+            if !skip_erase[i] {
+                erase(image, g);
+            }
         }
     }
     let notes: Vec<String> = blocks
@@ -190,6 +240,62 @@ pub fn draw_overlay(image: &mut RgbImage, blocks: &[TextBlock]) -> Vec<Drawn> {
         append_footnotes(image, &notes);
     }
     result
+}
+
+/// Uma passada do LaMa sobre tudo o que sai da página; `false` quando o servidor falhou.
+fn erase_with_models(
+    image: &mut RgbImage,
+    scene: &Scene,
+    blocks: &[TextBlock],
+    found: &[Glyphs],
+    sfx: &[Option<SfxShape>],
+    skip: &[bool],
+) -> bool {
+    if (scene.width, scene.height) != (image.width() as usize, image.height() as usize) {
+        return false;
+    }
+    let mut mask = vec![0u8; scene.width * scene.height];
+    let mut any = false;
+    for (i, block) in blocks.iter().enumerate() {
+        if skip[i] {
+            continue;
+        }
+        any = true;
+        if let Some(shape) = &sfx[i] {
+            vision::add_sfx_erase_area(&mut mask, scene, shape);
+            continue;
+        }
+        let g = &found[i];
+        let b = match g.page_box() {
+            Some(gb) if block.ink_boxes.is_some() => toon_ai::prompt::union(gb, block.text_box),
+            Some(gb) => gb,
+            None => block.text_box,
+        };
+        let letter = if g.letter_height > 0.0 {
+            g.letter_height
+        } else {
+            block
+                .letter_height
+                .unwrap_or_else(|| estimate_letter(block))
+        };
+        vision::add_erase_area(&mut mask, scene, b, letter, g.bbox.map(|_| g.glyph_mask()));
+    }
+    !any || vision::inpaint(image, &mask)
+}
+
+impl Glyphs {
+    fn page_box(&self) -> Option<[f32; 4]> {
+        self.bbox.map(|b| b.map(|v| v as f32))
+    }
+
+    fn glyph_mask(&self) -> GlyphMask<'_> {
+        GlyphMask {
+            win: self.win,
+            ww: self.ww,
+            wh: self.wh,
+            mask: &self.mask,
+        }
+    }
 }
 
 /// Faixas que se sobrepõem às vezes mandam o mesmo balão duas vezes: blocos cujas letras são as

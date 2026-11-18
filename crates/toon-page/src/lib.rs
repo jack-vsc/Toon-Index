@@ -13,3 +13,4 @@ pub mod page;
 pub mod pdf;
 pub mod pdftext;
 pub mod slicing;
+pub mod vision;

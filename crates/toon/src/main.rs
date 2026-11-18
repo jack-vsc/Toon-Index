@@ -36,5 +36,6 @@ fn main() -> eframe::Result {
     );
     // O modelo local não fica ocupando a placa de vídeo depois que a janela fecha.
     toon_ai::local::stop();
+    toon_page::vision::stop();
     result
 }

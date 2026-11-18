@@ -325,6 +325,7 @@ async fn check_loop(engine: Arc<Engine>) {
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
             toon_ai::local::stop_if_idle();
+            toon_page::vision::stop_if_idle();
         }
     });
     // Espera a janela abrir antes da primeira rodada.

@@ -572,6 +572,24 @@ impl App {
                     "Novels (texto)",
                 );
             });
+            ui.label(RichText::new("Servidor de visão (Python)").strong());
+            ui.label("Acha balões e letras com redes treinadas em mangá e apaga o texto com o LaMa. A pasta tem o .venv e models/pretrained; vazia, o app usa o detector próprio.");
+            ui.horizontal(|ui| {
+                ui.label("Pasta");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.settings.vision_dir)
+                        .desired_width(320.0)
+                        .hint_text(r"D:\vision"),
+                );
+                ui.selectable_value(&mut self.settings.vision_device, "gpu".to_string(), "Placa de vídeo");
+                ui.selectable_value(&mut self.settings.vision_device, "cpu".to_string(), "Processador");
+            });
+            if !self.settings.vision_dir.trim().is_empty() {
+                match toon_page::vision::status() {
+                    Ok(s) => ui.label(s),
+                    Err(e) => ui.colored_label(Color32::LIGHT_RED, e),
+                };
+            }
             ui.horizontal(|ui| {
                 ui.label("Pular páginas no começo");
                 ui.add(egui::DragValue::new(&mut self.settings.skip_start).range(0..=50));
