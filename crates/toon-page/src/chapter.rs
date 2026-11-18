@@ -27,6 +27,7 @@ pub fn pages_from_images(images: &[Vec<u8>]) -> anyhow::Result<Vec<PdfPage>> {
             Ok(PdfPage {
                 image,
                 jpeg,
+                source: crate::pdf::source_hash(bytes),
                 width_pt: w,
                 height_pt: h,
             })
@@ -122,7 +123,7 @@ async fn page_with_layers(
     reuse: bool,
 ) -> Result<RgbImage, AiError> {
     let original = render(page);
-    let key = tag.map(|t| crate::layers::key(&original, t));
+    let key = tag.map(|t| crate::layers::key(&page.source, t));
     if let (Some(k), true) = (&key, reuse) {
         if let Some(layer) = crate::layers::read(k) {
             let mut image = original.clone();
@@ -135,8 +136,11 @@ async fn page_with_layers(
     if let Some(k) = key {
         let image = done.image.clone();
         let count = done.blocks.len();
+        let (source, tag) = (page.source.clone(), tag.unwrap_or_default().to_string());
         tokio::task::spawn_blocking(move || {
-            if let Some(layer) = crate::layers::extract(&original, &image, count) {
+            if let Some(mut layer) = crate::layers::extract(&original, &image, count) {
+                layer.source = source;
+                layer.tag = tag;
                 let _ = crate::layers::save(&k, &layer);
             }
         });

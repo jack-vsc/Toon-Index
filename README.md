@@ -22,14 +22,16 @@ página → faixas → detector de texto → caixas numeradas + chave → modelo
 
 1. A página é lida na largura de saída (1400 px; 1000 px nas tiras de webtoon) e cortada em faixas.
    Os cortes caem nos vãos entre os quadros e nunca no meio de um texto.
-2. Um detector próprio (black-hat/top-hat, componentes conexos, letras em linhas e linhas em blocos)
-   acha os blocos de letreiro sem depender do modelo.
+2. Os blocos de letreiro são achados sem depender do modelo: pelo servidor de visão em Python, quando
+   ligado (ver abaixo), ou por um detector próprio (black-hat/top-hat, componentes conexos, letras em
+   linhas e linhas em blocos), que também acrescenta o que o servidor deixou escapar.
 3. O modelo recebe as faixas com as caixas numeradas em magenta e uma "chave" com cada caixa ampliada,
    e responde em JSON qual caixa tem qual fala, a tradução, o tipo de balão e o estilo da letra.
 4. A posição do texto vem das caixas do detector, não da caixa que o modelo inventa. Caixas que o
    modelo esqueceu são perguntadas de novo, sozinhas.
-5. As letras originais são apagadas por convolução normalizada (média dos pixels lisos em volta) e a
-   tradução é escrita no espaço livre do balão, no tamanho do original quando cabe.
+5. As letras originais são apagadas pelo LaMa do servidor de visão (o interior do balão inteiro, e as
+   onomatopeias pelo desenho das letras) ou, sem ele, por convolução normalizada (média dos pixels
+   lisos em volta). A tradução é escrita no espaço livre do balão, no tamanho do original quando cabe.
 
 As respostas ficam em cache: traduzir de novo a mesma página com o mesmo modelo não custa nada.
 
@@ -113,13 +115,47 @@ Nenhum desses arquivos entra no repositório. `TOON_DATA_DIR` aponta o app para 
 
 Mais detalhes em [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
+### Servidor de visão (opcional)
+
+Para achar os balões e repintar embaixo do texto, redes treinadas em mangá fazem melhor que qualquer
+coisa escrita à mão, e o ecossistema delas é o Python. O app abre `vision/manga_vision.py` como um
+programa à parte e conversa com ele por uma linha de JSON por pedido. O script vai junto do executável
+e é gravado na pasta de dados ao abrir.
+
+Numa pasta qualquer (por exemplo `D:\vision`):
+
+```
+python -m venv .venv
+.venv\Scripts\pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+.venv\Scripts\pip install -r <repositório>\vision\requirements.txt
+```
+
+e os modelos em `models\pretrained` dentro dela:
+
+| Arquivo | O que faz | De onde vem |
+| --- | --- | --- |
+| `comictextdetector.pt.onnx` | blocos, linhas e máscara das letras | manga-image-translator |
+| `bubble-seg.pt` | contorno dos balões (YOLOv8) | kitsumed/yolov8m_seg-speech-bubble |
+| `anime-manga-big-lama.pt` | LaMa ajustado para mangá | IOPaint |
+| `comic-text-and-bubble-detector.onnx` (opcional) | balões que a segmentação perde, texto dentro e fora deles | ogkalu/comic-text-and-bubble-detector |
+
+Depois escolha essa pasta em Configurações › Servidor de visão. Ele liga na primeira página, fecha
+depois de cinco minutos parado e roda na placa de vídeo NVIDIA ou no processador. Sem a pasta, sem o
+Python ou com o servidor caído, a página segue pelo detector e pelo apagador próprios.
+
+Teste numa imagem: `TOON_VISION_DIR=D:\vision cargo run --release -p toon-page --example vision -- pagina.jpg`
+grava ao lado dela a página apagada e a página com um texto de teste escrito.
+
 ## Também no app
 
 - **Novels em PDF de texto**: o texto sai da camada de texto do PDF (inclusive os mapas ToUnicode das
   edições da Yen Press e da Kobo), vai para a IA parágrafo por parágrafo e é composto de novo nas
   páginas do mesmo tamanho, com as ilustrações no lugar.
 - **Camadas**: cada página traduzida guarda só o que mudou; traduzir o mesmo capítulo de novo põe as
-  páginas de volta em segundos, sem a IA.
+  páginas de volta em segundos, sem a IA. O nome de cada camada vem dos bytes da imagem original no
+  PDF, não de como a página é desenhada, e os pedaços se ajustam a outro tamanho de página: outra
+  versão do app, em outra linguagem, acha as mesmas camadas. O formato está em
+  [docs/CAMADAS.md](docs/CAMADAS.md).
 - **Modelo próprio no PC**: o perfil "Neste PC" liga o `llama-server` do llama.cpp com o modelo
   instalado em `local-ai` e desliga depois de cinco minutos sem uso.
 - **Ficha da obra** ("Atualizar dados"): nome, sinopse, gêneros, situação, ano e capa pelo MangaDex ou
@@ -134,11 +170,10 @@ Mais detalhes em [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
 - Perfis do Cursor não funcionam: o Cursor só tem SDK em Node. Use a mesma conta pelo OpenRouter ou
   pela API da Anthropic.
-- O servidor de visão em Python (detecção de balões e LaMa) não foi trazido: o detector e o apagador
-  próprios do app fazem esse trabalho.
 - As camadas e as respostas guardadas pela versão em Electron continuam no disco, mas não são
-  reaproveitadas: o nome de cada uma vem dos pixels da página como o pdf.js desenhava. Os capítulos
-  já traduzidos estão todos na biblioteca.
+  reaproveitadas: o nome de cada uma vinha dos pixels da página como o pdf.js desenhava. Os capítulos
+  já traduzidos estão todos na biblioteca; só refazer um deles vai de novo para a IA. As camadas de
+  agora em diante não têm esse problema.
 
 ## Licença
 

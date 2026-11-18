@@ -11,8 +11,20 @@ pub struct PdfPage {
     pub image: DynamicImage,
     /// Os bytes originais, quando a página já era um JPEG (dá para gravar de volta sem recomprimir).
     pub jpeg: Option<Vec<u8>>,
+    /// SHA-256 da imagem como está guardada (ver `source_hash`): o nome das camadas desta página.
+    pub source: String,
     pub width_pt: f32,
     pub height_pt: f32,
+}
+
+/// A impressão digital de uma página, igual em qualquer linguagem que leia o arquivo: o SHA-256 dos
+/// bytes do JPEG como estão no PDF (ou no arquivo baixado) e, nas imagens sem JPEG, das amostras
+/// descompactadas do PDF ou dos bytes do arquivo baixado. Nada aqui depende de como a página é
+/// desenhada, então trocar de leitor de PDF ou de linguagem não muda o nome. Formato em
+/// `docs/CAMADAS.md`.
+pub fn source_hash(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(bytes))
 }
 
 /// Faixas de webtoon são bem mais altas que largas e se tratam pela largura, não pelo lado maior.
@@ -40,11 +52,13 @@ pub fn read_pages(bytes: &[u8]) -> anyhow::Result<Vec<PdfPage>> {
             );
         };
         let filters = best.filters.clone().unwrap_or_default();
-        let (image, jpeg) = if filters.iter().any(|f| f == "DCTDecode") {
+        let (image, jpeg, source) = if filters.iter().any(|f| f == "DCTDecode") {
             let data = best.content.to_vec();
+            let source = source_hash(&data);
             (
                 image::load_from_memory_with_format(&data, image::ImageFormat::Jpeg)?,
                 Some(data),
+                source,
             )
         } else {
             let stream = doc.get_object(best.id)?.as_stream()?;
@@ -59,11 +73,13 @@ pub fn read_pages(bytes: &[u8]) -> anyhow::Result<Vec<PdfPage>> {
                     best.color_space.as_deref(),
                 )?,
                 None,
+                source_hash(&raw),
             )
         };
         pages.push(PdfPage {
             image,
             jpeg,
+            source,
             width_pt,
             height_pt,
         });
