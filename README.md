@@ -1,6 +1,20 @@
-# manga-index
+# Toon Index (versão em Electron)
 
 Traduz capítulos de mangá/manhwa em PDF com IA e redesenha o texto traduzido nos balões.
+
+> Esta é a primeira versão do app, em Electron, TypeScript e React, mantida nesta branch para
+> consulta. A versão atual é a reescrita em Rust, na branch `main`. As duas usam a mesma pasta de
+> dados (`%APPDATA%\Manga Index`), e a versão em Rust lê tudo o que esta gravou. Não abra as duas ao
+> mesmo tempo: a fila e a nuvem são as mesmas.
+
+## Rodar
+
+```
+npm install
+npm run dev
+```
+
+O servidor de visão abaixo é opcional. Sem ele, o app usa o detector e o preenchimento internos.
 
 ## Modelos de visão (detecção de balões + apagamento)
 
@@ -26,3 +40,7 @@ Sem o Python ou os modelos, o app volta para o detector e o preenchimento intern
 node scripts/images-to-pdf.mjs <pasta-de-imagens> capitulo.pdf
 MI_EVAL_PDF=capitulo.pdf MI_EVAL_REF=<pasta-da-scan> MI_EVAL_OUT=samples/eval/run MI_EVAL_PAGES=1-3 npx electron-vite dev
 ```
+
+## Licença
+
+MIT. Veja [LICENSE](LICENSE).
