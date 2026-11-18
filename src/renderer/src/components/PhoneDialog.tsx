@@ -1,3 +1,4 @@
+import { CloudSection } from './CloudSection'
 import { useEffect, useState } from 'react'
 import type { DevicesStatus, PairingCode } from '../../../shared/devices'
 import type { UpdatesStatus } from '../../../shared/updates'
@@ -12,10 +13,13 @@ export function PhoneDialog({ onClose }: Props) {
   const [pairing, setPairing] = useState<PairingCode | null>(null)
   const [now, setNow] = useState(Date.now())
   const [updates, setUpdates] = useState<UpdatesStatus | null>(null)
+  // The notifications go through Firebase: ntfy is offered only without it (or while it is still on).
+  const [pushOn, setPushOn] = useState(false)
 
   useEffect(() => {
     window.api.devices.status().then(setStatus)
     window.api.updates.status().then(setUpdates)
+    window.api.cloud.status().then((s) => setPushOn(s.push))
     // Shows the phone once it paired, and counts the code's minutes down.
     const timer = setInterval(() => {
       setNow(Date.now())
@@ -80,7 +84,7 @@ export function PhoneDialog({ onClose }: Props) {
               </div>
             )}
             <p className="hint">
-              Na primeira vez, o Windows pode perguntar se o Manga Index pode usar a rede: permita em redes privadas.
+              Na primeira vez, o Windows pode perguntar se o Toon Index pode usar a rede: permita em redes privadas.
             </p>
           </>
         )}
@@ -113,7 +117,9 @@ export function PhoneDialog({ onClose }: Props) {
           </>
         )}
 
-        {updates && (
+        <CloudSection />
+
+        {updates && (!pushOn || updates.ntfyTopic) && (
           <>
             <h3>Avisos de capítulo novo no celular</h3>
             <label className="row phone-toggle">
@@ -122,7 +128,7 @@ export function PhoneDialog({ onClose }: Props) {
             </label>
             {updates.ntfyTopic && (
               <p className="hint">
-                Instale o app <strong>ntfy</strong> (Play Store) e, no app Manga Index, toque em Configurações › Avisos de capítulo novo para assinar. Ou assine
+                Instale o app <strong>ntfy</strong> (Play Store) e, no app Toon Index, toque em Configurações › Avisos de capítulo novo para assinar. Ou assine
                 à mão o tópico <code>{updates.ntfyTopic}</code> no servidor ntfy.sh. Quem souber o tópico também vê os avisos: não o
                 compartilhe.
               </p>

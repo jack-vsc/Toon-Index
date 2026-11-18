@@ -31,7 +31,8 @@ const api: MangaApi = {
   },
   data: {
     export: () => ipcRenderer.invoke('data:export'),
-    import: () => ipcRenderer.invoke('data:import')
+    import: () => ipcRenderer.invoke('data:import'),
+    logins: () => ipcRenderer.invoke('data:logins')
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (input) => ipcRenderer.invoke('settings:save', input),
@@ -43,6 +44,7 @@ const api: MangaApi = {
   listModels: (profile, apiKey) => ipcRenderer.invoke('models:list', profile, apiKey),
   testApi: (profile, apiKey) => ipcRenderer.invoke('api:test', profile, apiKey),
   translate: (req) => ipcRenderer.invoke('translate', req),
+  translateText: (req) => ipcRenderer.invoke('translate:text', req),
   vision: {
     detect: (image) => ipcRenderer.invoke('vision:detect', image),
     inpaint: (image, mask) => ipcRenderer.invoke('vision:inpaint', image, mask)
@@ -88,12 +90,21 @@ const api: MangaApi = {
     merge: (intoId, fromId) => ipcRenderer.invoke('works:merge', intoId, fromId),
     setShelf: (workId, patch) => ipcRenderer.invoke('works:shelf', workId, patch),
     setAuto: (workId, auto) => ipcRenderer.invoke('works:auto', workId, auto),
+    setUnit: (workId, unit) => ipcRenderer.invoke('works:unit', workId, unit),
+    delete: (workId) => ipcRenderer.invoke('works:delete', workId),
     move: (entryId, target) => ipcRenderer.invoke('works:move', entryId, target),
     covers: () => ipcRenderer.invoke('works:covers'),
     chapters: (match) => ipcRenderer.invoke('works:chapters', match),
-    search: (query) => ipcRenderer.invoke('works:search', query),
+    search: (query, own) => ipcRenderer.invoke('works:search', query, own),
     link: (workId, matches) => ipcRenderer.invoke('works:link', workId, matches),
     refresh: (workId) => ipcRenderer.invoke('works:refresh', workId)
+  },
+  cloud: {
+    status: () => ipcRenderer.invoke('cloud:status'),
+    set: (pasted, androidAppId) => ipcRenderer.invoke('cloud:set', pasted, androidAppId),
+    forget: () => ipcRenderer.invoke('cloud:forget'),
+    setPushKey: (pasted) => ipcRenderer.invoke('cloud:push-key', pasted),
+    testPush: () => ipcRenderer.invoke('cloud:test-push')
   },
   devices: {
     status: () => ipcRenderer.invoke('devices:status'),
@@ -119,13 +130,14 @@ const api: MangaApi = {
     take: () => ipcRenderer.invoke('remote:take'),
     queue: () => ipcRenderer.invoke('remote:queue'),
     pause: (paused) => ipcRenderer.invoke('remote:pause', paused),
-    batch: (work, site, chapters, download, source) => ipcRenderer.invoke('remote:batch', work, site, chapters, download, source),
+    batch: (work, site, chapters, download, source, options) => ipcRenderer.invoke('remote:batch', work, site, chapters, download, source, options),
     clearBatch: () => ipcRenderer.invoke('remote:clear-batch'),
     retryBatch: (ids) => ipcRenderer.invoke('remote:retry-batch', ids),
     reorder: (ids) => ipcRenderer.invoke('remote:reorder', ids),
     sort: () => ipcRenderer.invoke('remote:sort'),
     setOptions: (options) => ipcRenderer.invoke('remote:options', options),
     cancel: (id) => ipcRenderer.invoke('remote:cancel', id),
+    addPdfs: (files, options) => ipcRenderer.invoke('remote:add-pdfs', files, options),
     update: (id, patch) => ipcRenderer.invoke('remote:update', id, patch),
     onChanged: (callback) => {
       const listener = () => callback()
@@ -157,6 +169,7 @@ const api: MangaApi = {
     read: (path) => ipcRenderer.invoke('eval:read', path),
     write: (name, data) => ipcRenderer.invoke('eval:write', name, data),
     log: (message) => ipcRenderer.invoke('eval:log', message),
+    replayed: (id) => ipcRenderer.invoke('eval:replayed', id),
     done: () => ipcRenderer.invoke('eval:done')
   }
 }

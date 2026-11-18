@@ -27,6 +27,8 @@ export interface ReadingRecord {
 export interface ReadingReport {
   url: string
   title: string
+  /** The work's page on the site, from the chapter's link back to it (sites whose chapter links do not say the work). */
+  workUrl?: string
   progress: number | null
   /** Reached the last of the chapter's pages after reading long enough for it to count. */
   finished: boolean

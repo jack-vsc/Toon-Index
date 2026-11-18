@@ -2,12 +2,14 @@ import { app, BrowserWindow, Notification, shell } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { chaptersUpTo, latestChapter, MAX_SOURCES, type PageLink, type SourceCheck, type UpdatesStatus, type WorkUpdate } from '../shared/updates'
+import { chapterLinks, chaptersUpTo, datesOf, isRecent, linksScript, MAX_SOURCES, workDates, type PageLink, type SourceCheck, type UpdatesStatus, type WorkUpdate } from '../shared/updates'
 import { displayName, type Work } from '../shared/works'
 import { listLibrary, listWorks, saveWorkSources } from './library'
 import { addBatch, listRemoteJobs } from './remoteJobs'
 import { listReading } from './reading'
 import { autoCovers, autoLink, mangadexLatest } from './catalog'
+import { sendPush } from './cloud'
+import { signInIfAsked } from './siteLogins'
 import { hiddenWindow, isChallenged, open, sleep } from './webChapter'
 
 /** The sites are checked this often while the app is open; more would only burden them. */
@@ -63,12 +65,16 @@ function workUpdates(works: Work[], checks: Record<string, SourceCheck>): Record
       if (!check || check.latest === null || !check.latestUrl) continue
       const current = updates[work.id]
       if (current && current.latest >= check.latest) continue
+      // When it came out: the earliest date any of the work's sites gives it, else when it was first seen.
+      const date = workDates(work.sources, checks)[String(check.latest)]
       updates[work.id] = {
         workId: work.id,
         latest: check.latest,
         url: check.latestUrl,
         site: new URL(source).hostname.replace(/^www\./, ''),
-        checkedAt: check.checkedAt
+        checkedAt: check.checkedAt,
+        ...(date && { date }),
+        ...(check.latestSince && { since: check.latestSince })
       }
     }
   }
@@ -124,7 +130,23 @@ export async function checkNow(): Promise<void> {
       if (i > 0) await sleep(BETWEEN_SITES_MS)
       const check = await checkSource(win, source)
       const stored = load()
-      save({ ...stored, checks: { ...stored.checks, [source]: check } })
+      // A date read once stays: "3 days ago" read again tomorrow would move it.
+      const before = stored.checks[source]
+      const dates = { ...check.dates, ...before?.dates }
+      // A newer chapter than last time is new from now; the same one keeps when it was first seen. The
+      // first check of a site finds chapters out before: not new, unless the site dates them.
+      const latestSince =
+        check.latest === null || !before || before.latest === null
+          ? undefined
+          : check.latest > before.latest
+            ? Date.now()
+            : check.latest === before.latest
+              ? before.latestSince
+              : undefined
+      save({
+        ...stored,
+        checks: { ...stored.checks, [source]: { ...check, ...(Object.keys(dates).length && { dates }), ...(latestSince && { latestSince }) } }
+      })
     }
     const stored = load()
     save({ ...stored, lastRun: Date.now(), announced: await announce(stored) })
@@ -142,7 +164,7 @@ async function checkSource(win: BrowserWindow, source: string): Promise<SourceCh
     if (/^https:\/\/mangadex\.org\//i.test(source)) {
       const found = await mangadexLatest(source)
       if (!found) return failed('Nenhum capítulo em inglês ou português no MangaDex.')
-      return { checkedAt: Date.now(), latest: found.chapter, latestUrl: found.url }
+      return { checkedAt: Date.now(), latest: found.chapter, latestUrl: found.url, dates: found.dates }
     }
     await open(win, source)
     // The check runs unattended: a site asking for a bot check is left for when the person opens it.
@@ -150,16 +172,20 @@ async function checkSource(win: BrowserWindow, source: string): Promise<SourceCh
       if (waited > 20_000) return failed('O site pediu uma verificação: abra o link no app (Abrir link) uma vez para passar.')
       await sleep(1_000)
     }
+    // Sent to the login page (the list is for accounts only): in with the account in site-logins.env.
+    await signInIfAsked(win, source, (u) => open(win, u))
+    if (/\/(entrar|login|signin|sign-in)(\/|$)/i.test(new URL(win.webContents.getURL()).pathname)) {
+      return failed('O site pediu login: coloque a conta dele no arquivo site-logins.env (Configurações) ou entre pelo "Entrar no site".')
+    }
     await sleep(SETTLE_MS)
-    const links = (await win.webContents.executeJavaScript(
-      `[...document.querySelectorAll('a[href]')].map((a) => ({ href: a.href, text: (a.innerText || a.textContent || '').trim().slice(0, 120) }))`
-    )) as PageLink[]
+    const links = (await win.webContents.executeJavaScript(linksScript())) as PageLink[]
     // A site that moved to another address sends the old links there.
     // The work's name is taken from the link given: a site's list of every work it lands on instead has none.
     const landed = win.webContents.getURL()
     const page = new URL(source)
     page.hostname = new URL(landed).hostname
-    const found = latestChapter(page.href, links)
+    const chapters = chapterLinks(page.href, links)
+    const found = chapters.at(-1) ?? null
     if (!found && new URL(landed).hostname !== new URL(source).hostname) {
       return failed(`O link levou para ${new URL(landed).hostname}: o site pode ter mudado de endereço ou saído do ar. Troque o link.`)
     }
@@ -167,7 +193,7 @@ async function checkSource(win: BrowserWindow, source: string): Promise<SourceCh
       return failed('O link levou para outra página: a obra pode ter mudado de endereço no site. Troque o link.')
     }
     if (!found) return failed('Nenhum capítulo encontrado nesta página. Use a página da obra, a que lista os capítulos.')
-    return { checkedAt: Date.now(), latest: found.chapter, latestUrl: found.url }
+    return { checkedAt: Date.now(), latest: found.chapter, latestUrl: found.url, dates: datesOf(chapters) }
   } catch (err) {
     return failed((err as Error).message)
   }
@@ -175,7 +201,7 @@ async function checkSource(win: BrowserWindow, source: string): Promise<SourceCh
 
 /**
  * Chapters newer than the last one read and than the last one announced, once each: on the PC and,
- * when turned on, on the phone through ntfy. A work's first check only notes where it is.
+ * on the phone through Firebase (or ntfy, when turned on). A work's first check only notes where it is.
  */
 async function announce(stored: Stored): Promise<Record<string, number>> {
   const works = listWorks()
@@ -190,13 +216,17 @@ async function announce(stored: Stored): Promise<Record<string, number>> {
     const work = works.find((w) => w.id === update.workId)
     const name = work ? displayName(work.names[0]) : 'Obra'
     const queued = work?.auto ? queueNew(work, update, Math.max(before, ...read)) : 0
+    // Found now but out long ago (a site just added to the work): history, not news.
+    if (update.date && !isRecent(update)) continue
     const body = `Capítulo ${update.latest} em ${update.site}${queued ? (work!.auto === 'translate' ? ' · traduzindo no PC' : ' · baixando no PC') : ''}`
     if (Notification.isSupported()) {
       const notification = new Notification({ title: `Capítulo novo: ${name}`, body })
       notification.on('click', () => void shell.openExternal(update.url))
       notification.show()
     }
-    if (stored.ntfyTopic) await sendNtfy(stored.ntfyTopic, `Capítulo novo: ${name}`, body, update.url)
+    // On the phone through Firebase when that is set up; through ntfy otherwise, when it is on.
+    const pushed = await sendPush(`Capítulo novo: ${name}`, body, { workId: update.workId, url: update.url })
+    if (!pushed && stored.ntfyTopic) await sendNtfy(stored.ntfyTopic, `Capítulo novo: ${name}`, body, update.url)
   }
   return announced
 }

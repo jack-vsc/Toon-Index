@@ -11,8 +11,12 @@ import {
   type AppSettings,
   type GpuSharing,
   type ModelOption,
-  type PublicSettings
+  type PublicSettings,
+  type ThinkingLevel
 } from '../../../shared/types'
+
+/** Anthropic's own API, where the newer Claude models think by default (main/translate/anthropicProvider). */
+const isAnthropicUrl = (url: string): boolean => /^https?:\/\/api\.anthropic\.com(\/|$)/.test(url.trim())
 import { cleanIpcError } from '../lib/pipeline'
 import { LanguageSelect } from './LanguageSelect'
 
@@ -336,6 +340,24 @@ export function SettingsDialog({ initial, onClose, onSaved }: Props) {
                   }}
                 />
               </div>
+              {isAnthropicUrl(profile.baseUrl) && (
+                <div>
+                  <label className="field-label">Pensamento do Claude antes de responder</label>
+                  <select
+                    value={profile.thinking ?? 'off'}
+                    onChange={(e) => patchProfile(profile.id, { thinking: e.target.value as ThinkingLevel })}
+                  >
+                    <option value="off">Desligado (mais barato, recomendado para traduzir)</option>
+                    <option value="low">Pouco</option>
+                    <option value="medium">Médio (o padrão da Anthropic)</option>
+                    <option value="high">Muito (mais caro)</option>
+                  </select>
+                  <p className="hint">
+                    Os modelos novos do Claude pensam antes de responder, e esse pensamento é cobrado como texto de saída em toda página.
+                    Desligado, cada página custa bem menos. Modelos que não deixam desligar (Opus 5.5, Sonnet 5.5) pensam pouco.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="field-label">Modelos (precisam aceitar imagens; o marcado é o usado)</label>
                 <div className="model-list">
@@ -531,7 +553,7 @@ function LocalAiPanel({ activeModel, onUse }: { activeModel: string | null; onUs
     <section className="local-ai">
       <label className="field-label">IA neste PC, sem instalar nada</label>
       <p className="hint">
-        Traduz offline com o Gemma, do Google, rodando dentro do app. O motor e o modelo são baixados uma vez; a IA só ocupa a
+        Traduz offline com o Gemma, do Google, ou o Qwen treinado com as traduções do Claude, rodando dentro do app. O motor e o modelo são baixados uma vez; a IA só ocupa a
         placa enquanto traduz.
       </p>
       <div className="local-ai-row">
@@ -641,6 +663,19 @@ function DataBackup() {
         mesmo arquivo; restaurar junta, sem apagar nada.
       </p>
       {message && <p className="hint">{message}</p>}
+
+      <label className="field-label" style={{ marginTop: 14 }}>
+        Contas dos sites
+      </label>
+      <div className="row">
+        <button className="secondary" onClick={() => void window.api.data.logins()}>
+          Abrir arquivo de contas
+        </button>
+      </div>
+      <p className="hint">
+        Para sites que só mostram os capítulos a quem entrou (o MediocreToons): com a conta no arquivo, o app entra sozinho ao checar
+        capítulos novos. Fica só neste PC, e a senha só vai para o próprio site.
+      </p>
     </section>
   )
 }

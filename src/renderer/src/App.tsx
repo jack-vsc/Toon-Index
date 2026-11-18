@@ -31,6 +31,8 @@ import { runPhased } from './lib/gpuSharing'
 import { WebLinkInput } from './components/WebLinkInput'
 import { canvasToBlob, renderPage, thumbnailCanvas } from './lib/pdf'
 import { cleanIpcError, TranslationJob, type PageState } from './lib/pipeline'
+import { looksLikeNovel } from './lib/novel'
+import { MultiPdfDialog } from './components/MultiPdfDialog'
 import { usePdfPages } from './lib/usePdfPages'
 import { webChapterToPdf } from './lib/webChapter'
 
@@ -60,7 +62,9 @@ export default function App() {
   const [view, setView] = useState<View>('home')
   const [processingTab, setProcessingTab] = useState<'read' | 'grid'>('read')
   const [file, setFile] = useState<LoadedFile | null>(null)
-  const [setupInfo, setSetupInfo] = useState<{ numPages: number; cover: string | null } | null>(null)
+  /** Several PDFs chosen at once, waiting for their options before going to the queue. */
+  const [multiPdfs, setMultiPdfs] = useState<File[] | null>(null)
+  const [setupInfo, setSetupInfo] = useState<{ numPages: number; cover: string | null; novel: boolean } | null>(null)
   const [pages, setPages] = useState<PageState[]>([])
   const [running, setRunning] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -80,6 +84,8 @@ export default function App() {
   const [queue, setQueue] = useState<RemoteQueue | null>(null)
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchQuery, setBatchQuery] = useState<string | undefined>()
+  /** A work's next chapters, from its page. */
+  const [batchWork, setBatchWork] = useState<{ work: Work; after: number } | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [queueOpen, setQueueOpen] = useState(false)
   /** Reading with nothing around the pages (the window full screen too). */
@@ -157,14 +163,16 @@ export default function App() {
   }, [free, configured, settings, remoteFinished])
   const readerMode: ReaderMode = settings?.readerMode ?? 'scroll'
 
-  // Pausing the queue stops the chapter it is on (runRemote puts it back in the queue). The local AIs
-  // are stopped at once too: the page they are on would otherwise run to its end, holding the GPU.
+  // Pausing the queue stops the chapter it is on (runRemote puts it back in the queue), and so does
+  // taking it off the queue (runRemote drops it). The local AIs are stopped at once too: the page they
+  // are on would otherwise run to its end, holding the GPU.
+  const runningGone = !!remoteJob && !!queue && !queue.jobs.some((j) => j.id === remoteJob.id)
   useEffect(() => {
-    if (!queue?.paused || !remoteBusy.current) return
+    if (!(queue?.paused || runningGone) || !remoteBusy.current) return
     void window.api.web.cancel()
     job.current?.cancel()
     void Promise.all([window.api.ai.stop('ollama-models'), window.api.ai.stop('vision')]).catch(() => undefined)
-  }, [queue?.paused])
+  }, [queue?.paused, runningGone])
 
   const inResult = view === 'result' && !!reader
   // A library chapter opens where it was left, or at its start once it was read to the end.
@@ -210,9 +218,10 @@ export default function App() {
 
     try {
       job.current = await TranslationJob.open(bytes, setPages)
+      job.current.chapter = selected.name.replace(/\.pdf$/i, '')
       const first = await renderPage(job.current.doc, 1, 480)
       const cover = URL.createObjectURL(await canvasToBlob(thumbnailCanvas(first.canvas, 480), 'image/jpeg', 0.85))
-      setSetupInfo({ numPages: job.current.numPages, cover })
+      setSetupInfo({ numPages: job.current.numPages, cover, novel: await looksLikeNovel(job.current.doc) })
       return true
     } catch (err) {
       setMessage(`Não foi possível abrir o PDF: ${cleanIpcError(err)}`)
@@ -228,6 +237,8 @@ export default function App() {
   async function runRemote(remote: RemoteJob, pdf: Uint8Array | null, current: PublicSettings) {
     setRemoteJob(remote)
     const update = (patch: Parameters<typeof window.api.remote.update>[1]) => window.api.remote.update(remote.id, patch)
+    // Taken off the queue while it ran (from the queue window or the phone).
+    const removed = async () => !(await window.api.remote.queue()).jobs.some((j) => j.id === remote.id)
     savedEntry.current = null
     try {
       if (remote.batch?.download) {
@@ -249,15 +260,21 @@ export default function App() {
       toBackground(true)
       if (!(await openFile(selected, remote.url, true))) throw new Error('Não foi possível abrir o PDF.')
       // Sent with options of its own (from the phone, or the queue's): they hold for this chapter only.
-      await startTranslation(defaultChoice(job.current!.numPages, { ...current, ...remote.options }))
-      if ((await window.api.remote.queue()).paused) throw new Paused()
+      const run = { ...current, ...remote.options }
+      // Comic or novel as asked; 'auto' (the default) by whether the PDF's pages have text. A site's
+      // chapter is pictures: never a novel.
+      const novel = remote.kind !== 'link' && (run.contentType === 'novel' || (run.contentType !== 'comic' && (await looksLikeNovel(job.current!.doc))))
+      await startTranslation(defaultChoice(job.current!.numPages, run, novel))
+      if ((await window.api.remote.queue()).paused || (await removed())) throw new Paused()
       if (!savedEntry.current && job.current && job.current.translatedCount > 0) await finish()
       if (!savedEntry.current) throw new Error(job.current?.stopReason?.message ?? 'Nenhuma página foi traduzida.')
       await update({ status: 'done', message: undefined, entryId: savedEntry.current })
       closeJob()
       setMessage(`${remote.batch ? 'Traduzido' : 'Pedido do celular traduzido'} e salvo na biblioteca: ${selected.name.replace(/\.pdf$/i, '')}`)
     } catch (err) {
-      if (err instanceof Paused || (await window.api.remote.queue()).paused) {
+      if (await removed()) {
+        // Nothing to put back or mark failed: it is gone from the queue.
+      } else if (err instanceof Paused || (await window.api.remote.queue()).paused) {
         // Back to the queue, to start over when resumed; the local AIs leave the GPU meanwhile.
         await update({ status: 'queued', message: undefined })
         await Promise.all([window.api.ai.stop('ollama-models'), window.api.ai.stop('vision')]).catch(() => undefined)
@@ -270,6 +287,20 @@ export default function App() {
       remoteBusy.current = false
       setRemoteJob(null)
       setRemoteFinished((n) => n + 1)
+    }
+  }
+
+  /** Several PDFs chosen at once: queued, translated one after another with the PC's settings (comic or novel told apart by itself). */
+  async function queuePdfs(files: File[], options: Partial<TranslateOptions>) {
+    setMultiPdfs(null)
+    try {
+      await window.api.remote.addPdfs(
+        await Promise.all(files.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }))),
+        options
+      )
+      setMessage(`${files.length} PDFs na fila: eles são traduzidos um depois do outro. Acompanhe em Fila.`)
+    } catch (err) {
+      setMessage(`Não foi possível pôr os PDFs na fila: ${cleanIpcError(err)}`)
     }
   }
 
@@ -302,12 +333,15 @@ export default function App() {
 
   async function startTranslation(choice: SetupChoice) {
     if (!job.current || !settings) return
-    const saved = await saveSettingsPatch(choice.options)
+    // Comic or novel is this PDF's own: kept as the default, a novel would turn the next chapters into novels too.
+    const { contentType: _type, ...options } = choice.options
+    const saved = await saveSettingsPatch(options)
     if (!saved) return
     if (!behind.current) {
       setProcessingTab('read')
       setView('processing')
     }
+    job.current.novel = choice.novel
     await job.current.select(choice.pages, choice.untranslated)
     await translate(saved.concurrency, saved)
   }
@@ -353,7 +387,8 @@ export default function App() {
       translatedPages: job.current.translatedCount,
       original: current.bytes,
       translated: pdf,
-      coverJpeg: cover
+      coverJpeg: cover,
+      novel: job.current.novel
     })
     savedEntry.current = entry.id
     await refreshLibrary()
@@ -362,7 +397,8 @@ export default function App() {
       closeJob()
       return
     }
-    setReader({ title: current.name, translated: pdf, original: current.bytes, libraryId: entry.id, fromJob: true })
+    // A novel's pages are set again from its text, so they exist only in the PDF just built (the job has none to show).
+    setReader({ title: current.name, translated: pdf, original: current.bytes, libraryId: entry.id, fromJob: !job.current.novel })
     setShowOriginal(false)
     setMessage('Capítulo salvo na biblioteca.')
     setView('result')
@@ -436,6 +472,9 @@ export default function App() {
       return
     }
     closeJob()
+    // closeJob keeps a library chapter open (a novel just translated opens as one): Início leaves it too.
+    setReader(null)
+    setView('home')
   }
 
   function toBackground(on: boolean) {
@@ -615,7 +654,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              <span>Manga Index</span>
+              <span>Toon Index</span>
               {title && <span className="file-name">· {title}</span>}
             </>
           )}
@@ -788,7 +827,7 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                <DropZone onFile={openFile} disabled={!settings} />
+                <DropZone onFile={openFile} onFiles={setMultiPdfs} disabled={!settings} />
                 <WebLinkInput onFile={openFile} disabled={!settings} />
                 <div className="batch-open">
                   <button className="secondary" onClick={() => setBatchOpen(true)} disabled={!settings}>
@@ -821,6 +860,7 @@ export default function App() {
                 onDownload={downloadEntry}
                 onDelete={deleteEntry}
                 onWorksChanged={refreshLibrary}
+                onNext={(work, after) => (setBatchWork({ work, after }), setBatchOpen(true))}
               />
             )}
             {view === 'home' && page.kind === 'work' && !shownWork && (
@@ -832,6 +872,7 @@ export default function App() {
                 fileName={file.name}
                 numPages={setupInfo.numPages}
                 cover={setupInfo.cover}
+                detectedNovel={setupInfo.novel}
                 settings={settings}
                 onStart={startTranslation}
                 onCancel={goHome}
@@ -905,8 +946,18 @@ export default function App() {
       )}
       {aiMonitorOpen && <AiMonitor onClose={() => setAiMonitorOpen(false)} />}
       {storageOpen && <StorageDialog onClose={() => setStorageOpen(false)} />}
+      {multiPdfs && settings && (
+        <MultiPdfDialog files={multiPdfs} settings={settings} onQueue={(options) => void queuePdfs(multiPdfs, options)} onClose={() => setMultiPdfs(null)} />
+      )}
       {batchOpen && (
-        <BatchDialog works={works} reading={reading} initialQuery={batchQuery} onClose={() => (setBatchOpen(false), setBatchQuery(undefined))} />
+        <BatchDialog
+          works={works}
+          reading={reading}
+          initialQuery={batchQuery}
+          work={batchWork?.work}
+          after={batchWork?.after}
+          onClose={() => (setBatchOpen(false), setBatchQuery(undefined), setBatchWork(null))}
+        />
       )}
       {searchOpen && (
         <QuickSearch
@@ -1012,14 +1063,15 @@ function translatedName(name: string): string {
 }
 
 /** Every page, the first and last ones as the settings say (credit pages) left untranslated. */
-function defaultChoice(numPages: number, s: AppSettings): SetupChoice {
+function defaultChoice(numPages: number, s: AppSettings, novel: boolean): SetupChoice {
   const skipStart = Math.min(s.skipStart, numPages - 1)
   const skipEnd = Math.min(s.skipEnd, numPages - 1 - skipStart)
   const pages = Array.from({ length: numPages }, (_, i) => i + 1)
   return {
     pages,
     untranslated: pages.filter((n) => n <= skipStart || n > numPages - skipEnd),
-    options: { ...pickOptions(s), skipStart, skipEnd }
+    options: { ...pickOptions(s), skipStart, skipEnd },
+    novel
   }
 }
 

@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { HistoryChapter, HistoryWork, ReadingRecord, ReadingReport } from '../shared/reading'
 import { chapterInUrl, findWork, isNovelUrl, parseChapterName, sameName } from '../shared/works'
-import { indexWork, listWorks, readMeta, startedReading } from './library'
+import { sourceFromChapter } from '../shared/updates'
+import { addWorkSourceTo, indexWork, listWorks, readMeta, startedReading } from './library'
 
 const readingPath = (): string => join(app.getPath('userData'), 'library', 'reading.json')
 
@@ -80,9 +81,19 @@ export function reportReading(report: ReadingReport): (ReadingRecord & { work: s
   })
   saveReading(records)
   startedReading(workId)
+  // Its page on the site, for new chapters, when the chapter's own link does not lead to it.
+  if (report.workUrl && sameSite(report.workUrl, report.url) && !sourceFromChapter(report.url)) addWorkSourceTo(workId, report.workUrl)
   const saved = records.find((r) => r.workId === workId && r.chapter === parsed.chapter)!
   const work = listWorks().find((w) => w.id === workId)?.names[0] ?? parsed.work
   return { ...saved, work }
+}
+
+function sameSite(a: string, b: string): boolean {
+  try {
+    return new URL(a).hostname === new URL(b).hostname && /^https?:$/.test(new URL(a).protocol)
+  } catch {
+    return false
+  }
 }
 
 /** A translated chapter of the library read to its last page in the app. */
@@ -222,8 +233,8 @@ function readHistory(file: HistoryFile): Found[] {
           continue
         }
         // Video sites ("Assistir … Episódio 5") and error pages kept in the history.
-        if (NOT_MANGA.test(host) || /anime/i.test(host) || /^\s*(assistir|watch)/i.test(row.title)) continue
-        if (/^\s*\d{3}|error occurred|not found|não encontrad/i.test(row.title)) continue
+        if (NOT_MANGA.test(host) || /anime/i.test(host) || /^\s*(assistir|watch)\b/i.test(row.title)) continue
+        if (/^\s*\d{3}\b|error occurred|not found|não encontrad/i.test(row.title)) continue
         // The link has to name the chapter too: titles alone ("Chapter 3 - Getting started") say little.
         const parsed = parseChapterName(row.title, row.url)
         if (parsed.chapter === null || !parsed.work) continue

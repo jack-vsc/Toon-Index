@@ -22,7 +22,7 @@ export function Sidebar({ page, fresh, onPage, onBatch, onPhone, onAi, onStorage
     <nav className="sidebar">
       <button className="sidebar-brand" onClick={() => onPage({ kind: 'home' })}>
         <span className="logo">漫</span>
-        <span>Manga Index</span>
+        <span>Toon Index</span>
       </button>
 
       <button className="sidebar-search" onClick={onSearch} title="Buscar obra (Ctrl+K)">

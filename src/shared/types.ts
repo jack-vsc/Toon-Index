@@ -11,7 +11,16 @@ export interface ApiProfile {
   models: string[]
   /** Model used to translate. */
   model: string
+  /**
+   * How much the model thinks before answering (Anthropic's own API: newer Claude models think by
+   * default, billed as output). Absent: 'off'.
+   */
+  thinking?: ThinkingLevel
 }
+
+export type ContentType = 'auto' | 'comic' | 'novel'
+
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 
 /** [x0, y0, x1, y1] in pixels of the image that was sent to the model. */
 export type Box = [number, number, number, number]
@@ -55,6 +64,8 @@ export interface AppSettings {
   translateSfx: boolean
   /** A page translated before is put back from the layer saved then (lib/layers) instead of asking the AI again. */
   reuseLayers: boolean
+  /** Comics are read with vision; novels from the PDF's text (renderer lib/novel). 'auto' tells them apart. */
+  contentType: ContentType
   concurrency: number
   speed: Speed
   /** Pages left untranslated at the start / end of a whole-PDF run (scanlator credit pages). */
@@ -78,6 +89,7 @@ export type TranslateOptions = Pick<
   | 'speed'
   | 'translateSfx'
   | 'reuseLayers'
+  | 'contentType'
   | 'skipStart'
   | 'skipEnd'
   | 'gpuSharing'
@@ -93,6 +105,7 @@ export const TRANSLATE_OPTION_KEYS: (keyof TranslateOptions)[] = [
   'speed',
   'translateSfx',
   'reuseLayers',
+  'contentType',
   'skipStart',
   'skipEnd',
   'gpuSharing',
@@ -280,6 +293,10 @@ export interface EvalConfig {
   pages: number[] | null
   /** Only save the slices with the detected text marked, without calling the model. */
   detectOnly: boolean
+  /** Rebuilding the training dataset (MI_REPLAY_LIBRARY): the library's chapters to read again from the cache. */
+  replay?: { id: string; pdf: string; title: string }[]
+  /** Stop once this many pages are kept (MI_REPLAY_PAGES); 0 = the whole library. */
+  replayPages?: number
 }
 
 /** One model request: one or more consecutive vertical slices of the same page, top to bottom. */
@@ -290,6 +307,18 @@ export interface TranslateRequest {
   regions: MarkedRegion[]
   pageNumber: number
   /** Lets the renderer cancel this request while it is running. */
+  requestId: string
+  /** The chapter's name, for the training dataset (main/translate/dataset). */
+  chapter?: string
+}
+
+/** A novel's paragraphs to translate (main/translate translateText). */
+export interface TextRequest {
+  paragraphs: string[]
+  /** The paragraphs just before, for names and tone; not translated. */
+  context: string[]
+  /** The page the first paragraph is on, for logs. */
+  pageNumber: number
   requestId: string
 }
 
@@ -347,6 +376,8 @@ export interface SaveLibraryInput {
   coverJpeg: Uint8Array
   /** Downloaded as it is, already in the language read (the translated PDF is the original). */
   downloaded?: boolean
+  /** A novel translated from its text: its work is a novel's, apart from the manga with its name. */
+  novel?: boolean
 }
 
 export interface Language {
@@ -388,6 +419,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   targetLanguage: 'Brazilian Portuguese',
   translateSfx: false,
   reuseLayers: true,
+  contentType: 'auto',
   concurrency: 3,
   speed: 'fast',
   skipStart: 0,

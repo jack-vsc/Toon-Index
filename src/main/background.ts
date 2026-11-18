@@ -44,7 +44,11 @@ export function applyBackground(win: BrowserWindow | null): void {
   const enabled = backgroundEnabled()
   // Not installed: Electron itself runs this folder (as the desktop shortcut does).
   const args = app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden']
-  if (!process.env.MI_USER_DATA) app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args, name: 'Manga Index' })
+  if (!process.env.MI_USER_DATA) {
+    // The entry from when the app was called Manga Index goes, or Windows would start it twice.
+    app.setLoginItemSettings({ openAtLogin: false, path: process.execPath, args, name: 'Manga Index' })
+    app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args, name: 'Toon Index' })
+  }
   if (enabled && !tray) createTray(win)
   if (!enabled && tray) {
     tray.destroy()
@@ -66,10 +70,10 @@ let trayWindow: BrowserWindow | null = null
 export function refreshTray(): void {
   if (!tray) return
   const paused = remoteQueue().paused
-  tray.setToolTip(paused ? 'Manga Index: tradução pausada, GPU livre' : 'Manga Index: ligado em segundo plano')
+  tray.setToolTip(paused ? 'Toon Index: tradução pausada, GPU livre' : 'Toon Index: ligado em segundo plano')
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Abrir o Manga Index', click: () => showWindow(trayWindow) },
+      { label: 'Abrir o Toon Index', click: () => showWindow(trayWindow) },
       { type: 'separator' },
       paused
         ? { label: 'Continuar a tradução', click: () => pauseRemoteJobs(false) }
@@ -119,7 +123,7 @@ export function keepInBackground(win: BrowserWindow): void {
     if (!toldHidden && Notification.isSupported()) {
       toldHidden = true
       new Notification({
-        title: 'O Manga Index continua ligado',
+        title: 'O Toon Index continua ligado',
         body: 'Em segundo plano, para o celular mandar capítulos a qualquer hora. Para sair, use o ícone perto do relógio.'
       }).show()
     }

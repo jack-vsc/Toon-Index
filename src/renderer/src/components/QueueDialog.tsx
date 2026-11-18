@@ -125,9 +125,11 @@ export function QueueDialog({
                   </span>
                   <span className="queue-pos">{gi + 1}</span>
                   {g.work !== null ? (
-                    <span className="queue-name">
+                    <span className="queue-name queue-group-name">
                       <span className="queue-chevron">{open ? '▾' : '▸'}</span>
-                      <strong>{g.work}</strong> <span className="queue-range">{chapterRange(g.jobs)}</span>
+                      <span className="queue-title" title={`${g.work} ${chapterRange(g.jobs)}`}>
+                        <strong>{g.work}</strong> <span className="queue-range">{chapterRange(g.jobs)}</span>
+                      </span>
                       <span className="badge">{g.jobs.length === 1 ? '1 capítulo' : `${g.jobs.length} capítulos`}</span>
                       <KindBadges jobs={g.jobs} />
                     </span>
@@ -408,6 +410,9 @@ function RunningCard({ job, paused }: { job: RemoteJob; paused: boolean }) {
         <button className="secondary small" onClick={() => window.api.remote.pause(!paused)}>
           {paused ? '▶ Continuar' : '❚❚ Pausar'}
         </button>
+        <button className="secondary small" title="Para este capítulo e passa para o próximo" onClick={() => window.api.remote.cancel(job.id)}>
+          ✕ Tirar da fila
+        </button>
       </div>
     </div>
   )
@@ -457,7 +462,9 @@ function chapterRange(jobs: RemoteJob[]): string {
   const numbers = jobs.map((j) => j.batch!.chapter)
   const low = Math.min(...numbers)
   const high = Math.max(...numbers)
-  return low === high ? `Cap. ${low}` : `Cap. ${low}–${high}`
+  // A novel's volumes, from PDFs named "Name - Volume 08".
+  const label = jobs.every((j) => j.kind === 'pdf' && /\bvol(?:ume)?\b/i.test(j.name)) ? 'Vol.' : 'Cap.'
+  return low === high ? `${label} ${low}` : `${label} ${low}–${high}`
 }
 
 function KindBadges({ jobs }: { jobs: RemoteJob[] }) {

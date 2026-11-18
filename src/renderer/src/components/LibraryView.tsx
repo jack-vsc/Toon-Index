@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { CATALOG_SITES, isSameWork, type CatalogMatch, type CatalogResult } from '../../../shared/catalog'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { CATALOG_SITES, isSameWork, RESULT_SITES, type CatalogMatch, type CatalogResult } from '../../../shared/catalog'
 import type { ReadingRecord } from '../../../shared/reading'
 import { chapterCount, isDownloaded, languageLabel, type LibraryEntry } from '../../../shared/types'
-import { MAX_SOURCES, sourceFromChapter, unreadUpdates, type UpdatesStatus, type WorkUpdate } from '../../../shared/updates'
-import { displayName, formatOf, normalizeName, SHELVES, shelfOf, type Shelf, type Work, type WorkFormat } from '../../../shared/works'
+import { releaseLabel } from '../../../shared/chapterDates'
+import { isRecent, MAX_SOURCES, outAt, sourceFromChapter, unreadUpdates, workDates, type UpdatesStatus, type WorkUpdate } from '../../../shared/updates'
+import { displayName, duplicateWorks, formatOf, normalizeName, SHELVES, shelfOf, UNIT_WORDS, unitOf, type Shelf, type Work, type WorkFormat } from '../../../shared/works'
 import { HistoryImport } from './HistoryImport'
 
 /** A work with its translated chapters (in reading order) and readings. */
@@ -17,7 +18,10 @@ export interface LibraryData {
   /** Works with something to show: a new chapter out first, then the one read most recently. */
   groups: WorkGroup[]
   /** By work id, a chapter out past the last one read. */
+  /** Chapters out in the last week past the last one read: the news. */
   fresh: Map<string, WorkUpdate>
+  /** Older chapters not read yet: the history under the news. */
+  older: WorkUpdate[]
   /** By work id, the cover found on the catalog sites. */
   covers: Record<string, string>
   /** By work id, the newest chapter out on its sites, for how far along the reading is. */
@@ -40,7 +44,9 @@ export function useLibrary(entries: LibraryEntry[], works: Work[], reading: Read
     window.api.works.covers().then(setCovers)
   }, [works, updates?.running])
 
-  const fresh = new Map(unreadUpdates(updates?.updates ?? {}, reading).map((u) => [u.workId, u]))
+  const unread = unreadUpdates(updates?.updates ?? {}, reading)
+  const fresh = new Map(unread.filter((u) => isRecent(u)).map((u) => [u.workId, u]))
+  const older = unread.filter((u) => !fresh.has(u.workId)).sort((a, b) => outAt(b) - outAt(a))
   const groups = works
     .map((work) => ({
       work,
@@ -50,7 +56,7 @@ export function useLibrary(entries: LibraryEntry[], works: Work[], reading: Read
     .filter((g) => g.chapters.length > 0 || g.records.length > 0 || g.work.shelf || g.work.favorite)
     .sort((a, b) => Number(fresh.has(b.work.id)) - Number(fresh.has(a.work.id)) || lastActivity(b) - lastActivity(a))
   const latest = new Map(Object.values(updates?.updates ?? {}).map((u) => [u.workId, u.latest]))
-  return { groups, fresh, covers, latest }
+  return { groups, fresh, older, covers, latest }
 }
 
 /** The work's own cover, or its latest translated chapter's. */
@@ -90,7 +96,7 @@ function metaLine(group: WorkGroup, latest: number | undefined): string {
   const shelf = group.work.shelf && group.work.shelf !== 'reading' ? SHELVES[group.work.shelf] : null
   const parts: string[] = []
   if (shelf) parts.push(shelf)
-  if (upTo !== null) parts.push(`Cap. ${upTo}`)
+  if (upTo !== null) parts.push(`${UNIT_WORDS[unitOf(group.work)].short} ${upTo}`)
   else if (!shelf) parts.push(group.records.length ? 'Lendo' : 'Não lido')
   if (share !== null && share < 1 && group.work.shelf !== 'done') parts.push(`${Math.round(share * 100)}% lido`)
   if (group.work.format === 'novel') parts.push('Novel')
@@ -308,12 +314,12 @@ function PosterCard({ group, data, onPick }: { group: WorkGroup; data: LibraryDa
 /** How many new chapters the first page shows; the rest are on their own page. */
 const HOME_UPDATES = 6
 
-/** The works with a chapter out past the last one read: favorites first, then the ones checked last. */
+/** The works with a chapter out past the last one read: the newest out first. */
 export function freshWorks(data: LibraryData): { update: WorkUpdate; group: WorkGroup }[] {
   return [...data.fresh.values()]
     .map((u) => ({ update: u, group: data.groups.find((g) => g.work.id === u.workId) }))
     .filter((f): f is { update: WorkUpdate; group: WorkGroup } => !!f.group)
-    .sort((a, b) => Number(!!b.group.work.favorite) - Number(!!a.group.work.favorite) || b.update.checkedAt - a.update.checkedAt)
+    .sort((a, b) => outAt(b.update) - outAt(a.update))
 }
 
 /** A new chapter out: the work, how far behind the reading is, and where to read it. */
@@ -343,7 +349,7 @@ function UpdateRow({
           {displayName(group.work.names[0])}
         </button>
         <span>
-          Capítulo {update.latest}
+          {UNIT_WORDS[unitOf(group.work)].one} {update.latest}
           {behind !== null && (
             <span className="muted">
               {' '}
@@ -352,7 +358,7 @@ function UpdateRow({
           )}
         </span>
         <span className="mono muted">
-          {update.site.toUpperCase()} · {timeAgo(update.checkedAt)}
+          {update.site.toUpperCase()} · {update.date ? releaseLabel(update.date) : timeAgo(update.checkedAt)}
         </span>
       </div>
       {onTranslate && (
@@ -391,11 +397,11 @@ export function UpdatesView({
           <CheckButton updates={updates} />
         </div>
         <p className="hint">
-          Obras com capítulo novo depois do último que você leu. Os sites de cada obra são checados a cada 2 horas
+          Capítulos que saíram nos últimos 7 dias depois do último que você leu. Os sites de cada obra são checados a cada 2 horas
           {updates?.lastRun ? ` (última vez ${timeAgo(updates.lastRun)})` : ''}; a obra sai daqui quando você lê o capítulo.
         </p>
         {fresh.length === 0 ? (
-          <p className="hint center">Nenhum capítulo novo por enquanto.</p>
+          <p className="hint center">Nenhum capítulo novo nos últimos 7 dias.</p>
         ) : (
           <div className="update-list">
             {fresh.map(({ update, group }) => (
@@ -411,7 +417,61 @@ export function UpdatesView({
           </div>
         )}
       </section>
+      <UpdateHistory data={data} onPick={onPick} />
     </div>
+  )
+}
+
+/** Rows of the history shown at first, and added each time "Mostrar mais" is pressed. */
+const HISTORY_PAGE = 40
+
+/**
+ * Chapters out over a week ago and not read yet, newest first: one compact line each, a page at a
+ * time, so a long history costs no more than its first lines.
+ */
+function UpdateHistory({ data, onPick }: { data: LibraryData; onPick: (workId: string) => void }) {
+  const [shown, setShown] = useState(HISTORY_PAGE)
+  const names = useMemo(() => new Map(data.groups.map((g) => [g.work.id, g.work])), [data.groups])
+  // A work saved twice (a page in common) has one line, under the name of the copy on a list.
+  const twice = useMemo(() => duplicateWorks(data.older.flatMap((u) => names.get(u.workId) ?? [])), [data.older, names])
+  const rows = data.older.filter((u) => names.has(u.workId) && !twice.has(u.workId))
+  if (!rows.length) return null
+  return (
+    <section className="home-section">
+      <div className="section-head">
+        <h2>
+          Histórico <span className="library-count">{rows.length}</span>
+        </h2>
+      </div>
+      <p className="hint">Capítulos que saíram há mais de 7 dias e você ainda não leu.</p>
+      <div className="history-list">
+        {rows.slice(0, shown).map((u) => {
+          const work = names.get(u.workId)!
+          return (
+            <div key={u.workId} className="history-row">
+              <button className="history-name" onClick={() => onPick(work.id)} title={displayName(work.names[0])}>
+                {displayName(work.names[0])}
+              </button>
+              <span className="history-chapter">
+                {UNIT_WORDS[unitOf(work)].short} {u.latest}
+              </span>
+              <span className="history-when">{u.date ? releaseLabel(u.date).replace(/^saiu (em )?/, '') : `visto ${timeAgo(outAt(u))}`}</span>
+              <span className="history-site mono muted" title={u.site}>
+                {u.site}
+              </span>
+              <button className="secondary small" onClick={() => window.open(u.url)}>
+                Ler
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      {rows.length > shown && (
+        <button className="secondary small history-more" onClick={() => setShown(shown + HISTORY_PAGE)}>
+          Mostrar mais ({rows.length - shown})
+        </button>
+      )}
+    </section>
   )
 }
 
@@ -554,13 +614,16 @@ export function WorkPage({
   onOpen,
   onDownload,
   onDelete,
-  onWorksChanged
+  onWorksChanged,
+  onNext
 }: {
   group: WorkGroup
   data: LibraryData
   updates: UpdatesStatus | null
   others: Work[]
   onBack: () => void
+  /** "Próximos capítulos": the ones after `after` (the last read or had), from the work's sites, to the queue. */
+  onNext: (work: Work, after: number) => void
 } & Actions) {
   const { work, chapters, records } = group
   const [editing, setEditing] = useState(false)
@@ -578,6 +641,8 @@ export function WorkPage({
   const { upTo, share } = progressOf(group, latest)
   const newest = newestChapter(group, latest) || null
   const rows = chapterRows(records, chapters, newest)
+  // When each chapter came out, where the work's sites say.
+  const dates = workDates(work.sources, updates?.checks ?? {})
   // Read or unread by hand; "até aqui" marks every chapter before it read too.
   const toggleRead = (row: ChapterRow) =>
     row.record?.status === 'read' ? window.api.reading.forget(work.id, row.chapter) : window.api.reading.mark(work.id, row.chapter)
@@ -633,7 +698,7 @@ export function WorkPage({
           <div className="work-stats">
             {newest !== null && (
               <span>
-                <strong>{newest}</strong> capítulos
+                <strong>{newest}</strong> {UNIT_WORDS[unitOf(work)].many.toLowerCase()}
               </span>
             )}
             {chapters.length > 0 && (
@@ -646,10 +711,21 @@ export function WorkPage({
           <div className="row work-actions">
             <ContinueButtons inApp={inApp} continueUrl={status?.continueUrl} onOpen={onOpen} />
             {update && (
-              <button className="secondary" onClick={() => window.open(update.url)} title={`Saiu no ${update.site}`}>
-                Último · Cap. {update.latest}
+              <button
+                className="secondary"
+                onClick={() => window.open(update.url)}
+                title={`Saiu no ${update.site}${update.date ? ` · ${releaseLabel(update.date).replace(/^saiu /, '')}` : ''}`}
+              >
+                Último · {UNIT_WORDS[unitOf(work)].short} {update.latest}
               </button>
             )}
+            <button
+              className="secondary"
+              title="Traduzir ou baixar os capítulos depois do último lido (ou já na biblioteca), dos sites da obra"
+              onClick={() => onNext(work, Math.max(upTo ?? 0, ...chapters.map((c) => c.chapter ?? 0)))}
+            >
+              Próximos capítulos
+            </button>
             <button className={`secondary fav-button ${work.favorite ? 'on' : ''}`} onClick={() => setShelf({ favorite: !work.favorite })}>
               {work.favorite ? '♥ Favorita' : '♡ Favoritar'}
             </button>
@@ -713,6 +789,8 @@ export function WorkPage({
           records={records}
           checks={updates?.checks ?? {}}
           onDone={() => (setEditing(false), onWorksChanged())}
+          onChanged={onWorksChanged}
+          onDeleted={() => (onWorksChanged(), onBack())}
         />
       )}
 
@@ -720,9 +798,9 @@ export function WorkPage({
         <section className="chapter-panel">
           <div className="chapter-panel-head">
             <h2>
-              Capítulos <span className="library-count">{rows.length}</span>
+              {UNIT_WORDS[unitOf(work)].many} <span className="library-count">{rows.length}</span>
             </h2>
-            <input type="search" inputMode="decimal" placeholder="Nº do capítulo" value={chapterQuery} onChange={(e) => setChapterQuery(e.target.value)} />
+            <input type="search" inputMode="decimal" placeholder={unitOf(work) === 'volume' ? 'Nº do volume' : 'Nº do capítulo'} value={chapterQuery} onChange={(e) => setChapterQuery(e.target.value)} />
             <button className="secondary small" onClick={() => setOldestFirst(!oldestFirst)}>
               {oldestFirst ? '↑ Antigos' : '↓ Recentes'}
             </button>
@@ -734,7 +812,7 @@ export function WorkPage({
                 <span className="chapter-num">{chapter}</span>
                 <span className="chapter-text">
                   <span className="chapter-title">
-                    Capítulo {chapter}
+                    {UNIT_WORDS[unitOf(work)].one} {chapter}
                     {record?.status === 'read' && <span className="badge ok">lido</span>}
                     {record?.status === 'reading' && (
                       <span className="badge">{record.progress !== null ? `${Math.round(record.progress * 100)}%` : 'lendo'}</span>
@@ -743,11 +821,16 @@ export function WorkPage({
                     {versions.length > 1 && <span className="badge">{versions.length} versões</span>}
                   </span>
                   <span className="chapter-where">
-                    {record
-                      ? `${siteOf(record.url) || sourceLabel(record.source)} · ${timeAgo(record.updatedAt)}`
-                      : entry
-                        ? `${siteOf(entry.source ?? '') || 'arquivo'} · ${timeAgo(entry.createdAt)}`
-                        : ''}
+                    {[
+                      dates[String(chapter)] && releaseLabel(dates[String(chapter)]),
+                      record
+                        ? `${siteOf(record.url) || sourceLabel(record.source)} · ${timeAgo(record.updatedAt)}`
+                        : entry
+                          ? `${siteOf(entry.source ?? '') || 'arquivo'} · ${timeAgo(entry.createdAt)}`
+                          : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </span>
                   {versions.length > 1 && (
                     <span className="chapter-versions">
@@ -771,13 +854,6 @@ export function WorkPage({
                   )}
                 </span>
                 <span className="chapter-actions">
-                  <button
-                    className={`secondary small read-toggle ${record?.status === 'read' ? 'on' : ''}`}
-                    title={record?.status === 'read' ? 'Marcar como não lido' : 'Marcar como lido'}
-                    onClick={() => void toggleRead({ chapter, record, entry, versions })}
-                  >
-                    ✓
-                  </button>
                   <button className="secondary small upto" title="Marcar este e todos os anteriores como lidos" onClick={() => readUpToHere(chapter)}>
                     Lidos até aqui
                   </button>
@@ -791,6 +867,14 @@ export function WorkPage({
                       Site ↗
                     </button>
                   )}
+                  {/* Last, so it sits in the same place on every row whatever buttons come before it. */}
+                  <button
+                    className={`secondary small read-toggle ${record?.status === 'read' ? 'on' : ''}`}
+                    title={record?.status === 'read' ? 'Marcar como não lido' : 'Marcar como lido'}
+                    onClick={() => void toggleRead({ chapter, record, entry, versions })}
+                  >
+                    ✓
+                  </button>
                 </span>
               </div>
             ))}
@@ -829,11 +913,17 @@ export function WorkPage({
             )}
             {newest !== null && (
               <>
-                <dt>Capítulos</dt>
+                <dt>{UNIT_WORDS[unitOf(work)].many}</dt>
                 <dd>{newest}</dd>
               </>
             )}
-            <dt>Capítulo novo</dt>
+            {newest !== null && dates[String(newest)] && (
+              <>
+                <dt>Último</dt>
+                <dd>{releaseLabel(dates[String(newest)]).replace(/^saiu /, '')}</dd>
+              </>
+            )}
+            <dt>{UNIT_WORDS[unitOf(work)].one} novo</dt>
             <dd>
               <select
                 className="pill-select"
@@ -1120,16 +1210,48 @@ function WorkEditor({
   others,
   records,
   checks,
-  onDone
+  onDone,
+  onChanged,
+  onDeleted
 }: {
   work: Work
   others: Work[]
   records: ReadingRecord[]
   checks: UpdatesStatus['checks']
   onDone: () => void
+  /** Saved while the editor stays open (the names' order): the page shows it at once. */
+  onChanged: () => void
+  onDeleted: () => void
 }) {
+  const remove = async () => {
+    const name = displayName(work.names[0])
+    if (!confirm(`Excluir "${name}"? Os capítulos traduzidos dela no PC, onde você parou e a capa somem. Não dá para desfazer.`)) return
+    await window.api.works.delete(work.id)
+    onDeleted()
+  }
   const hasReading = records.length > 0
-  const [text, setText] = useState(work.names.join('\n'))
+  const [names, setNames] = useState<string[]>(work.names)
+  const [newName, setNewName] = useState('')
+  // Moving or taking out a name is saved at once, so the name shown changes on the page above.
+  const saveOrder = async (next: string[]) => {
+    setNames(next)
+    try {
+      await window.api.works.setNames(work.id, next.map((s) => s.trim()).filter(Boolean))
+      onChanged()
+    } catch (err) {
+      setError(String((err as Error).message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    }
+  }
+  const moveName = (from: number, to: number) => {
+    const next = [...names]
+    next.splice(to, 0, next.splice(from, 1)[0])
+    void saveOrder(next)
+  }
+  const addName = () => {
+    if (!newName.trim()) return
+    setNames([...names, newName.trim()])
+    setNewName('')
+  }
   const [sources, setSources] = useState<string[]>(work.sources ?? [])
   // The work's page on each site it was read on, from the chapters' links.
   const suggested = [...new Set(records.map((r) => sourceFromChapter(r.url)).filter((s): s is string => !!s))].filter((s) => !sources.includes(s))
@@ -1139,10 +1261,7 @@ function WorkEditor({
 
   async function save() {
     try {
-      await window.api.works.setNames(
-        work.id,
-        text.split('\n').map((s) => s.trim())
-      )
+      await window.api.works.setNames(work.id, [...names, newName].map((s) => s.trim()).filter(Boolean))
       onDone()
     } catch (err) {
       setError(String((err as Error).message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
@@ -1182,8 +1301,54 @@ function WorkEditor({
 
   return (
     <div className="work-editor">
-      <label className="field-label">Nomes da obra, um por linha (o primeiro é o principal)</label>
-      <textarea rows={Math.min(8, Math.max(3, work.names.length + 1))} value={text} onChange={(e) => setText(e.target.value)} />
+      <label className="field-label">Nomes da obra (o primeiro é o que aparece)</label>
+      <div className="name-list">
+        {names.map((name, i) => (
+          <div key={i} className="name-row">
+            <input value={name} onChange={(e) => setNames(names.map((n, j) => (j === i ? e.target.value : n)))} />
+            {/* Every row keeps the four places, empty where a button does not apply, so they line up. */}
+            {i === 0 ? (
+              <span className="name-main">Principal</span>
+            ) : (
+              <button className="secondary small" title="Mostrar a obra com este nome" onClick={() => moveName(i, 0)}>
+                ★ Principal
+              </button>
+            )}
+            {i > 0 ? (
+              <button className="secondary small" title="Subir" onClick={() => moveName(i, i - 1)}>
+                ↑
+              </button>
+            ) : (
+              <span />
+            )}
+            {i < names.length - 1 ? (
+              <button className="secondary small" title="Descer" onClick={() => moveName(i, i + 1)}>
+                ↓
+              </button>
+            ) : (
+              <span />
+            )}
+            {names.length > 1 ? (
+              <button className="secondary small" title="Tirar este nome" onClick={() => void saveOrder(names.filter((_, j) => j !== i))}>
+                ✕
+              </button>
+            ) : (
+              <span />
+            )}
+          </div>
+        ))}
+        <div className="name-row">
+          <input
+            value={newName}
+            placeholder="Outro nome (de outro site ou idioma)"
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addName()}
+          />
+          <button className="secondary small name-add" disabled={!newName.trim()} onClick={addName}>
+            Adicionar
+          </button>
+        </div>
+      </div>
       <p className="hint">
         Capítulos novos com qualquer um desses nomes, ou com o começo deles (nomes cortados), entram nesta obra, seja no app ou lidos no navegador.
         Adicione os nomes usados em outros sites e idiomas.
@@ -1192,6 +1357,22 @@ function WorkEditor({
       <div className="row">
         <button onClick={save}>Salvar nomes</button>
       </div>
+
+      <label className="field-label" style={{ marginTop: 14 }}>
+        Numeração
+      </label>
+      <select
+        className="pill-select"
+        value={unitOf(work)}
+        onChange={async (e) => {
+          await window.api.works.setUnit(work.id, e.target.value as 'chapter' | 'volume')
+          onDone()
+        }}
+      >
+        <option value="chapter">Capítulos</option>
+        <option value="volume">Volumes</option>
+      </select>
+      <p className="hint">Volumes para quem traduz uma light novel um volume inteiro por vez: a obra mostra "Vol. 8" em vez de "Capítulo 8".</p>
 
       <CatalogSearch work={work} others={others} onLinked={onDone} />
 
@@ -1275,6 +1456,12 @@ function WorkEditor({
           </div>
         </>
       )}
+
+      <div className="row" style={{ marginTop: 18 }}>
+        <button className="danger" onClick={() => void remove()}>
+          Excluir obra
+        </button>
+      </div>
     </div>
   )
 }
@@ -1347,7 +1534,7 @@ function CatalogSearch({ work, others, onLinked }: { work: Work; others: Work[];
       </div>
       {results?.map((r) => (
         <div key={r.site} className="catalog-site">
-          <div className="catalog-site-name">{CATALOG_SITES[r.site]}</div>
+          <div className="catalog-site-name">{RESULT_SITES[r.site]}</div>
           {r.error && <p className="error">{r.error}</p>}
           {!r.error && !r.matches.length && <p className="hint">Nada encontrado com esse nome.</p>}
           {r.matches.map((m) => {
@@ -1438,7 +1625,7 @@ export function QuickSearch({
             <span className="quick-icon">⌕</span>
             <span className="quick-text">
               <strong>Buscar “{search.trim()}” nos sites</strong>
-              <span>MangaDex e mgeko: traduzir ou baixar capítulos</span>
+              <span>MangaDex, mgeko, MangaKakalot e MangaLivre: traduzir ou baixar capítulos</span>
             </span>
           </button>
         )}

@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import type { CatalogSite } from '../shared/catalog'
 import { DOWNLOADED_MODEL, type LibraryEntry, type SaveLibraryInput } from '../shared/types'
 import { MAX_SOURCES } from '../shared/updates'
-import { findWork, formatOf, normalizeName, parseChapterName, sameName, withName, type Shelf, type Work, type WorkFormat, type WorkInfo } from '../shared/works'
-import { moveReading } from './reading'
+import { cleanWorkName, findWork, formatOf, sourceKey, isVolumeName, normalizeName, parseChapterName, sameName, withName, type Shelf, type Work, type WorkFormat, type WorkInfo, type WorkUnit } from '../shared/works'
+import { forgetReading, moveReading } from './reading'
 import { getSettings } from './settings'
 import { currentModelLabel } from './translate'
 
@@ -35,15 +35,16 @@ function saveWorks(works: Work[]): void {
 }
 
 /** The work a chapter named `name` belongs to, created when no known name matches; learns the name. */
-export function indexWork(name: string, format: WorkFormat = 'comic'): string {
+/** A new work starts numbered in volumes when its first file is a volume ("… Volume 08.pdf"); the editor changes it. */
+export function indexWork(name: string, format: WorkFormat = 'comic', unit: WorkUnit = 'chapter'): string {
   const works = listWorks()
-  const clean = name.trim() || 'Sem nome'
+  const clean = cleanWorkName(name) || 'Sem nome'
   const found = findWork(works, clean, format)
   if (found) {
     saveWorks(works.map((w) => (w.id === found.id ? withName(w, clean) : w)))
     return found.id
   }
-  const work: Work = { id: randomUUID(), names: [clean], createdAt: Date.now(), ...(format === 'novel' && { format }) }
+  const work: Work = { id: randomUUID(), names: [clean], createdAt: Date.now(), ...(format === 'novel' && { format }), ...(unit === 'volume' && { unit }) }
   saveWorks([...works, work])
   return work.id
 }
@@ -69,6 +70,14 @@ export function listLibrary(): LibraryEntry[] {
         const parsed = parseChapterName(meta.fileName, meta.source)
         meta = { ...meta, workId: indexWork(parsed.work), chapter: parsed.chapter }
         writeMeta(meta)
+      }
+      // Saved before volume numbers were read ("Name - Volume 07"): the number is filled in once.
+      if (meta.chapter == null) {
+        const parsed = parseChapterName(meta.fileName, meta.source)
+        if (parsed.chapter != null) {
+          meta = { ...meta, chapter: parsed.chapter }
+          writeMeta(meta)
+        }
       }
       const coverPath = join(dir, 'cover.jpg')
       const cover = existsSync(coverPath) ? `data:image/jpeg;base64,${readFileSync(coverPath).toString('base64')}` : ''
@@ -101,7 +110,7 @@ export function saveToLibrary(input: SaveLibraryInput): LibraryEntry {
     sourceLanguage: input.downloaded ? settings.targetLanguage : settings.sourceLanguage,
     targetLanguage: settings.targetLanguage,
     model: input.downloaded ? DOWNLOADED_MODEL : currentModelLabel(),
-    workId: indexWork(parsed.work),
+    workId: indexWork(parsed.work, input.novel ? 'novel' : 'comic', input.novel && isVolumeName(input.fileName) ? 'volume' : 'chapter'),
     chapter: parsed.chapter,
     ...(input.source ? { source: input.source } : {})
   }
@@ -119,14 +128,16 @@ export function saveToLibrary(input: SaveLibraryInput): LibraryEntry {
       } catch {
         continue
       }
-      if (old.workId === meta.workId && old.chapter === meta.chapter && hostOf(old.source) === site) deleteFromLibrary(other)
+      // Far fewer pages is a download that went wrong (a reader that opened at its end): both stay.
+      const shorter = old.pageCount > 0 && meta.pageCount < old.pageCount * 0.6
+      if (old.workId === meta.workId && old.chapter === meta.chapter && hostOf(old.source) === site && !shorter) deleteFromLibrary(other)
     }
   }
   return { ...meta, cover: `data:image/jpeg;base64,${Buffer.from(input.coverJpeg).toString('base64')}` }
 }
 
 /** Replaces a work's names (the first is shown); a name another work had moves to this one. */
-export function setWorkNames(workId: string, names: string[]): Work[] {
+export function setWorkNames(workId: string, names: string[], byHand = false): Work[] {
   const clean = [...new Map(names.map((n) => n.trim()).filter(Boolean).map((n) => [normalizeName(n), n])).values()]
   if (!clean.length) throw new Error('A obra precisa de pelo menos um nome.')
   const keys = new Set(clean.map(normalizeName))
@@ -135,7 +146,7 @@ export function setWorkNames(workId: string, names: string[]): Work[] {
   // The novel keeps the names it shares with its manga.
   const works = all.map((w) =>
     w.id === workId
-      ? { ...w, names: clean }
+      ? { ...w, names: clean, ...(byHand && { namedByHand: true }) }
       : formatOf(w) === format
         ? { ...w, names: w.names.filter((n) => !keys.has(normalizeName(n))) }
         : w
@@ -199,7 +210,7 @@ export function applyCatalog(
   if (found.cover) saveWorkCover(workId, found.cover)
   const works = all.map((w) => (w.id === workId ? updated : w))
   saveWorks(works)
-  return works
+  return mergeDuplicateWorks() ?? works
 }
 
 /** A work brought up to date from a site: as applyCatalog, plus the name it is shown by and what the site says of it. */
@@ -211,11 +222,11 @@ export function saveWorkInfo(
   const works = listWorks().map((w) => {
     if (w.id !== workId) return w
     // Shown first, written as the site writes it, when it is one of its names (no other work has it).
-    const at = found.title ? w.names.findIndex((n) => sameName(n, found.title!)) : -1
+    const at = found.title && !w.namedByHand ? w.names.findIndex((n) => sameName(n, found.title!)) : -1
     return { ...w, names: at >= 0 ? [found.title!, ...w.names.filter((_, i) => i !== at)] : w.names, info: found.info }
   })
   saveWorks(works)
-  return works
+  return mergeDuplicateWorks() ?? works
 }
 
 /**
@@ -223,6 +234,22 @@ export function saveWorkInfo(
  * new chapters: the page a range of its chapters was taken from. It goes first, so it stays when the
  * work already has as many as it can.
  */
+/** The work gets `source`, its page on a site, unless it already has one there (or as many as it can). */
+export function addWorkSourceTo(workId: string, source: string): void {
+  const host = (u: string) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, '')
+    } catch {
+      return ''
+    }
+  }
+  const works = listWorks()
+  const work = works.find((w) => w.id === workId)
+  if (!work || (work.sources ?? []).some((s) => host(s) === host(source)) || (work.sources ?? []).length >= MAX_SOURCES) return
+  saveWorks(works.map((w) => (w.id === workId ? { ...w, sources: [...(w.sources ?? []), source] } : w)))
+  mergeDuplicateWorks()
+}
+
 export function addWorkSource(name: string, source: string): void {
   const workId = indexWork(name)
   saveWorks(
@@ -230,6 +257,7 @@ export function addWorkSource(name: string, source: string): void {
       w.id === workId && !w.sources?.includes(source) ? { ...w, sources: [source, ...(w.sources ?? [])].slice(0, MAX_SOURCES) } : w
     )
   )
+  mergeDuplicateWorks()
 }
 
 /** Puts the work on a reading list (null: none) or among the favorites. */
@@ -246,6 +274,17 @@ export function setWorkShelf(workId: string, patch: { shelf?: Shelf | null; favo
 }
 
 /** What happens to the work's new chapters besides the notice (null: only the notice). */
+/** Whether the work's numbers are chapters or volumes (a light novel translated a volume at a time). */
+export function setWorkUnit(workId: string, unit: WorkUnit): Work[] {
+  const works = listWorks().map((w) => {
+    if (w.id !== workId) return w
+    const { unit: _unit, ...rest } = w
+    return { ...rest, ...(unit === 'volume' && { unit }) }
+  })
+  saveWorks(works)
+  return works
+}
+
 export function setWorkAuto(workId: string, auto: 'translate' | 'download' | null): Work[] {
   const works = listWorks().map((w) => {
     if (w.id !== workId) return w
@@ -265,6 +304,38 @@ export function startedReading(workId: string): void {
 /** The work's pages on sites, checked for new chapters (shared/updates.ts). */
 export function saveWorkSources(workId: string, sources: string[]): void {
   saveWorks(listWorks().map((w) => (w.id === workId ? { ...w, sources } : w)))
+  mergeDuplicateWorks()
+}
+
+/**
+ * Works saved twice (the same kind, a page on a site in common: the same MangaDex title, the same
+ * address) become one: the one on a list or a favorite takes the other's chapters, names, pages and
+ * readings, else the oldest. Null when there were none.
+ */
+export function mergeDuplicateWorks(): Work[] | null {
+  let merged: Work[] | null = null
+  // Each merge changes the list: look again until no two share a page.
+  for (let round = 0; round < 50; round++) {
+    const works = listWorks()
+    const listed = (w: Work): number => (w.shelf || w.favorite ? 1 : 0)
+    const ranked = [...works].sort((a, b) => listed(b) - listed(a) || (a.createdAt ?? 0) - (b.createdAt ?? 0))
+    const owner = new Map<string, Work>()
+    let pair: [Work, Work] | null = null
+    for (const w of ranked) {
+      for (const key of (w.sources ?? []).map((s) => `${formatOf(w)}|${sourceKey(s)}`)) {
+        const into = owner.get(key)
+        if (into && into.id !== w.id) {
+          pair = [into, w]
+          break
+        }
+        owner.set(key, w)
+      }
+      if (pair) break
+    }
+    if (!pair) return merged
+    merged = mergeWorks(pair[0].id, pair[1].id)
+  }
+  return merged
 }
 
 /** Moves every chapter of `fromId` into `intoId`, which also takes all its names (and sites). */
@@ -278,10 +349,18 @@ export function mergeWorks(intoId: string, fromId: string): Work[] {
     .map((w) => {
       if (w.id !== intoId || !from) return w
       const sources = [...new Set([...(w.sources ?? []), ...(from.sources ?? [])])].slice(0, MAX_SOURCES)
-      return { ...from.names.reduce(withName, w), ...(sources.length && { sources }) }
+      return {
+        ...from.names.reduce(withName, w),
+        ...(sources.length && { sources }),
+        // What the other had and this one not: its list, being a favorite.
+        ...(!w.shelf && from.shelf && { shelf: from.shelf }),
+        ...(!w.favorite && from.favorite && { favorite: true })
+      }
     })
   saveWorks(merged)
   moveReading(fromId, intoId)
+  const cover = readWorkCover(fromId)
+  if (cover && !hasWorkCover(intoId)) saveWorkCover(intoId, cover)
   return merged
 }
 
@@ -328,6 +407,16 @@ export function readCover(id: string): Buffer | null {
 
 export function deleteFromLibrary(id: string): void {
   rmSync(entryDir(id), { recursive: true, force: true })
+}
+
+/** The work gone for good: its chapters, where it was left, its cover and the work itself. */
+export function deleteWork(workId: string): Work[] {
+  for (const entry of listLibrary()) if (entry.workId === workId) deleteFromLibrary(entry.id)
+  forgetReading(workId, null)
+  rmSync(join(root(), 'work-covers', `${workId}.jpg`), { force: true })
+  const works = listWorks().filter((w) => w.id !== workId)
+  saveWorks(works)
+  return works
 }
 
 function hostOf(url: string | undefined): string {

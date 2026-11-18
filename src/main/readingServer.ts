@@ -4,13 +4,13 @@ import { join } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { ReadingReport } from '../shared/reading'
 import { deviceFor, pair, phonesEnabled } from './devices'
-import { addWorkSource, deleteFromLibrary, hasWorkCover, listLibrary, listWorks, readCover, readLibraryPdf, readWorkCover, setWorkShelf } from './library'
+import { deleteWork, addWorkSource, deleteFromLibrary, hasWorkCover, listLibrary, listWorks, mergeWorks, readCover, readLibraryPdf, readWorkCover, setWorkAuto, setWorkNames, setWorkShelf, setWorkUnit } from './library'
 import { displayName, findWork, SHELVES, type Shelf } from '../shared/works'
-import { unreadUpdates, type ChapterLink } from '../shared/updates'
-import { CATALOG_SITES, type CatalogSite } from '../shared/catalog'
-import { chapterList, searchCatalogToChoose } from './catalog'
-import { checkNow, updatesStatus } from './updates'
-import { bookmarkPage, continueList, pageInfo } from './extensionApi'
+import { isRecent, unreadUpdates, workDates, type ChapterLink } from '../shared/updates'
+import { CATALOG_SITES, type CatalogMatch, type CatalogSite } from '../shared/catalog'
+import { chapterList, linkWork, refreshWork, searchCatalogToChoose } from './catalog'
+import { checkNow, setWorkSources, updatesStatus } from './updates'
+import { readUpToPage, bookmarkPage, continueList, pageInfo } from './extensionApi'
 import {
   addBatch,
   addLinkJob,
@@ -30,6 +30,7 @@ import { AUTO_LANGUAGE, isLocalProfile, LANGUAGES, profileReady, TRANSLATE_OPTIO
 import { finishedInApp, forgetReading, libraryChangedElsewhere, listReading, markRead, readInApp, reportReading } from './reading'
 import { mergeData, resolveWork } from './dataSync'
 import { clearArea, deleteWorkChapters, storageUsage } from './storage'
+import { cloudForPhone, joinCloud } from './cloud'
 
 /** The browser extension (extension/background.js) and the phone app reach the app here. */
 export const READING_PORT = 47321
@@ -46,9 +47,15 @@ export function startReadingServer(): void {
   server = createServer((req, res) => {
     route(req, res).catch((err: Error) => send(res, 500, { error: err.message }))
   })
-  // Another copy of the app already listening keeps the reports; this one just goes without.
-  server.on('error', (err) => console.warn('[reading] server not started:', err.message))
-  server.listen(READING_PORT, phonesEnabled() ? '0.0.0.0' : '127.0.0.1')
+  // The port can still be held for a moment by the copy of the app that just closed, or for good by
+  // another copy left open: it is tried again until it frees up, or else the phone (and the internet
+  // sync, which goes through this server) would find no PC until the app was opened again.
+  const listening = server
+  listening.on('error', (err: NodeJS.ErrnoException) => {
+    console.warn('[reading] server not started:', err.message)
+    if (err.code === 'EADDRINUSE') setTimeout(() => server === listening && listening.listen(READING_PORT, phonesEnabled() ? '0.0.0.0' : '127.0.0.1'), 3_000)
+  })
+  listening.listen(READING_PORT, phonesEnabled() ? '0.0.0.0' : '127.0.0.1')
 }
 
 export function stopReadingServer(): void {
@@ -75,21 +82,23 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // The extension.
   const local = /^(::1|127\.|::ffff:127\.)/.test(req.socket.remoteAddress ?? '')
   const origin = req.headers.origin ?? ''
-  if (!local || !/^(chrome|moz)-extension:\/\//.test(origin)) return send(res, 403, { error: 'Somente a extensão do Manga Index.' })
+  if (!local || !/^(chrome|moz)-extension:\/\//.test(origin)) return send(res, 403, { error: 'Somente a extensão do Toon Index.' })
   res.setHeader('Access-Control-Allow-Origin', origin)
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST')
   if (req.method === 'OPTIONS') return send(res, 204)
-  if (req.method === 'GET' && path === '/status') return send(res, 200, { app: 'Manga Index' })
-  if (req.method === 'GET' && path === '/updates') return send(res, 200, newChapters())
+  if (req.method === 'GET' && path === '/status') return send(res, 200, { app: 'Toon Index' })
+  if (req.method === 'GET' && path === '/updates') return send(res, 200, newChapters().filter((u) => u.recent))
   if (req.method === 'POST' && path === '/reading') return send(res, 200, report(await readBody(req)))
   // The popup: the page's work, putting it on a list, and the works to go back to.
   if (req.method === 'GET' && path === '/continue') return send(res, 200, continueList())
-  if (req.method === 'POST' && (path === '/page' || path === '/bookmark')) {
-    const body = (await readBody(req)) as { url?: unknown; title?: unknown; shelf?: unknown; favorite?: unknown }
+  if (req.method === 'POST' && (path === '/page' || path === '/bookmark' || path === '/read-up-to')) {
+    const body = (await readBody(req)) as { url?: unknown; title?: unknown; workUrl?: unknown; shelf?: unknown; favorite?: unknown }
     if (typeof body?.url !== 'string' || typeof body.title !== 'string') return send(res, 400, { error: 'url e title.' })
+    const workUrl = typeof body.workUrl === 'string' && /^https?:\/\//.test(body.workUrl) ? body.workUrl : undefined
     try {
-      return send(res, 200, path === '/page' ? pageInfo(body.url, body.title) : bookmarkPage(body.url, body.title, body))
+      if (path === '/read-up-to') return send(res, 200, readUpToPage(body.url, body.title, workUrl))
+      return send(res, 200, path === '/page' ? pageInfo(body.url, body.title, workUrl) : bookmarkPage(body.url, body.title, body, workUrl))
     } catch (err) {
       return send(res, 400, { error: (err as Error).message })
     }
@@ -110,13 +119,22 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   const device = token ? deviceFor(token) : null
   if (!device) return send(res, 401, { error: 'Este celular não está pareado (ou foi removido no app do PC).' })
 
-  if (req.method === 'GET' && path === '/api/status') return send(res, 200, { app: 'Manga Index', device })
+  if (req.method === 'GET' && path === '/api/status') return send(res, 200, { app: 'Toon Index', device })
+  // The sync over the internet: what a phone at home needs to reach it, and joining it.
+  if (req.method === 'GET' && path === '/api/cloud') return send(res, 200, cloudForPhone())
+  if (req.method === 'POST' && path === '/api/cloud/join') {
+    const { uid } = (await readBody(req)) as { uid?: unknown }
+    if (typeof uid !== 'string') return send(res, 400, { error: 'uid.' })
+    await joinCloud(uid)
+    return send(res, 200, { ok: true })
+  }
   if (req.method === 'GET' && path === '/api/library') {
     // Covers go one by one (/api/cover/…), so the list stays small.
     const chapters = listLibrary().map(({ cover, ...entry }) => ({ ...entry, hasCover: !!cover }))
     // The newest chapter out on each work's sites too, for how far along the reading is.
-    const out = updatesStatus().updates
-    const works = listWorks().map((w) => ({ ...w, hasCover: hasWorkCover(w.id), latest: out[w.id]?.latest ?? null }))
+    const { updates: out, checks } = updatesStatus()
+    // And when each chapter came out, where its sites say.
+    const works = listWorks().map((w) => ({ ...w, hasCover: hasWorkCover(w.id), latest: out[w.id]?.latest ?? null, dates: workDates(w.sources, checks) }))
     const { ntfyTopic, lastRun, running } = updatesStatus()
     return send(res, 200, { works, reading: listReading(), chapters, updates: newChapters(), ntfyTopic, lastCheck: lastRun, checking: running })
   }
@@ -208,9 +226,9 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
   // "Vários capítulos" from the phone: the work looked up on the sites, its chapters, and a range of them
   // queued (translated, or downloaded as they are).
   if (req.method === 'POST' && path === '/api/works/search') {
-    const { query } = (await readBody(req)) as { query?: unknown }
+    const { query, own } = (await readBody(req)) as { query?: unknown; own?: unknown }
     if (typeof query !== 'string' || !query.trim()) return send(res, 400, { error: 'Falta o nome da obra.' })
-    return send(res, 200, await searchCatalogToChoose(query))
+    return send(res, 200, await searchCatalogToChoose(query, own === true))
   }
   if (req.method === 'POST' && path === '/api/works/chapters') {
     const { site, url: page, withTitle } = (await readBody(req)) as { site?: unknown; url?: unknown; withTitle?: unknown }
@@ -312,6 +330,31 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     setWorkShelf(id, { shelf: shelf as Shelf | null, favorite: favorite === true })
     return send(res, 200, { ok: true })
   }
+  // The work's editor, as on the PC: its names, its sites, the catalog, joining it with another.
+  if (req.method === 'POST' && path === '/api/works/edit') {
+    const body = (await readBody(req)) as { workId?: unknown; names?: unknown; sources?: unknown; fromId?: unknown; auto?: unknown; refresh?: unknown; matches?: unknown; unit?: unknown }
+    const work = listWorks().find((w) => w.id === body.workId)
+    if (!work) return send(res, 404, { error: 'Essa obra não está mais na biblioteca do PC.' })
+    const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((s) => typeof s === 'string')
+    try {
+      if (strings(body.names)) setWorkNames(work.id, body.names, true)
+      else if (strings(body.sources)) setWorkSources(work.id, body.sources)
+      else if (typeof body.fromId === 'string' && listWorks().some((w) => w.id === body.fromId)) mergeWorks(work.id, body.fromId)
+      else if (body.auto === null || body.auto === 'translate' || body.auto === 'download') setWorkAuto(work.id, body.auto)
+      else if (body.unit === 'chapter' || body.unit === 'volume') setWorkUnit(work.id, body.unit)
+      else if (body.refresh === true) await refreshWork(work.id)
+      else if (Array.isArray(body.matches)) {
+        const matches = (body.matches as CatalogMatch[]).filter(
+          (m) => m && typeof m.url === 'string' && /^https?:\/\//.test(m.url) && typeof m.title === 'string' && m.site in CATALOG_SITES && strings(m.altNames)
+        )
+        await linkWork(work.id, matches)
+      } else return send(res, 400, { error: 'Nada para mudar.' })
+    } catch (err) {
+      return send(res, 400, { error: (err as Error).message })
+    }
+    libraryChangedElsewhere()
+    return send(res, 200, { ok: true })
+  }
   if (req.method === 'POST' && path === '/api/library/delete') {
     // One version of a chapter, deleted from the phone.
     const { id } = (await readBody(req)) as { id?: unknown }
@@ -326,6 +369,27 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
     const { area } = (await readBody(req)) as { area?: unknown }
     if (area !== 'layers' && area !== 'aiCache' && area !== 'appCache') return send(res, 400, { error: 'area.' })
     return send(res, 200, await clearArea(area))
+  }
+  // A work's page open in the phone's browser: where it stands, and its "Quero ler" button.
+  if (req.method === 'POST' && (path === '/api/works/page' || path === '/api/works/bookmark')) {
+    const body = (await readBody(req)) as { url?: unknown; title?: unknown; shelf?: unknown; favorite?: unknown }
+    if (typeof body?.url !== 'string' || typeof body.title !== 'string') return send(res, 400, { error: 'url e title.' })
+    try {
+      if (path === '/api/works/page') return send(res, 200, pageInfo(body.url, body.title))
+      const info = bookmarkPage(body.url, body.title, body)
+      libraryChangedElsewhere()
+      return send(res, 200, info)
+    } catch (err) {
+      return send(res, 400, { error: (err as Error).message })
+    }
+  }
+  // The work gone for good, from its editor on the phone.
+  if (req.method === 'POST' && path === '/api/works/delete') {
+    const { workId } = (await readBody(req)) as { workId?: unknown }
+    if (typeof workId !== 'string' || !listWorks().some((w) => w.id === workId)) return send(res, 400, { error: 'Obra não encontrada no PC.' })
+    deleteWork(workId)
+    libraryChangedElsewhere()
+    return send(res, 200, { ok: true })
   }
   if (req.method === 'POST' && path === '/api/storage/work') {
     const { workId } = (await readBody(req)) as { workId?: unknown }
@@ -344,10 +408,12 @@ async function phone(req: IncomingMessage, res: ServerResponse, path: string): P
 }
 
 /** Chapters out on the works' sites past the last one read, with the work's name. */
-function newChapters(): (ReturnType<typeof unreadUpdates>[number] & { work: string })[] {
+function newChapters(): (ReturnType<typeof unreadUpdates>[number] & { work: string; recent: boolean })[] {
   const works = listWorks()
+  // The older ones too, marked so (the phone lists them under the news, as history).
   return unreadUpdates(updatesStatus().updates, listReading()).map((u) => ({
     ...u,
+    recent: isRecent(u),
     work: displayName(works.find((w) => w.id === u.workId)?.names[0] ?? '')
   }))
 }

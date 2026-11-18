@@ -1,3 +1,4 @@
+import { parseReleaseDate } from './chapterDates'
 import { chapterInUrl } from './works'
 
 /**
@@ -16,6 +17,10 @@ export interface SourceCheck {
   latestUrl: string | null
   /** Why the check failed ("needs verification" when the site asked for a bot check). */
   error?: string
+  /** By chapter number, when each came out, where the site says (the first date seen stays). */
+  dates?: Record<string, number>
+  /** When the check first found `latest` (a newer chapter than the one before): for sites that give no dates. */
+  latestSince?: number
 }
 
 /** What the library shows of a work: its newest chapter on any of its sites. */
@@ -25,7 +30,14 @@ export interface WorkUpdate {
   url: string
   site: string
   checkedAt: number
+  /** When the newest chapter came out, where the site says. */
+  date?: number
+  /** When the app first saw it, for sites that give no date. */
+  since?: number
 }
+
+/** A chapter counts as new for this long after it came out (or was first seen, without a date). */
+export const NEW_FOR_MS = 7 * 24 * 60 * 60_000
 
 export interface UpdatesStatus {
   /** By work id, works whose sites list a chapter. */
@@ -40,6 +52,30 @@ export interface UpdatesStatus {
 export interface PageLink {
   href: string
   text: string
+  /** The text and date attributes of the link's row in the list, where sites write when it came out. */
+  when?: string
+}
+
+/**
+ * Runs in a page: its links (those `selector` picks), each with its row in the list (the closest
+ * parent holding no other links) for the date beside it, in text or in attributes (datetime, tooltips).
+ */
+export function linksScript(selector = 'a[href]'): string {
+  return `[...document.querySelectorAll(${JSON.stringify(selector)})].map((a) => {
+    let row = a
+    for (let i = 0; i < 4 && row.parentElement; i++) {
+      const up = row.parentElement
+      if (up.querySelectorAll('a[href]').length > 3 || (up.innerText || '').length > 400) break
+      row = up
+    }
+    const names = ['datetime', 'title', 'uk-tooltip', 'data-original-title', 'data-date', 'data-time']
+    const attrs = [row, ...row.querySelectorAll('*')].flatMap((el) => names.map((n) => el.getAttribute(n)).filter(Boolean))
+    return {
+      href: a.href,
+      text: (a.innerText || a.textContent || '').trim().slice(0, 120),
+      when: ((row.innerText || row.textContent || '') + ' | ' + attrs.join(' | ')).replace(/\\s+/g, ' ').slice(0, 400)
+    }
+  })`
 }
 
 const CHAPTER_TEXT = /(?:\b(?:chapter|chap|ch|cap(?:[ií]tulo)?|ep(?:is[oó]dio|isode)?)\.?\s*[-#:]?\s*|#)(\d+(?:[.,]\d+)?)/i
@@ -47,6 +83,24 @@ const CHAPTER_TEXT = /(?:\b(?:chapter|chap|ch|cap(?:[ií]tulo)?|ep(?:is[oó]dio|
 export interface ChapterLink {
   chapter: number
   url: string
+  /** When it came out, where the site says. */
+  date?: number
+}
+
+/** By chapter number, the dates among chapter links. */
+export function datesOf(chapters: ChapterLink[]): Record<string, number> {
+  return Object.fromEntries(chapters.filter((c) => c.date).map((c) => [String(c.chapter), c.date!]))
+}
+
+/** A work's chapter dates from all its sites: the earliest each was seen out on. */
+export function workDates(sources: string[] | undefined, checks: Record<string, SourceCheck>): Record<string, number> {
+  const dates: Record<string, number> = {}
+  for (const source of sources ?? []) {
+    for (const [chapter, date] of Object.entries(checks[source]?.dates ?? {})) {
+      if (!dates[chapter] || date < dates[chapter]) dates[chapter] = date
+    }
+  }
+  return dates
 }
 
 /** The highest chapter among a work page's links (see chapterLinks). */
@@ -80,6 +134,8 @@ function chapterLinksOf(source: string, links: PageLink[], onlyThisWork: boolean
   }
   const slug = workSlug(page.pathname)
   const found = new Map<number, string>()
+  const dates = new Map<number, number>()
+  const now = Date.now()
   for (const link of links) {
     let url: URL
     try {
@@ -94,11 +150,17 @@ function chapterLinksOf(source: string, links: PageLink[], onlyThisWork: boolean
     const fromText = CHAPTER_TEXT.exec(link.text)
     const chapter = fromText ? parseFloat(fromText[1].replace(',', '.')) : chapterInUrl(url.href)
     // Years and ids that look like chapter numbers.
-    if (chapter === null || chapter > 5000 || found.has(chapter)) continue
+    if (chapter === null || chapter > 5000) continue
+    // The date may sit by another of the chapter's links (its number, its title).
+    const date = link.when ? parseReleaseDate(link.when, now) : null
+    if (date && !dates.has(chapter)) dates.set(chapter, date)
+    if (found.has(chapter)) continue
     // Sites list a chapter once per group that translated it; the first is the newest upload.
     found.set(chapter, url.href.replace(/#.*$/, ''))
   }
-  return [...found].map(([chapter, url]) => ({ chapter, url })).sort((a, b) => a.chapter - b.chapter)
+  return [...found]
+    .map(([chapter, url]) => ({ chapter, url, ...(dates.has(chapter) && { date: dates.get(chapter) }) }))
+    .sort((a, b) => a.chapter - b.chapter)
 }
 
 /**
@@ -158,6 +220,20 @@ export function unreadUpdates(updates: Record<string, WorkUpdate>, read: { workI
     const chapters = read.filter((r) => r.workId === u.workId && r.status === 'read').map((r) => r.chapter)
     return !chapters.length || u.latest > Math.max(...chapters)
   })
+}
+
+/**
+ * Out in the last week (by the site's date, else when the app first saw it): news, counted and
+ * announced. Older chapters not read yet stay in the history under it.
+ */
+export function isRecent(update: WorkUpdate, now = Date.now()): boolean {
+  const out = update.date ?? update.since
+  return !!out && now - out <= NEW_FOR_MS
+}
+
+/** When the chapter came out, as far as is known, for putting the history in order. */
+export function outAt(update: WorkUpdate): number {
+  return update.date ?? update.since ?? update.checkedAt
 }
 
 /** A chapter's link → the work's page on that site: "/manga/name/chapter-53/" → "/manga/name/". */

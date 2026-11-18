@@ -11,6 +11,7 @@ import type {
   SaveSettingsInput,
   TextBlock,
   TranslateOptions,
+  TextRequest,
   TranslateRequest,
   VisionDetection,
   WebChapter,
@@ -23,6 +24,7 @@ import type { DevicesStatus, PairingCode } from '../shared/devices'
 import type { HistoryWork, ReadingRecord } from '../shared/reading'
 import type { RemoteJob, RemoteQueue } from '../shared/remoteJobs'
 import type { StorageArea, StorageUsage } from '../shared/storage'
+import type { CloudStatus } from '../shared/cloud'
 import type { ChapterLink, UpdatesStatus } from '../shared/updates'
 import type { CatalogMatch, CatalogResult, CatalogSite } from '../shared/catalog'
 import type { Shelf, Work } from '../shared/works'
@@ -51,6 +53,8 @@ export interface MangaApi {
   data: {
     export(): Promise<{ path: string; works: number; chapters: number } | null>
     import(): Promise<{ works: number; chapters: number } | null>
+    /** Opens the file with the sites' accounts (site-logins.env), made empty when there is none. */
+    logins(): Promise<string>
   }
   getSettings(): Promise<PublicSettings>
   saveSettings(input: SaveSettingsInput): Promise<PublicSettings>
@@ -62,6 +66,8 @@ export interface MangaApi {
   testApi(profile: ApiProfile, apiKey?: string): Promise<{ ms: number }>
   /** Returns one list of blocks per image in the request. */
   translate(req: TranslateRequest): Promise<TextBlock[][]>
+  /** A novel's paragraphs (read from the PDF's text), translated one for one. */
+  translateText(req: TextRequest): Promise<string[]>
   /** Pretrained manga models (text + speech bubbles, LaMa inpainting) run by the Python vision server. */
   vision: {
     detect(image: Uint8Array): Promise<VisionDetection>
@@ -118,20 +124,36 @@ export interface MangaApi {
     setShelf(workId: string, patch: { shelf?: Shelf | null; favorite?: boolean }): Promise<Work[]>
     /** What happens to the work's new chapters besides the notice: translated, downloaded, or nothing (null). */
     setAuto(workId: string, auto: 'translate' | 'download' | null): Promise<Work[]>
+    /** Whether the work's numbers are chapters or volumes. */
+    setUnit(workId: string, unit: 'chapter' | 'volume'): Promise<Work[]>
+    /** The work gone for good, with its chapters and where it was left. */
+    delete(workId: string): Promise<Work[]>
     move(entryId: string, target: { workId: string } | { newName: string }): Promise<Work[]>
     /** By work id, the covers found on the catalog sites (data URLs). */
     covers(): Promise<Record<string, string>>
     /** Every chapter of a work on MangaDex or mgeko, or on any site from its page's link ('link'), in order. */
     /** The chapters, and the work's name as its page gives it. */
-    chapters(match: { site: CatalogSite | 'link'; url: string }): Promise<{ title: string | null; chapters: ChapterLink[] }>
+    chapters(match: { site: CatalogSite | 'link'; url: string }): Promise<{ title: string | null; chapters: ChapterLink[]; language?: string | null }>
     /** Looks a name up on MangaDex, mgeko and comix. */
-    search(query: string): Promise<CatalogResult[]>
+    /** With `own`, the person's own sites in Portuguese too. */
+    search(query: string, own?: boolean): Promise<CatalogResult[]>
     /** Takes the chosen matches' names, pages and cover into the work. */
     link(workId: string, matches: CatalogMatch[]): Promise<Work[]>
     /** Brings the work's cover, name, synopsis, tags and status up to date from MangaDex or its page on a site. */
     refresh(workId: string): Promise<Work[]>
   }
   /** Phones paired with the app (the Android app reaches it on the home network or Tailscale). */
+  /** Sync over the internet through the person's Firebase project. */
+  cloud: {
+    status(): Promise<CloudStatus>
+    /** The console's firebaseConfig block, pasted as it is, and the Android app's id. */
+    set(pasted: string, androidAppId: string): Promise<CloudStatus>
+    forget(): Promise<CloudStatus>
+    /** The service account key's JSON, pasted as it is, for the notifications; null forgets it. */
+    setPushKey(pasted: string | null): Promise<CloudStatus>
+    /** A test notification on the phones; false when none got it. */
+    testPush(): Promise<boolean>
+  }
   devices: {
     status(): Promise<DevicesStatus>
     /** Turns answering phones on the network on or off. */
@@ -164,7 +186,7 @@ export interface MangaApi {
     pause(paused: boolean): Promise<RemoteQueue>
     /** Queues a range of a work's chapters, to translate (or only download) in order. */
     /** `source`: the work's page the chapters came from, added to the work's sites. */
-    batch(work: string, site: string, chapters: ChapterLink[], download: boolean, source?: string): Promise<RemoteQueue>
+    batch(work: string, site: string, chapters: ChapterLink[], download: boolean, source?: string, options?: Partial<TranslateOptions>): Promise<RemoteQueue>
     /** Takes the queued chapters of those ranges off the queue. */
     clearBatch(): Promise<RemoteQueue>
     /** The ranges' chapters that failed (all, or these) go back to the queue, ahead of later chapters. */
@@ -177,6 +199,8 @@ export interface MangaApi {
     setOptions(options: Partial<TranslateOptions> | null): Promise<RemoteQueue>
     /** Takes one queued request off the queue. */
     cancel(id: string): Promise<RemoteQueue>
+    /** PDFs chosen on this PC, queued in this order, translated with these options over the PC's. */
+    addPdfs(files: { name: string; bytes: Uint8Array }[], options?: Partial<TranslateOptions>): Promise<RemoteQueue>
     /** Returns a function that stops listening. */
     onChanged(callback: () => void): () => void
   }
@@ -205,6 +229,8 @@ export interface MangaApi {
     read(path: string): Promise<Uint8Array>
     write(name: string, data: Uint8Array | string): Promise<void>
     log(message: string): Promise<void>
+    /** A library chapter read again into the training dataset (MI_REPLAY_LIBRARY). */
+    replayed(id: string): Promise<void>
     done(): Promise<void>
   }
 }

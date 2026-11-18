@@ -2,16 +2,21 @@ import { useRef, useState } from 'react'
 
 interface Props {
   onFile: (file: File) => void
+  /** Several PDFs at once: they go to the queue, translated one after another. */
+  onFiles: (files: File[]) => void
   disabled?: boolean
 }
 
-export function DropZone({ onFile, disabled }: Props) {
+export function DropZone({ onFile, onFiles, disabled }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const [hover, setHover] = useState(false)
 
   function pick(files: FileList | null) {
-    const file = files?.[0]
-    if (file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) onFile(file)
+    const pdfs = [...(files ?? [])].filter((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'))
+    if (pdfs.length === 1) onFile(pdfs[0])
+    // In the order of their names, chapter 2 before chapter 10.
+    else if (pdfs.length > 1) onFiles(pdfs.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true })))
+    if (input.current) input.current.value = ''
   }
 
   return (
@@ -31,8 +36,8 @@ export function DropZone({ onFile, disabled }: Props) {
     >
       <div className="dropzone-icon">📄</div>
       <p className="dropzone-title">Arraste o PDF do capítulo aqui</p>
-      <p className="dropzone-sub">ou clique para escolher o arquivo</p>
-      <input ref={input} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => pick(e.target.files)} />
+      <p className="dropzone-sub">ou clique para escolher. Vários PDFs de uma vez vão para a fila, um depois do outro.</p>
+      <input ref={input} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(e) => pick(e.target.files)} />
     </div>
   )
 }

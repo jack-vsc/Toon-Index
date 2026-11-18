@@ -5,16 +5,26 @@ import { normalizeName, sameName } from './works'
  * its other names, its cover, the page checked for new chapters, and chapters to translate in a row.
  * (comix asks that no third-party apps use it, and turns them away, so it is not one of them.)
  */
-export type CatalogSite = 'mangadex' | 'mgeko'
+export type CatalogSite = 'mangadex' | 'mgeko' | 'mangakakalot' | 'mangalivre'
 
 export const CATALOG_SITES: Record<CatalogSite, string> = {
   mangadex: 'MangaDex',
-  mgeko: 'mgeko'
+  mgeko: 'mgeko',
+  mangakakalot: 'MangaKakalot',
+  mangalivre: 'MangaLivre (português)'
 }
 
-/** A work found on one of the sites. */
+/**
+ * Where a search's results come from: a catalog site, or the person's own sites in Portuguese (those
+ * the library's works are followed on), searched by the work's names in Portuguese too.
+ */
+export type ResultSite = CatalogSite | 'sites'
+
+export const RESULT_SITES: Record<ResultSite, string> = { ...CATALOG_SITES, sites: 'Nos seus sites em português' }
+
+/** A work found on one of the sites (`link`: its page on one of the person's own sites). */
 export interface CatalogMatch {
-  site: CatalogSite
+  site: CatalogSite | 'link'
   title: string
   /** The work's page there, the one that lists its chapters. */
   url: string
@@ -23,13 +33,15 @@ export interface CatalogMatch {
   altNames: string[]
   /** The newest chapter listed, when the site says. */
   latest: number | null
+  /** Its names in Portuguese, when the site says (MangaDex): what the Portuguese sites call it. */
+  ptNames?: string[]
   /** The cover as a data URL, for showing the results (the app's pages show no images from sites). */
   thumb?: string
 }
 
 /** What a site answered: its matches, or why it could not be searched. */
 export interface CatalogResult {
-  site: CatalogSite
+  site: ResultSite
   matches: CatalogMatch[]
   error?: string
 }

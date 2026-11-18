@@ -1,4 +1,5 @@
 import { BrowserWindow, session, type WebContents } from 'electron'
+import { signInIfAsked } from './siteLogins'
 import type { WebChapter, WebChapterProgress } from '../shared/types'
 
 /**
@@ -15,6 +16,8 @@ const LOAD_TIMEOUT_MS = 60_000
 const CHALLENGE_WAIT_MS = 8_000
 const CHALLENGE_TIMEOUT_MS = 120_000
 const PARALLEL_DOWNLOADS = 4
+/** How long a page one screen tall is given to build its pages before it is taken as it is. */
+const PAGES_BUILT_MS = 12_000
 
 let running: { cancelled: boolean; win: BrowserWindow | null } | null = null
 
@@ -39,8 +42,10 @@ export async function fetchWebChapter(url: string, sender: WebContents): Promise
     try {
       return await mangadexChapter(mangadex, ses, job, progress)
     } finally {
-      ses.webRequest.onBeforeSendHeaders(null)
-      if (running === job) running = null
+      if (running === job) {
+        ses.webRequest.onBeforeSendHeaders(null)
+        running = null
+      }
     }
   }
   const win = new BrowserWindow({
@@ -58,10 +63,25 @@ export async function fetchWebChapter(url: string, sender: WebContents): Promise
     progress({ stage: 'loading' })
     await open(win, url)
     await passChallenge(win, job, progress)
+    // Sent to the login page: in with the account in site-logins.env, when there is one.
+    if (await signInIfAsked(win, url, (u) => open(win, u))) await sleep(2_000)
     check(job)
     progress({ stage: 'scrolling' })
-    await scrollToBottom(win, job)
-    const found = (await win.webContents.executeJavaScript(COLLECT)) as { title: string; urls: string[] }
+    // Read at every step: some readers keep only the pages near the screen in the page (MangaFire
+    // shows 6 of 165), so the ones scrolled past are gone by the end.
+    const found = { title: '', urls: [] as string[] }
+    const collect = async (): Promise<void> => {
+      const seen = (await win.webContents.executeJavaScript(COLLECT)) as { title: string; urls: string[] }
+      found.title = seen.title
+      found.urls = mergeInOrder(found.urls, seen.urls)
+    }
+    await untilPagesBuilt(win, job)
+    await fromTheTop(win, job)
+    await scrollToBottom(win, job, collect)
+    const last = (await win.webContents.executeJavaScript(COLLECT)) as { title: string; urls: string[] }
+    // A page that keeps them all is read as it is at the end: an image swapped for a sharper one while
+    // scrolling would otherwise come twice.
+    if (last.urls.length >= found.urls.length / 2) Object.assign(found, last)
     if (!found.urls.length) {
       throw new Error('Não encontrei as páginas do capítulo nesse link. Confira se é a página de leitura do capítulo.')
     }
@@ -73,16 +93,19 @@ export async function fetchWebChapter(url: string, sender: WebContents): Promise
       while (next < found.urls.length) {
         check(job)
         const i = next++
-        images[i] = await download(win, ses, found.urls[i])
+        images[i] = await download(win, ses, found.urls[i], url)
         progress({ stage: 'downloading', done: ++done, total: found.urls.length })
       }
     }
     await Promise.all(Array.from({ length: PARALLEL_DOWNLOADS }, worker))
     return { title: cleanTitle(found.title) || new URL(url).hostname, images }
   } finally {
-    ses.webRequest.onBeforeSendHeaders(null)
     if (!win.isDestroyed()) win.destroy()
-    if (running === job) running = null
+    // A newer chapter's job has its own: only this one's is taken away.
+    if (running === job) {
+      ses.webRequest.onBeforeSendHeaders(null)
+      running = null
+    }
   }
 }
 
@@ -95,7 +118,8 @@ async function mangadexChapter(
 ): Promise<WebChapter> {
   progress({ stage: 'loading' })
   const json = async (url: string): Promise<unknown> => {
-    const res = await ses.fetch(url)
+    // The API turns away browsers: the app names itself (the images below are fetched as the browser).
+    const res = await ses.fetch(url, { headers: { 'User-Agent': 'ToonIndex/1.0' } })
     if (!res.ok) throw new Error(`O MangaDex respondeu ${res.status}.`)
     return res.json()
   }
@@ -225,8 +249,56 @@ export async function isChallenged(win: BrowserWindow): Promise<boolean> {
   )
 }
 
+/**
+ * The pages seen so far with the ones on screen now, in reading order: a page not seen yet goes right
+ * after the one before it on screen (or before the first one known, at the top).
+ */
+export function mergeInOrder(known: string[], seen: string[]): string[] {
+  const all = [...known]
+  const firstKnown = seen.find((u) => all.includes(u))
+  let at = firstKnown ? all.indexOf(firstKnown) : all.length
+  for (const url of seen) {
+    const i = all.indexOf(url)
+    if (i >= 0) at = i + 1
+    else all.splice(at++, 0, url)
+  }
+  return all
+}
+
+/**
+ * Readers that build their pages with a script after the page loaded (MangaFire's: 183 pages a few
+ * seconds in) are still one screen tall at first, which reads as "already at the bottom": waited for.
+ */
+async function untilPagesBuilt(win: BrowserWindow, job: { cancelled: boolean }): Promise<void> {
+  for (let waited = 0; waited < PAGES_BUILT_MS; waited += 500) {
+    check(job)
+    const tall = (await win.webContents.executeJavaScript(
+      'document.documentElement.scrollHeight > window.innerHeight * 1.5'
+    )) as boolean
+    if (tall) return
+    await win.webContents.capturePage().catch(() => undefined)
+    await sleep(500)
+  }
+}
+
+/**
+ * A reader that goes back to where the chapter was left (MangaFire, by the account's progress) opens a
+ * chapter read before at its end, with only the last pages in it: back to the top, until it stays.
+ */
+async function fromTheTop(win: BrowserWindow, job: { cancelled: boolean }): Promise<void> {
+  for (let tries = 0; tries < 5; tries++) {
+    check(job)
+    const top = (await win.webContents.executeJavaScript(
+      'window.scrollY < window.innerHeight || (window.scrollTo(0, 0), false)'
+    )) as boolean
+    if (top) return
+    await sleep(800)
+    await win.webContents.capturePage().catch(() => undefined)
+  }
+}
+
 /** Scrolls down a screen at a time until the page stops growing, so lazy images get their address. */
-async function scrollToBottom(win: BrowserWindow, job: { cancelled: boolean }): Promise<void> {
+async function scrollToBottom(win: BrowserWindow, job: { cancelled: boolean }, onStep: () => Promise<void>): Promise<void> {
   let lastHeight = 0
   let still = 0
   for (let step = 0; step < 600 && still < 6; step++) {
@@ -237,6 +309,10 @@ async function scrollToBottom(win: BrowserWindow, job: { cancelled: boolean }): 
     still = bottom && height === lastHeight ? still + 1 : 0
     lastHeight = height
     await sleep(bottom ? 400 : 120)
+    // A window never shown draws no frames, and readers that load pages as they come into view (by
+    // IntersectionObserver) wait for one: a capture draws it.
+    await win.webContents.capturePage().catch(() => undefined)
+    await onStep()
   }
 }
 
@@ -262,17 +338,28 @@ const COLLECT = `(() => {
   return { title: document.title, urls }
 })()`
 
-async function download(win: BrowserWindow, ses: Electron.Session, url: string): Promise<Uint8Array> {
-  // Addresses that only exist inside the page are read by the page itself.
-  if (url.startsWith('blob:') || url.startsWith('data:')) {
-    const base64 = (await win.webContents.executeJavaScript(
-      `fetch(${JSON.stringify(url)}).then((r) => r.blob()).then((b) => new Promise((ok) => { const f = new FileReader(); f.onload = () => ok(String(f.result).split(',')[1]); f.readAsDataURL(b) }))`
-    )) as string
-    return new Uint8Array(Buffer.from(base64, 'base64'))
+/** As the reader's own <img> asks: image servers behind Cloudflare (MangaKakalot's) turn away the rest. */
+function imageHeaders(image: string, page: string): Record<string, string> {
+  const from = new URL(page)
+  const to = new URL(image)
+  const site = (host: string): string => host.split('.').slice(-2).join('.')
+  return {
+    Referer: from.origin + '/',
+    Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    'Sec-Fetch-Dest': 'image',
+    'Sec-Fetch-Mode': 'no-cors',
+    'Sec-Fetch-Site': to.origin === from.origin ? 'same-origin' : site(to.hostname) === site(from.hostname) ? 'same-site' : 'cross-site'
   }
+}
+
+async function download(win: BrowserWindow, ses: Electron.Session, url: string, page: string): Promise<Uint8Array> {
+  // Addresses that only exist inside the page are read by the page itself.
+  if (url.startsWith('blob:') || url.startsWith('data:')) return fromPage(win, url)
   for (let attempt = 1; ; attempt++) {
     try {
-      const res = await ses.fetch(url)
+      const res = await ses.fetch(url, { headers: imageHeaders(url, page) })
+      // Turned away (a site behind Cloudflare, whose cookie only a page sends): asked by the page.
+      if (res.status === 403 || res.status === 401) return await fromPage(win, url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return new Uint8Array(await res.arrayBuffer())
     } catch (err) {
@@ -280,6 +367,14 @@ async function download(win: BrowserWindow, ses: Electron.Session, url: string):
       await sleep(800 * attempt)
     }
   }
+}
+
+/** An image as the page itself fetches it, with its cookies. */
+async function fromPage(win: BrowserWindow, url: string): Promise<Uint8Array> {
+  const base64 = (await win.webContents.executeJavaScript(
+    `fetch(${JSON.stringify(url)}, { credentials: 'include' }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob() }).then((b) => new Promise((ok) => { const f = new FileReader(); f.onload = () => ok(String(f.result).split(',')[1]); f.readAsDataURL(b) }))`
+  )) as string
+  return new Uint8Array(Buffer.from(base64, 'base64'))
 }
 
 /** "Name Chapter 53 - Site Name" → "Name Chapter 53". */

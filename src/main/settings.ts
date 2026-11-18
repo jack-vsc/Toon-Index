@@ -59,6 +59,7 @@ function mergeSettings(raw: (Partial<AppSettings> & LegacySettings) | undefined,
     targetLanguage: raw?.targetLanguage ?? d.targetLanguage,
     translateSfx: raw?.translateSfx ?? d.translateSfx,
     reuseLayers: raw?.reuseLayers ?? d.reuseLayers,
+    contentType: raw?.contentType === 'comic' || raw?.contentType === 'novel' ? raw.contentType : d.contentType,
     concurrency: raw?.concurrency ?? d.concurrency,
     speed: raw?.speed ?? d.speed,
     skipStart: raw?.skipStart ?? d.skipStart,
@@ -123,7 +124,8 @@ function normalizeProfile(p: Partial<ApiProfile> | undefined): ApiProfile | unde
     kind,
     baseUrl: kind === 'openai' && typeof p.baseUrl === 'string' ? p.baseUrl.trim() : '',
     models: kind === 'openai' ? models : [],
-    model
+    model,
+    ...(p.thinking === 'low' || p.thinking === 'medium' || p.thinking === 'high' ? { thinking: p.thinking } : {})
   }
 }
 

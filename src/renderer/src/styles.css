@@ -1863,6 +1863,8 @@ details pre {
 
 .chapter-actions {
   display: flex;
+  justify-content: flex-end;
+  align-items: center;
   gap: 6px;
 }
 
@@ -2598,6 +2600,23 @@ details pre {
   margin-left: 8px;
 }
 
+/* A work's row: a long name gives way ("…"), its tags stay whole. */
+.queue-group-name {
+  display: flex;
+  align-items: center;
+}
+
+.queue-group-name .queue-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-group-name .queue-chevron,
+.queue-group-name .badge {
+  flex-shrink: 0;
+}
+
 .queue-state {
   color: var(--muted);
   font-size: 12px;
@@ -3074,4 +3093,155 @@ textarea:focus {
 .storage-size {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+
+.cloud-steps {
+  padding-left: 18px;
+}
+
+.cloud-rules {
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11px;
+  background: var(--panel-2);
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.ok-text {
+  color: var(--ok);
+}
+
+/* The PDFs chosen together, before they go to the queue. */
+.multi-pdf-list {
+  max-height: 160px;
+  overflow-y: auto;
+  margin: 8px 0 14px;
+  padding-left: 22px;
+  font-size: 13px;
+}
+.multi-pdf-list li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Scroll bars in the app's colors: thin, on a clear track, and out of sight until the pointer is over
+ * what scrolls (rows of covers, lists, the page).
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Deleting for good: outlined in red, filled only under the mouse. */
+button.danger:not(.link) {
+  background: transparent;
+  color: var(--err);
+  border: 1px solid var(--err);
+}
+
+button.danger:not(.link):hover {
+  background: var(--err);
+  color: #fff;
+}
+
+/* The work's names in its editor: the first is the one shown, the others move up to it. */
+.name-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The name, then four fixed places (main, up, down, out), so every row's buttons line up. */
+.name-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px 36px 36px 36px;
+  align-items: center;
+  gap: 6px;
+}
+
+.name-row input {
+  min-width: 0;
+}
+
+.name-row > button {
+  width: 100%;
+  justify-content: center;
+}
+
+/* The new name's row: its button takes the four places. */
+.name-row .name-add {
+  grid-column: 2 / -1;
+}
+
+.name-main {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-2);
+  text-align: center;
+}
+
+/* Novidades' history: one line per chapter, name cut short, the rest in fixed columns. */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 76px 150px 190px auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.history-row + .history-row {
+  border-top: 1px solid var(--border);
+}
+
+.history-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.history-name {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.history-chapter {
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+.history-when {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.history-site {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-more {
+  margin-top: 10px;
 }

@@ -49,7 +49,7 @@ export function StorageDialog({ onClose }: { onClose: () => void }) {
           <>
             <div className="storage-total">
               <strong>{formatBytes(usage.total)}</strong>
-              <span>usados pelo Manga Index{usage.free !== null && ` · ${formatBytes(usage.free)} livres no disco`}</span>
+              <span>usados pelo Toon Index{usage.free !== null && ` · ${formatBytes(usage.free)} livres no disco`}</span>
             </div>
             <StorageBar
               parts={[

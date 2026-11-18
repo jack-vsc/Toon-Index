@@ -9,6 +9,8 @@ export interface Work {
   id: string
   /** Every name the work is known by; the first one is shown. */
   names: string[]
+  /** The name shown was chosen in the editor: looking the work up again leaves it first. */
+  namedByHand?: boolean
   createdAt: number
   /** A novel shares its name with the manga made from it, but is read apart from it. Absent for comics. */
   format?: 'novel'
@@ -22,6 +24,8 @@ export interface Work {
   favorite?: boolean
   /** What happens to a new chapter found on its sites, besides the notice: translated, or downloaded as it is. */
   auto?: 'translate' | 'download'
+  /** What its numbers count: chapters (absent), or volumes (a light novel translated a volume at a time). */
+  unit?: 'volume'
   /** What a site says of the work ("Atualizar dados"): MangaDex first, else its page on a site. */
   info?: WorkInfo
 }
@@ -82,6 +86,8 @@ export interface ChapterName {
 const MIN_PREFIX = 12
 
 const CHAPTER = /(?:\b(?:chapter|chap|ch|cap(?:[ií]tulo)?|ep(?:is[oó]dio|isode)?)\.?\s*[-#:]?\s*|#)(\d+(?:[.,]\d+)?)/i
+/** A novel's volume ("Volume 07", "Vol. 7"): its number when the name has no chapter. */
+const VOLUME = /\b(?:volume|vol)\.?\s*[-#:]?\s*(\d+(?:[.,]\d+)?)/i
 
 /** Splits a chapter's title (file name, page title) and optionally its link into work name and number. */
 export function parseChapterName(title: string, url?: string): ChapterName {
@@ -93,7 +99,7 @@ export function parseChapterName(title: string, url?: string): ChapterName {
     return ' '
   })
   text = text.replace(/\[[^\]]*\]|\([^)]*\)|@\S+/g, ' ')
-  const found = CHAPTER.exec(text)
+  const found = CHAPTER.exec(text) ?? VOLUME.exec(text)
   if (found) {
     chapter ??= parseFloat(found[1].replace(',', '.'))
     // What follows the chapter number is the chapter's own title or the site's name.
@@ -108,7 +114,8 @@ export function parseChapterName(title: string, url?: string): ChapterName {
   const named = site ? parts.filter((p) => !isSite(p, site)) : parts
   if (named.length < parts.length && named.length) parts = named
   else if (parts.length > 1) parts = parts.slice(0, -1)
-  let work = parts.join(' - ').replace(/[\s\-–—:|,.·•]+$/, '').trim()
+  // "Name Vol. 3 Chapter 12": the volume is not part of the work's name.
+  let work = parts.join(' - ').replace(/\s*\b(?:volume|vol)\.?\s*\d+(?:[.,]\d+)?\s*$/i, '').replace(/[\s\-–—:|,.·•]+$/, '').trim()
   if (url) {
     const fromUrl = parseUrl(url)
     chapter ??= fromUrl.chapter
@@ -151,7 +158,9 @@ function parseUrl(url: string): ChapterName {
     const slug = i > 0 ? (segments.slice(0, i).reverse().find(named) ?? segments[i - 1]) : segments.find(named)
     // "solo-leveling-7f873ca6": the site's id for the work is not part of its name.
     const name = slug ? slug.replace(/[-_](?=[a-z]*\d)[a-z0-9]{4,}$/i, '').replace(/[-_]+/g, ' ') : ''
-    return { work: name, chapter: chapterSeg ? parseFloat(chapterSeg[1]) : null }
+    // "/capitulo/591535": a number that big is the site's id for the chapter, not its number.
+    const chapter = chapterSeg ? parseFloat(chapterSeg[1]) : null
+    return { work: name, chapter: chapter !== null && chapter < 10_000 ? chapter : null }
   } catch {
     return { work: '', chapter: null }
   }
@@ -213,7 +222,7 @@ export function findWork(works: Work[], name: string, format: WorkFormat = 'comi
  * shown was cut mid-word, it becomes the one shown.
  */
 export function withName(work: Work, name: string): Work {
-  const clean = name.trim()
+  const clean = cleanWorkName(name)
   if (!clean) return work
   const key = normalizeName(clean)
   if (work.names.some((n) => normalizeName(n) === key)) return work
@@ -234,7 +243,67 @@ function cutShort(name: string): boolean {
   return /\s\p{Ll}$/u.test(name.trim())
 }
 
+/**
+ * A name without what a page's title wrapped it in: "[Manga]: Manga One Day, Suddenly, Seoul Is Read"
+ * → "One Day, Suddenly, Seoul Is", "The Asterisk War, Vol. 8 Overview" → "The Asterisk War".
+ */
+export function cleanWorkName(name: string): string {
+  let clean = name.trim()
+  const tagged = /^(?:\[[^\]]*\]\s*)?:/.test(clean)
+  clean = clean.replace(/^(?:\[[^\]]*\]\s*)?:\s*/, '')
+  // After such a tag the site's words go too: "Manga …", "… Read".
+  if (tagged) clean = clean.replace(/^(?:manga|manhwa|manhua|webtoon)\s+/i, '').replace(/\s+read(?:\s+online)?$/i, '')
+  clean = clean.replace(/[,\s]+(?:vol(?:ume)?\.?\s*\d+\s*)?overview$/i, '').replace(/[,\s\-–—:|]+$/, '').trim()
+  return clean || name.trim()
+}
+
+/** A work's page as the same work's other copies have it: MangaDex by its id, any other by its address. */
+export function sourceKey(url: string): string {
+  const dex = /mangadex\.org\/title\/([0-9a-f-]{36})/i.exec(url)
+  if (dex) return `mangadex:${dex[1].toLowerCase()}`
+  try {
+    const u = new URL(url)
+    return u.hostname.replace(/^www\./, '') + u.pathname.replace(/\/$/, '')
+  } catch {
+    return url
+  }
+}
+
+/**
+ * Of works that are the same one saved twice (a page of theirs in common), the one to show: the one on
+ * a list or a favorite, else the first. The others' ids.
+ */
+export function duplicateWorks(works: Work[]): Set<string> {
+  const ranked = [...works].sort((a, b) => Number(!!(b.shelf || b.favorite)) - Number(!!(a.shelf || a.favorite)))
+  const seen = new Set<string>()
+  const hidden = new Set<string>()
+  for (const w of ranked) {
+    const keys = (w.sources ?? []).map(sourceKey)
+    if (keys.some((k) => seen.has(k))) hidden.add(w.id)
+    else keys.forEach((k) => seen.add(k))
+  }
+  return hidden
+}
+
 /** "The mythical weapon creation" → "The Mythical Weapon Creation" (names taken from links are lowercase). */
 export function displayName(name: string): string {
+  name = cleanWorkName(name)
   return name === name.toLowerCase() ? name.replace(/(^|\s)(\p{L})/gu, (_m, s: string, c: string) => s + c.toUpperCase()) : name
+}
+
+export type WorkUnit = 'chapter' | 'volume'
+
+/** The words for what a work's numbers count, chosen in its editor. */
+export const UNIT_WORDS: Record<WorkUnit, { one: string; many: string; short: string }> = {
+  chapter: { one: 'Capítulo', many: 'Capítulos', short: 'Cap.' },
+  volume: { one: 'Volume', many: 'Volumes', short: 'Vol.' }
+}
+
+/** "Asterisk War - Volume 08": a name numbered by volume, with no chapter number. */
+export function isVolumeName(name: string): boolean {
+  return VOLUME.test(name) && !CHAPTER.test(name)
+}
+
+export function unitOf(work: Pick<Work, 'unit'> | undefined): WorkUnit {
+  return work?.unit === 'volume' ? 'volume' : 'chapter'
 }
