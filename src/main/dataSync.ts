@@ -33,7 +33,7 @@ export function resolveWork(id: unknown, name: unknown): string | null {
 
 /** Merges a backup file or what the phone sends; returns how many works and chapters it held. */
 export function mergeData(data: { works?: unknown; reading?: unknown }): { works: number; chapters: number } {
-  if (!Array.isArray(data.works) || !Array.isArray(data.reading)) throw new Error('Esse arquivo não é um backup do Manga Index.')
+  if (!Array.isArray(data.works) || !Array.isArray(data.reading)) throw new Error('Esse arquivo não é um backup do Toon Index.')
   const ids = new Map<string, string>()
   for (const raw of data.works as Partial<Work>[]) {
     const names = Array.isArray(raw.names) ? raw.names.filter((n): n is string => typeof n === 'string' && !!n.trim()) : []

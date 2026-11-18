@@ -97,8 +97,16 @@ export function pair(code: string, name: string): { token: string; device: Paire
   return { token, device: shown }
 }
 
+/**
+ * The token the cloud sync (cloud.ts) asks the phone API with, for the requests phones leave in the
+ * cloud: only in memory, made again each time the app opens.
+ */
+export const internalToken = randomBytes(32).toString('hex')
+const CLOUD_DEVICE: PairedDevice = { id: 'cloud', name: 'Celular (pela internet)', pairedAt: 0, lastSeen: null }
+
 /** The device a token belongs to, noting it was seen; null for an unknown or revoked token. */
 export function deviceFor(token: string): PairedDevice | null {
+  if (token.length === internalToken.length && timingSafeEqual(Buffer.from(token), Buffer.from(internalToken))) return CLOUD_DEVICE
   const stored = load()
   const h = hash(token)
   const device = stored.devices.find((d) => d.tokenHash === h)

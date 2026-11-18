@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RemoteJob, RemoteQueue } from '../shared/remoteJobs'
 import type { TranslateOptions } from '../shared/types'
+import { parseChapterName } from '../shared/works'
 
 /** Finished ones are kept a while for the phone to see how they went. */
 const KEEP_DONE_DAYS = 7
@@ -28,10 +29,20 @@ export function remoteQueue(): RemoteQueue {
     const stored = JSON.parse(readFileSync(listPath(), 'utf8')) as Partial<RemoteQueue>
     const old = Date.now() - KEEP_DONE_DAYS * 86_400_000
     const jobs = (stored.jobs ?? []).filter((j) => j.status === 'queued' || j.status === 'running' || j.updatedAt > old)
-    return { jobs, paused: stored.paused === true }
+    return { jobs: jobs.map(withWork), paused: stored.paused === true }
   } catch {
     return { jobs: [], paused: false }
   }
+}
+
+/**
+ * A PDF named for its work and number ("Name - Volume 08", "Name Chapter 12") belongs with that work's
+ * other chapters in the queue, like a range asked for on the PC (also the ones queued before this).
+ */
+function withWork(job: RemoteJob): RemoteJob {
+  if (job.kind !== 'pdf' || job.batch) return job
+  const parsed = parseChapterName(job.name)
+  return parsed.work && parsed.chapter != null ? { ...job, batch: { work: parsed.work, chapter: parsed.chapter, site: 'pdf' } } : job
 }
 
 function save(jobs: RemoteJob[], paused = remoteQueue().paused): void {
@@ -92,6 +103,7 @@ export function cleanOptions(raw: unknown): Partial<TranslateOptions> | null {
   if (r.speed === 'fast' || r.speed === 'balanced' || r.speed === 'quality') out.speed = r.speed
   if (typeof r.translateSfx === 'boolean') out.translateSfx = r.translateSfx
   if (typeof r.reuseLayers === 'boolean') out.reuseLayers = r.reuseLayers
+  if (r.contentType === 'auto' || r.contentType === 'comic' || r.contentType === 'novel') out.contentType = r.contentType
   if (typeof r.skipStart === 'number') out.skipStart = Math.min(50, Math.max(0, Math.round(r.skipStart)))
   if (typeof r.skipEnd === 'number') out.skipEnd = Math.min(50, Math.max(0, Math.round(r.skipEnd)))
   if (r.gpuSharing === 'auto' || r.gpuSharing === 'phased' || r.gpuSharing === 'together') out.gpuSharing = r.gpuSharing
@@ -114,7 +126,11 @@ export function setQueueOptions(options: Partial<TranslateOptions> | null, ids?:
 
 /** Takes every queued chapter of the ranges asked for on the PC off the queue. */
 export function clearBatch(): RemoteQueue {
-  save(listRemoteJobs().filter((j) => !(j.batch && j.status === 'queued')))
+  const jobs = listRemoteJobs()
+  const gone = jobs.filter((j) => j.batch && j.status === 'queued')
+  save(jobs.filter((j) => !gone.includes(j)))
+  // PDFs chosen on the PC (grouped by work too) leave their file behind otherwise.
+  for (const job of gone) if (job.kind === 'pdf') rmSync(pdfPath(job.id), { force: true })
   return remoteQueue()
 }
 
@@ -181,13 +197,14 @@ export function addLinkJob(url: string, device: string, options: Partial<Transla
 export function addPdfJob(name: string, pdf: Buffer, device: string, options: Partial<TranslateOptions> | null = null): RemoteJob {
   if (pdf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('O arquivo enviado não é um PDF.')
   const clean = (name.trim() || 'capitulo.pdf').replace(/[\\/:*?"<>|]+/g, ' ')
+  const job = withWork({ kind: 'pdf', name: /\.pdf$/i.test(clean) ? clean : `${clean}.pdf` } as RemoteJob)
   // Written before the job is listed, so the window never takes a job whose PDF is not there yet.
-  return add({ kind: 'pdf', name: /\.pdf$/i.test(clean) ? clean : `${clean}.pdf`, device, ...(options && { options }) }, (id) =>
+  return add({ kind: 'pdf', name: job.name, device, ...(options && { options }), ...(job.batch && { batch: job.batch }) }, (id) =>
     writeFileSync(pdfPath(id), pdf)
   )
 }
 
-function add(fields: Pick<RemoteJob, 'kind' | 'name' | 'device' | 'options'> & { url?: string }, before?: (id: string) => void): RemoteJob {
+function add(fields: Pick<RemoteJob, 'kind' | 'name' | 'device' | 'options' | 'batch'> & { url?: string }, before?: (id: string) => void): RemoteJob {
   mkdirSync(dir(), { recursive: true })
   const now = Date.now()
   const job: RemoteJob = { id: randomUUID(), ...fields, createdAt: now, updatedAt: now, status: 'queued' }
@@ -228,10 +245,10 @@ export function updateRemoteJob(id: string, patch: Partial<Pick<RemoteJob, 'stat
   if (patch.status === 'done' || patch.status === 'failed') rmSync(pdfPath(id), { force: true })
 }
 
-/** Takes a job off the queue (the phone changed its mind); one already running finishes. */
+/** Takes a job off the queue (the phone changed its mind); one running is stopped by the window, which sees it gone. */
 export function cancelRemoteJob(id: string): void {
   const jobs = listRemoteJobs()
-  if (!jobs.some((j) => j.id === id && j.status === 'queued')) return
+  if (!jobs.some((j) => j.id === id && (j.status === 'queued' || j.status === 'running'))) return
   save(jobs.filter((j) => j.id !== id))
   rmSync(pdfPath(id), { force: true })
 }
