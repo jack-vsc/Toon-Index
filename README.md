@@ -14,6 +14,10 @@ O projeto tem três partes:
 | app do celular | `mobile/` (Flutter) | lê a biblioteca, pede capítulos ao PC, lê no navegador do celular |
 | extensão | `extension/` (Chrome/Edge/Brave) | anota os capítulos lidos em qualquer site e mostra os novos |
 
+A primeira versão do app do PC, em Electron e TypeScript, está na branch
+[`electron`](https://github.com/jack-vsc/Toon-Index/tree/electron). As duas versões usam a mesma pasta
+de dados.
+
 ## Como a página é traduzida
 
 ```
