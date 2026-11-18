@@ -67,13 +67,36 @@ interface ModelInfo {
   model: Download
   mmproj: Download
   /** The same model in Ollama, used instead of downloading it again. */
-  ollama: string
+  ollama?: string
+  /** Context for a page and its answer (8192 when unset); Qwen reads an image in more tokens than Gemma. */
+  ctx?: number
 }
 
 const HF = 'https://huggingface.co'
 
 /** Google's own files (Apache 2.0), the 4-bit "QAT" versions trained to lose little in compression. */
 export const MODELS: ModelInfo[] = [
+  // Qwen3.5-2B (Apache 2.0) trained on this app's own Claude translations (Manga Detector Pipeline,
+  // runs/q35-2b), Q8_0. Not published anywhere yet: its files are put in place by hand (no url).
+  {
+    id: 'qwen35-manga-2b',
+    label: 'Qwen3.5-2B treinado',
+    note: 'Treinado com as traduções do Claude: o mais fiel e o mais rápido; cabe em placas de 4 GB.',
+    model: {
+      url: '',
+      name: 'model.gguf',
+      sha256: '8f6a2f8375baf8a13cf6121613dfeb61ac03ea572ad8e4b8b8a2ea969d1e99a0',
+      size: 2_012_012_192
+    },
+    mmproj: {
+      url: '',
+      name: 'mmproj.gguf',
+      sha256: '77d7cb2a85629bfeee146d43be07cc54394926e9aeb0822cd7a820b360817289',
+      size: 668_226_592
+    },
+    // Pages of several slices reach ~9-10k tokens here.
+    ctx: 16384
+  },
   {
     id: 'gemma-4-e4b',
     label: 'Gemma 4 E4B',
@@ -91,6 +114,24 @@ export const MODELS: ModelInfo[] = [
       size: 991_552_256
     },
     ollama: 'gemma4/e4b-it-qat'
+  },
+  {
+    id: 'gemma-4-e2b',
+    label: 'Gemma 4 E2B',
+    note: 'Mais leve e mais rápido; lê o contexto com menos cuidado que o E4B.',
+    model: {
+      url: `${HF}/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/main/gemma-4-E2B_q4_0-it.gguf`,
+      name: 'model.gguf',
+      sha256: 'fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634',
+      size: 3_349_516_256
+    },
+    mmproj: {
+      url: `${HF}/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/main/gemma-4-E2B-it-mmproj.gguf`,
+      name: 'mmproj.gguf',
+      sha256: '021059cce659fe7f9170d5599761d7bbaf644b798dab9503aca30dc43e6beb14',
+      size: 986_833_664
+    },
+    ollama: 'gemma4/e2b-it-qat'
   }
 ]
 
@@ -219,6 +260,7 @@ export async function installModel(id: string, fromOllama: boolean): Promise<voi
     writeFileSync(join(dir, 'source.json'), JSON.stringify({ ...files, fromOllama: true }, null, 2))
     return
   }
+  if (!info.model.url) throw new Error(`O ${info.label} ainda não tem download: os arquivos são copiados à mão para ${dir}.`)
   cancelled = false
   const total = info.model.size + info.mmproj.size
   try {
@@ -257,6 +299,7 @@ function modelFiles(id: string): { model: string; mmproj: string } | null {
 
 /** The model's files in Ollama's store, when it pulled the same model. */
 function ollamaFiles(info: ModelInfo): { model: string; mmproj: string } | null {
+  if (!info.ollama) return null
   const models = process.env.OLLAMA_MODELS || join(homedir(), '.ollama', 'models')
   try {
     const manifest = JSON.parse(readFileSync(join(models, 'manifests', 'registry.ollama.ai', 'library', ...info.ollama.split('/')), 'utf8')) as {
@@ -301,7 +344,7 @@ export async function ensureLocalServer(id: string): Promise<void> {
     // context kept in 8 bits takes half the memory for the same answers, so more of the model fits on
     // the card. --fit puts on the card what fits and the rest in the RAM.
     '--parallel', '1',
-    '--ctx-size', '8192',
+    '--ctx-size', String(modelInfo(id).ctx ?? 8192),
     '--cache-type-k', 'q8_0',
     '--cache-type-v', 'q8_0',
     ...(cpu ? ['--n-gpu-layers', '0', '--no-mmproj-offload'] : ['--fit', 'on']),

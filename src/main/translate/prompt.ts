@@ -78,6 +78,36 @@ Respond with ONLY a JSON object, no markdown fences and no commentary, in exactl
 }
 
 /** Asks again for boxes the model left out of its answer, showing only the key. */
+/**
+ * A novel's paragraphs, read from the PDF's own text (no images): translated one for one, so each comes
+ * back in its place. `context` are the paragraphs just before, for names and tone; they are not translated.
+ */
+export function buildNovelPrompt(paragraphs: string[], context: string[], settings: AppSettings): string {
+  const source =
+    settings.sourceLanguage === AUTO_LANGUAGE ? 'Detect the source language automatically.' : `The source language is ${settings.sourceLanguage}.`
+  const before = context.length
+    ? `\nFor context only (already translated elsewhere, do NOT return them), the paragraphs just before:\n${context.map((p) => `> ${p}`).join('\n')}\n`
+    : ''
+  return `You are a professional literary translator translating a light novel into ${settings.targetLanguage}.
+${source}
+Translate the numbered paragraphs below. Write natural, fluent prose a published ${settings.targetLanguage} edition would have: keep the meaning, tone, names, honorifics and the narrator's voice, and use the dialogue punctuation that is usual in ${settings.targetLanguage} novels. Do not summarize, merge, split, censor or add anything. A paragraph that is only a symbol or a scene break comes back unchanged. A chapter title is translated as a title.
+${before}
+Paragraphs (${paragraphs.length}):
+${paragraphs.map((p, i) => `[${i + 1}] ${p}`).join('\n')}
+
+Answer with a JSON object and nothing else: {"t": ["translation of [1]", "translation of [2]", ...]} with exactly ${paragraphs.length} strings, in order.`
+}
+
+/** The translations of a novel's paragraphs, exactly one per paragraph sent. */
+export function parseNovel(raw: string, count: number): string[] {
+  const parsed = parseLenient(raw.slice(raw.indexOf('{'))) as { t?: unknown }
+  const list = Array.isArray(parsed?.t) ? parsed.t : null
+  if (!list || list.length !== count || !list.every((s) => typeof s === 'string')) {
+    throw new FormatError(`A IA devolveu ${list?.length ?? 0} parágrafos de ${count}.`)
+  }
+  return list as string[]
+}
+
 export function buildFollowUp(ids: number[], req: TranslateRequest, settings: AppSettings): string {
   const source =
     settings.sourceLanguage === AUTO_LANGUAGE

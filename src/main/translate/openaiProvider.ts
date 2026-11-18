@@ -115,7 +115,7 @@ async function request(
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
-      'X-Title': 'Manga Index'
+      'X-Title': 'Toon Index'
     },
     body: JSON.stringify({
       model,

@@ -1,5 +1,6 @@
 import type { BlockKind, Box, FontRole, TextBlock } from '../../../shared/types'
-import { FONTS } from './fonts'
+import { ctx2d, newCanvas, type AnyCanvas, type Ctx2D } from './canvas'
+import { FONTS } from './fontFaces'
 import { components, dilate, erode, isGlyph, odd, quantile, type Comp } from './glyphs'
 import {
   addEraseArea,
@@ -89,8 +90,16 @@ function isFootnote(block: TextBlock): boolean {
  * (`ensureFonts`). With the vision models' `scene`, LaMa repaints under the text and the translation
  * is fitted to the detected bubble.
  */
-export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[], scene: Scene | null = null): Promise<OverlayInfo[]> {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+/** Repaints the masked pixels with the inpainting model; false when it failed. A worker asks the window for it. */
+export type Inpaint = (canvas: AnyCanvas, mask: Uint8Array) => Promise<boolean>
+
+export async function drawOverlay(
+  canvas: AnyCanvas,
+  blocks: TextBlock[],
+  scene: Scene | null = null,
+  inpaint: Inpaint = (c, mask) => inpaintCanvas(c as HTMLCanvasElement, mask)
+): Promise<OverlayInfo[]> {
+  const ctx = ctx2d(canvas, true)
   const W = canvas.width
   const H = canvas.height
   // Locate all glyphs on the untouched page first, then erase, then write: no step sees another's output.
@@ -127,7 +136,7 @@ export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]
   // scanlation group's watermark is only erased.
   for (let i = 0; i < blocks.length; i++) if (blocks[i].kind === 'watermark' && !kept.has(i)) skipDraw.add(i)
   const skipErase = new Set([...skipDraw].filter((i) => blocks[i].kind !== 'watermark' || kept.has(i)))
-  const erased = scene ? await eraseWithModels(canvas, scene, blocks, glyphs, sfx, skipErase) : false
+  const erased = scene ? await eraseWithModels(canvas, scene, blocks, glyphs, sfx, skipErase, inpaint) : false
   if (!erased) glyphs.forEach((g, i) => skipErase.has(i) || erase(ctx, g))
 
   const footnotes: string[] = []
@@ -158,7 +167,7 @@ export async function drawOverlay(canvas: HTMLCanvasElement, blocks: TextBlock[]
  * by the paper showing there (chapter 52: an outline that also took in the art below a bubble covered a
  * watermark on dark art; the one sharing a box with "HIS NAME IS KIM SHIMUN." was 40% white paper).
  */
-function touchesSpeech(ctx: CanvasRenderingContext2D, scene: Scene, box: Box): boolean {
+function touchesSpeech(ctx: Ctx2D, scene: Scene, box: Box): boolean {
   const area = (box[2] - box[0]) * (box[3] - box[1])
   if (!scene.bubbles.some((b) => !b.frame && insideCount(b, box) > 0.15 * area)) return false
   const [x0, y0, x1, y1] = box.map(Math.round)
@@ -171,12 +180,13 @@ function touchesSpeech(ctx: CanvasRenderingContext2D, scene: Scene, box: Box): b
 
 /** One LaMa pass over everything to erase on the page. */
 async function eraseWithModels(
-  canvas: HTMLCanvasElement,
+  canvas: AnyCanvas,
   scene: Scene,
   blocks: TextBlock[],
   glyphs: Glyphs[],
   sfx: (SfxLook | null)[],
-  skip: Set<number>
+  skip: Set<number>,
+  inpaint: Inpaint
 ): Promise<boolean> {
   const mask = new Uint8Array(canvas.width * canvas.height)
   let any = false
@@ -194,7 +204,7 @@ async function eraseWithModels(
     addEraseArea(mask, scene, box, letter, g.bbox ? g : null)
     any = true
   })
-  return any ? inpaintCanvas(canvas, mask) : true
+  return any ? inpaint(canvas, mask) : true
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -217,7 +227,7 @@ interface SfxLook {
 }
 
 /** Direction and extent of the strokes (principal axis of their pixels) and their colour, before erasing. */
-function measureSfx(ctx: CanvasRenderingContext2D, shape: SfxShape): SfxLook {
+function measureSfx(ctx: Ctx2D, shape: SfxShape): SfxLook {
   const { box, w, h, mask } = shape
   const xs: number[] = []
   const ys: number[] = []
@@ -336,7 +346,7 @@ function fillOf(strokes: { c: RGB; inner: boolean }[], bg: RGB | null): RGB {
 }
 
 /** Writes a translated sound effect on one line in brush lettering, along the original's direction and over its length. */
-function drawSfx(ctx: CanvasRenderingContext2D, block: TextBlock, look: SfxLook): { capHeight: number; fontSize: number; family: string } {
+function drawSfx(ctx: Ctx2D, block: TextBlock, look: SfxLook): { capHeight: number; fontSize: number; family: string } {
   const text = block.translation.replace(/\s+/g, ' ').trim().toUpperCase()
   const face = FONTS.brush
   const weight = face.weights[face.weights.length - 1]
@@ -373,8 +383,8 @@ function drawSfx(ctx: CanvasRenderingContext2D, block: TextBlock, look: SfxLook)
 }
 
 /** Adds a band below the page with *adendo lines (signage and similar). */
-function appendFootnotes(canvas: HTMLCanvasElement, notes: string[]): void {
-  const ctx = canvas.getContext('2d')!
+function appendFootnotes(canvas: AnyCanvas, notes: string[]): void {
+  const ctx = ctx2d(canvas)
   const pad = Math.round(canvas.width * 0.02)
   const fontSize = Math.max(13, Math.round(canvas.width / 52))
   const lineGap = Math.round(fontSize * 0.35)
@@ -402,7 +412,7 @@ function appendFootnotes(canvas: HTMLCanvasElement, notes: string[]): void {
   }
 }
 
-function wrapFootnote(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number): number {
+function wrapFootnote(ctx: Ctx2D, text: string, x: number, y: number, maxW: number, lineH: number): number {
   let line = ''
   let used = 0
   for (const char of text) {
@@ -481,7 +491,7 @@ interface Cluster {
  * background; strokes whose surroundings are not flat (artwork) are dropped; the rest are grouped into
  * clusters, and the cluster that best matches the model's box and the length of the original text wins.
  */
-export function findGlyphs(ctx: CanvasRenderingContext2D, block: TextBlock, W: number, H: number): Glyphs {
+export function findGlyphs(ctx: Ctx2D, block: TextBlock, W: number, H: number): Glyphs {
   const tb = block.textBox
   const tbW = tb[2] - tb[0]
   const tbH = tb[3] - tb[1]
@@ -1099,7 +1109,7 @@ function runs(values: Uint8Array, maxGap: number): [number, number][] {
 // ---------------------------------------------------------------------------------------------------
 
 /** Rebuilds the background under the glyphs from the surrounding pixels (works on gradients and art too). */
-function erase(ctx: CanvasRenderingContext2D, g: Glyphs): void {
+function erase(ctx: Ctx2D, g: Glyphs): void {
   if (!g.bbox) return
   const { win, ww, wh } = g
   // Wide enough to cover the outline, the anti-aliasing and JPEG ringing around the strokes, plus a ring
@@ -1308,7 +1318,7 @@ interface Style {
 
 /** Writes the translation where the original was, in lettering that resembles the original's. */
 function typeset(
-  ctx: CanvasRenderingContext2D,
+  ctx: Ctx2D,
   block: TextBlock,
   g: Glyphs,
   W: number,
@@ -1399,7 +1409,7 @@ function typeset(
 }
 
 /** Picks the bundled face, weight, colours and spacing closest to the original lettering. */
-function resolveStyle(ctx: CanvasRenderingContext2D, block: TextBlock, look: Look | null, profile: Profile): Style {
+function resolveStyle(ctx: Ctx2D, block: TextBlock, look: Look | null, profile: Profile): Style {
   const text = originalLine(block)
   const face = FONTS[chooseRole(block, look, text)]
   // As wide as the original for the same text, at the same cap height.
@@ -1529,8 +1539,8 @@ function faceInk(family: string, weight: number, text: string): { ink: number; p
   const cached = inkCache.get(key)
   if (cached) return cached
   const size = 60
-  const canvas = document.createElement('canvas')
-  const c = canvas.getContext('2d', { willReadFrequently: true })!
+  const canvas = newCanvas(1, 1)
+  const c = ctx2d(canvas, true)
   c.font = `${weight} ${size}px ${family}`
   const cap = c.measureText('H').actualBoundingBoxAscent || size * 0.7
   const width = Math.max(1, c.measureText(text).width)
@@ -1562,7 +1572,7 @@ function faceInk(family: string, weight: number, text: string): { ink: number; p
 }
 
 /** Measures a face the same way `measureLook` measures the original lettering. */
-function faceMetrics(ctx: CanvasRenderingContext2D, family: string, weight: number): FaceMetrics {
+function faceMetrics(ctx: Ctx2D, family: string, weight: number): FaceMetrics {
   const key = `${family}|${weight}`
   const cached = metricsCache.get(key)
   if (cached) return cached
@@ -1577,10 +1587,10 @@ function faceMetrics(ctx: CanvasRenderingContext2D, family: string, weight: numb
   const advance = ctx.measureText(sample).width / sample.length / cap
   ctx.restore()
 
-  const canvas = document.createElement('canvas')
+  const canvas = newCanvas(1, 1)
   canvas.width = 1400
   canvas.height = 160
-  const c = canvas.getContext('2d', { willReadFrequently: true })!
+  const c = ctx2d(canvas, true)
   c.fillStyle = '#fff'
   c.fillRect(0, 0, canvas.width, canvas.height)
   c.fillStyle = '#000'
@@ -1606,7 +1616,7 @@ function faceMetrics(ctx: CanvasRenderingContext2D, family: string, weight: numb
  * image), and where its middle is. Rows where the original text was are at least as wide as that text.
  */
 function measureBubble(
-  ctx: CanvasRenderingContext2D,
+  ctx: Ctx2D,
   block: TextBlock,
   textBox: Box,
   measured: boolean,
@@ -1750,7 +1760,7 @@ function ownRoom(around: Profile, textBox: Box, letterHeight: number): Profile {
  * the centre line. A bubble holding only this block is lettered around its own centre; a shared one
  * around the original text.
  */
-function bubbleProfile(ctx: CanvasRenderingContext2D, bubble: Bubble, textBox: Box, letterHeight: number, alone: boolean): Profile {
+function bubbleProfile(ctx: Ctx2D, bubble: Bubble, textBox: Box, letterHeight: number, alone: boolean): Profile {
   const { box, w, h } = bubble
   // Keep clear of the border line, which the interior mask runs up to.
   const mask = erode(bubble.mask, w, h, odd(Math.max(3, Math.round(letterHeight * 0.2))))
@@ -1853,7 +1863,7 @@ interface Layout {
  * proportions between the original block's and the bubble's.
  */
 function layoutAt(
-  ctx: CanvasRenderingContext2D,
+  ctx: Ctx2D,
   text: string,
   size: number,
   profile: Profile,
@@ -1961,7 +1971,7 @@ function breakLines(
 }
 
 /** Last resort when nothing fits: smallest font, plain greedy wrapping at the centre width. */
-function forcedLayout(ctx: CanvasRenderingContext2D, text: string, profile: Profile, style: Style): Layout {
+function forcedLayout(ctx: Ctx2D, text: string, profile: Profile, style: Style): Layout {
   ctx.font = fontSpec(style, MIN_FONT)
   const width = Math.max(40, rowWidth(profile, profile.cy - 4, profile.cy + 4) * FILL)
   const lines: string[] = []
@@ -1993,7 +2003,7 @@ function rowWidth(profile: Profile, y0: number, y1: number): number {
 }
 
 /** Words, with any word wider than `maxWidth` hyphenated into pieces. */
-function splitWords(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] | null {
+function splitWords(ctx: Ctx2D, text: string, maxWidth: number): string[] | null {
   const out: string[] = []
   for (const word of text.split(/\s+/).filter(Boolean)) {
     if (ctx.measureText(word).width <= maxWidth) {

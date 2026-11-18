@@ -1,7 +1,7 @@
 import type { Box, VisionBlock } from '../../../shared/types'
 import type { TextRegion } from './detect'
 import { dilate, erode, odd } from './glyphs'
-import { canvasToBytes } from './pdf'
+import { canvasToBytes } from './canvasBytes'
 
 /** A speech bubble's interior, rasterized over its bounding box. */
 export interface Bubble {

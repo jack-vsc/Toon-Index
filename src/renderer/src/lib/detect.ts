@@ -26,10 +26,13 @@ export interface TextRegion {
  * the model leaves boxes without readable text out.
  */
 export function detectText(canvas: HTMLCanvasElement): TextRegion[] {
-  const W = canvas.width
-  const H = canvas.height
+  if (canvas.width < 16 || canvas.height < 16) return []
+  return detectTextIn(canvas.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)
+}
+
+/** The same on the image's RGBA pixels: what the detection workers run (detectWorkers.ts), away from the window. */
+export function detectTextIn(data: Uint8ClampedArray, W: number, H: number): TextRegion[] {
   if (W < 16 || H < 16) return []
-  const data = canvas.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, W, H).data
   const gray = new Uint8Array(W * H)
   for (let p = 0, i = 0; p < gray.length; p++, i += 4) gray[p] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
 

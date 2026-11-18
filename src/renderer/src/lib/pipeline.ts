@@ -7,11 +7,13 @@ import {
   type PageImage,
   type TextBlock
 } from '../../../shared/types'
-import { detectText, drawKey, drawMarks, type TextRegion } from './detect'
+import { drawKey, drawMarks, type TextRegion } from './detect'
+import { detectTextOff } from './detectWorkers'
 import { buildPdf, type OutputPage } from './exportPdf'
 import { applyLayer, extractLayer, layerKey, type PageLayer } from './layers'
 import { ensureFonts } from './fonts'
-import { drawOverlay, type OverlayInfo } from './overlay'
+import type { OverlayInfo } from './overlay'
+import { drawOverlayOff } from './overlayWorkers'
 import {
   canvasToBase64,
   canvasToBlob,
@@ -26,6 +28,11 @@ import {
 import { planSlices } from './slicing'
 import { analyzePage, regionsInSlice, type Scene } from './scene'
 import { normalizeText, similarText } from './text'
+import { buildFlow, buildNovelPdf, novelLayout, readNovelPage, type NovelFlow, type NovelParagraph, type NovelPiece } from './novel'
+
+/** A novel's paragraphs go to the AI about this many characters at a time (a page or two of text). */
+const NOVEL_BATCH_CHARS = 3500
+const NOVEL_BATCH_PARAGRAPHS = 40
 
 /** Output resolution (page width in px). */
 const OUTPUT_WIDTH = 1400
@@ -80,6 +87,13 @@ export class TranslationJob {
    * choice; `reuse` puts a page translated before back from it instead of asking the AI again.
    */
   layers: { tag: string; reuse: boolean } | null = null
+  /** A novel: its text is read from the PDF, translated paragraph by paragraph and set again (lib/novel). */
+  novel = false
+  /** The chapter's name, kept with each page in the training dataset. */
+  chapter = ''
+  private novelPieces = new Map<number, NovelPiece[]>()
+  private novelFlow: NovelFlow = []
+  private novelText = new Map<number, string>()
   private outputs = new Map<number, OutputPage>()
   private cancelled = false
   private activeRequests = new Set<string>()
@@ -132,6 +146,7 @@ export class TranslationJob {
     this.stopReason = null
     this.limiter = new Limiter(concurrency)
     this.retry()
+    if (this.novel) return this.runNovel(concurrency)
     if (phased) return this.runPhased(concurrency)
     // Pages are picked when a worker is free, so pages retried during the run join it.
     const claimed = new Set<number>()
@@ -169,7 +184,7 @@ export class TranslationJob {
         await this.guard(number, async () => {
           this.update(number, { stage: 'Traduzindo' })
           const canvas = await renderForTranslation(this.doc, number)
-          translated.set(number, await this.translateSlices(number, prepareSlices(canvas, page.tall, page.scene)))
+          translated.set(number, await this.translateSlices(number, await prepareSlices(canvas, page.tall, page.scene)))
           this.update(number, { stage: 'Aguardando redesenho' })
         })
       }
@@ -183,10 +198,91 @@ export class TranslationJob {
       await this.guard(number, async () => {
         this.update(number, { stage: 'Redesenhando' })
         const canvas = await renderForTranslation(this.doc, number)
-        await this.draw(number, { ...page, canvas, prepared: prepareSlices(canvas, page.tall, page.scene) }, blocks)
+        await this.draw(number, { ...page, canvas, prepared: await prepareSlices(canvas, page.tall, page.scene) }, blocks)
       })
     }
     for (const number of pending) if (!this.cancelled && this.pages.find((p) => p.number === number)?.status === 'working') this.update(number, { status: 'pending', stage: undefined })
+  }
+
+  /**
+   * A novel: every page's text read first (no vision), joined into paragraphs, and those translated a
+   * batch at a time. A page is done once every paragraph on it is; picture pages are done at once.
+   */
+  private async runNovel(concurrency: number): Promise<void> {
+    for (const page of this.pages) {
+      if (this.cancelled) return
+      if (page.status !== 'pending' || this.novelPieces.has(page.number)) continue
+      this.update(page.number, { status: 'working', stage: 'Lendo o texto', error: undefined })
+      this.novelPieces.set(page.number, await readNovelPage(this.doc, page.number))
+      this.update(page.number, { status: 'pending', stage: undefined })
+    }
+    this.novelFlow = buildFlow(this.pages.map((p) => (p.status === 'skipped' ? [{ kind: 'picture', page: p.number }] : this.novelPieces.get(p.number) ?? [])))
+    const paragraphs = this.novelFlow.flatMap((piece) => (piece.kind === 'paragraph' ? [piece.paragraph] : []))
+    // What each page still waits for; a page with nothing to translate (a picture) is done now.
+    const waiting = new Map<number, number>()
+    for (const p of paragraphs) if (!this.novelText.has(p.id)) for (const n of p.pages) waiting.set(n, (waiting.get(n) ?? 0) + 1)
+    for (const page of this.pages) if (page.status === 'pending' && !waiting.has(page.number)) this.update(page.number, { status: 'done', stage: undefined })
+
+    const batches: NovelParagraph[][] = []
+    let batch: NovelParagraph[] = []
+    let size = 0
+    for (const p of paragraphs) {
+      if (this.novelText.has(p.id) || !p.pages.some((n) => this.pages.find((pg) => pg.number === n)?.status === 'pending')) continue
+      if (batch.length && (size + p.text.length > NOVEL_BATCH_CHARS || batch.length >= NOVEL_BATCH_PARAGRAPHS)) {
+        batches.push(batch)
+        batch = []
+        size = 0
+      }
+      batch.push(p)
+      size += p.text.length
+    }
+    if (batch.length) batches.push(batch)
+
+    const worker = async () => {
+      for (let next = batches.shift(); next && !this.cancelled; next = batches.shift()) {
+        const pages = [...new Set(next.flatMap((p) => p.pages))]
+        for (const n of pages) this.update(n, { status: 'working', stage: 'Traduzindo', error: undefined })
+        try {
+          const translated = await this.translateParagraphs(next, paragraphs)
+          next.forEach((p, i) => this.novelText.set(p.id, translated[i]))
+          for (const p of next) for (const n of p.pages) waiting.set(n, (waiting.get(n) ?? 1) - 1)
+          for (const n of pages) this.update(n, waiting.get(n)! <= 0 ? { status: 'done', stage: undefined } : { status: 'pending', stage: undefined })
+        } catch (err) {
+          if (this.cancelled) {
+            for (const n of pages) this.update(n, { status: 'pending', stage: undefined })
+            return
+          }
+          const error = toAppError(err)
+          for (const n of pages) this.update(n, { status: 'error', error, stage: undefined })
+          if (FATAL_ERRORS.has(error.code)) {
+            this.stopReason = error
+            this.cancel()
+          }
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker))
+  }
+
+  /** A batch of paragraphs; when the AI loses count of them, the batch is sent again in halves. */
+  private async translateParagraphs(batch: NovelParagraph[], all: NovelParagraph[]): Promise<string[]> {
+    const requestId = `novel-${batch[0].id}-${Math.random().toString(36).slice(2)}`
+    this.activeRequests.add(requestId)
+    const start = all.indexOf(batch[0])
+    try {
+      return await window.api.translateText({
+        paragraphs: batch.map((p) => p.text),
+        context: all.slice(Math.max(0, start - 2), start).map((p) => p.text),
+        pageNumber: batch[0].pages[0],
+        requestId
+      })
+    } catch (err) {
+      if (this.cancelled || batch.length === 1 || toAppError(err).code !== 'format') throw err
+      const half = Math.ceil(batch.length / 2)
+      return [...(await this.translateParagraphs(batch.slice(0, half), all)), ...(await this.translateParagraphs(batch.slice(half), all))]
+    } finally {
+      this.activeRequests.delete(requestId)
+    }
   }
 
   /** Puts failed pages (the given ones, or all) back in the queue. */
@@ -214,6 +310,15 @@ export class TranslationJob {
 
   /** Pages that failed or were never translated keep their original image. */
   async buildPdf(title: string): Promise<{ pdf: Uint8Array; cover: Uint8Array }> {
+    if (this.novel) {
+      const numbers = this.pages.map((p) => p.number)
+      const pdf = await buildNovelPdf(await this.doc.getData(), this.novelFlow, this.novelText, await novelLayout(this.doc, numbers), title)
+      // The cover is the original's first page (a novel's cover is a picture, kept as it is).
+      const first = await createImageBitmap(new Blob([(await this.renderOriginal(numbers[0])).jpeg as BlobPart], { type: 'image/jpeg' }))
+      const cover = await canvasToBytes(thumbnailCanvas(first, 480), 'image/jpeg', 0.85)
+      first.close()
+      return { pdf, cover }
+    }
     const pages: OutputPage[] = []
     for (const { number } of this.pages) {
       pages.push(this.outputs.get(number) ?? (await this.renderOriginal(number)))
@@ -235,6 +340,12 @@ export class TranslationJob {
       if (page.thumbUrl) URL.revokeObjectURL(page.thumbUrl)
       if (page.imageUrl) URL.revokeObjectURL(page.imageUrl)
     }
+  }
+
+  /** Detects and translates a page without drawing it (rebuilding the training dataset from the cache). */
+  async readPage(pageNumber: number): Promise<number> {
+    const page = await this.detect(pageNumber)
+    return (await this.translateSlices(pageNumber, page.prepared)).length
   }
 
   private async processPage(pageNumber: number): Promise<void> {
@@ -272,7 +383,7 @@ export class TranslationJob {
     const tall = isTallPage(widthPt, heightPt)
     const canvas = await renderForTranslation(this.doc, pageNumber)
     const scene = await analyzePage(canvas)
-    return { started, widthPt, heightPt, tall, scene, canvas, prepared: prepareSlices(canvas, tall, scene) }
+    return { started, widthPt, heightPt, tall, scene, canvas, prepared: await prepareSlices(canvas, tall, scene) }
   }
 
   /** Sends the page's slices to the model; blocks come back in page pixels. */
@@ -288,7 +399,7 @@ export class TranslationJob {
           const requestId = crypto.randomUUID()
           this.activeRequests.add(requestId)
           try {
-            const blocks = await window.api.translate({ images, key, regions, pageNumber, requestId })
+            const blocks = await window.api.translate({ images, key, regions, pageNumber, requestId, chapter: this.chapter })
             this.update(pageNumber, { parts: { done: ++done, total: chunks.length } })
             return blocks.flatMap((list, i) => list.map((b) => toPageSpace(b, part[i].scale, part[i].offsetY)))
           } finally {
@@ -312,7 +423,7 @@ export class TranslationJob {
     await ensureFonts()
     const pagePx = canvas.height
     const before = this.onPageRendered ? cropCanvas(canvas, { x: 0, y: 0, width: canvas.width, height: pagePx }, Infinity) : null
-    const drawn = await drawOverlay(canvas, blocks, scene)
+    const drawn = await drawOverlayOff(canvas, blocks, scene)
     const heightPtOut = heightPt * (canvas.height / pagePx)
     if (before) {
       const regions = prepared.flatMap((p) =>
@@ -410,9 +521,11 @@ export async function renderForTranslation(doc: PDFDocumentProxy, pageNumber: nu
 }
 
 /** Cuts the page into the overlapping images sent to the model and finds the text on each. */
-export function prepareSlices(canvas: HTMLCanvasElement, tall: boolean, scene: Scene | null = null): PreparedSlice[] {
+export async function prepareSlices(canvas: HTMLCanvasElement, tall: boolean, scene: Scene | null = null): Promise<PreparedSlice[]> {
   const sliceHeight = Math.round(canvas.width * SLICE_ASPECT)
-  const keep = (scene?.blocks ?? []).map((b): [number, number] => [b.box[1] - b.letterHeight, b.box[3] + b.letterHeight])
+  const keep = scene
+    ? scene.blocks.map((b): [number, number] => [b.box[1] - b.letterHeight, b.box[3] + b.letterHeight])
+    : await textRows(canvas, sliceHeight, tall ? AI_LONG_SIDE_TALL : AI_LONG_SIDE)
   const slices = planSlices(canvas, sliceHeight, Math.round(sliceHeight * SLICE_OVERLAP), keep)
   const aiLongSide = tall ? AI_LONG_SIDE_TALL : AI_LONG_SIDE
   const prepared: PreparedSlice[] = []
@@ -421,7 +534,7 @@ export function prepareSlices(canvas: HTMLCanvasElement, tall: boolean, scene: S
     const scale = canvas.width / crop.width
     const cutTop = slice.y0 > 0
     const cutBottom = slice.y1 < canvas.height
-    const found = detectText(crop).filter((r) => !(cutTop && r.box[1] <= 2) && !(cutBottom && r.box[3] >= crop.height - 2))
+    const found = (await detectTextOff(crop)).filter((r) => !(cutTop && r.box[1] <= 2) && !(cutBottom && r.box[3] >= crop.height - 2))
     // The models find the text; the built-in detector only adds what they missed (small remarks), and
     // the translation model skips its boxes that hold no text.
     const regions = scene
@@ -431,6 +544,19 @@ export function prepareSlices(canvas: HTMLCanvasElement, tall: boolean, scene: S
   }
   boxOnce(prepared)
   return prepared
+}
+
+/**
+ * Without the models' blocks, the rows the built-in detector finds text on, over the whole page: the
+ * blank gap between two lines of a narration on white looks like a gutter between panels, and a cut
+ * there left the lines under it at the slice's edge, dropped as cut text (chapter 79 of The Genius
+ * Midfielder: "Even a child whose" translated, the two lines under it left in English).
+ */
+async function textRows(canvas: HTMLCanvasElement, sliceHeight: number, longSide: number): Promise<[number, number][]> {
+  if (canvas.height <= sliceHeight * 1.15) return []
+  const whole = cropCanvas(canvas, { x: 0, y: 0, width: canvas.width, height: canvas.height }, longSide)
+  const scale = canvas.width / whole.width
+  return (await detectTextOff(whole)).map((r): [number, number] => [(r.box[1] - r.letterHeight) * scale, (r.box[3] + r.letterHeight) * scale])
 }
 
 /** `around` also holds the models' blocks cut by the slice edge: lines of those found here are not extra. */

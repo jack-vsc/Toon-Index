@@ -4,6 +4,9 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
+export { canvasToBlob, canvasToBytes } from './canvasBytes'
+import { canvasToBytes } from './canvasBytes'
+
 const assetBase = new URL('pdfjs/', window.location.href).href
 
 /** Chromium refuses canvases taller than this. */
@@ -84,16 +87,6 @@ export function cropCanvas(
 export function thumbnailCanvas(source: CanvasImageSource & { width: number; height: number }, longSide: number): HTMLCanvasElement {
   const height = Math.min(source.height, Math.round(source.width / 0.7))
   return cropCanvas(source, { x: 0, y: 0, width: source.width, height }, longSide)
-}
-
-export function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
-  return new Promise((resolve, reject) =>
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Falha ao codificar imagem'))), type, quality)
-  )
-}
-
-export async function canvasToBytes(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Uint8Array> {
-  return new Uint8Array(await (await canvasToBlob(canvas, type, quality)).arrayBuffer())
 }
 
 export async function canvasToBase64(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<string> {

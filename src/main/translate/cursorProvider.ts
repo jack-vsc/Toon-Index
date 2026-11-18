@@ -32,7 +32,7 @@ export async function runCursor(
     agent = await Agent.create({
       apiKey,
       model: { id: model, params: await speedParams(apiKey, model, speed) },
-      name: `Manga Index - página ${req.pageNumber}`,
+      name: `Toon Index - página ${req.pageNumber}`,
       tools: [],
       local: {
         cwd: agentWorkDir(),

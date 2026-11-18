@@ -9,7 +9,7 @@ export interface OutputPage {
 export async function buildPdf(pages: OutputPage[], title: string): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
   pdf.setTitle(title)
-  pdf.setCreator('Manga Index')
+  pdf.setCreator('Toon Index')
   for (const page of pages) {
     const image = await pdf.embedJpg(page.jpeg)
     const target = pdf.addPage([page.widthPt, page.heightPt])

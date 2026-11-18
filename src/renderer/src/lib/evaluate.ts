@@ -42,6 +42,7 @@ export async function runEvaluation(config: EvalConfig): Promise<void> {
     const reference = config.reference.length ? await loadReference(config.reference) : null
     log(`reference: ${config.reference.length} images, ${reference?.thumbH ?? 0} thumbnail rows`)
     const job = await TranslationJob.open(await api.read(config.pdf), () => {})
+    job.chapter = config.pdf.split(/[\\/]/).pop()!.replace(/\.pdf$/i, '')
     const pages = config.pages ?? Array.from({ length: job.numPages }, (_, i) => i + 1)
     await job.select(pages)
     const summary: Record<string, unknown>[] = []
