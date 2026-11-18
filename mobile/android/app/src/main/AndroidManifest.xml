@@ -6,9 +6,9 @@
     <!-- Whether chapters downloaded on the phone may use mobile data (a setting). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <application
-        android:label="Manga Index"
+        android:label="Toon Index"
         android:usesCleartextTraffic="true"
-        android:name="${applicationName}"
+        android:name=".App"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup"
@@ -53,6 +53,10 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/files" />
         </provider>
+        <!-- New-chapter notifications from the PC (Firebase): their icon, color and channel (made in App). -->
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_notification" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="chapters" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

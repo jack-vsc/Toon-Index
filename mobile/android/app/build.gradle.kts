@@ -47,3 +47,10 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // App.kt starts Firebase itself (the project comes from the PC, not from a google-services.json);
+    // the version is the one firebase_core uses.
+    implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
+    implementation("com.google.firebase:firebase-common")
+}

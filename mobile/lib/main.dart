@@ -11,7 +11,7 @@ import 'translate_screen.dart';
 
 void main() => runApp(const MangaIndexApp());
 
-/// The phone side of Manga Index: the library and where each work was left, kept in sync with the
+/// The phone side of Toon Index: the library and where each work was left, kept in sync with the
 /// PC app it is paired with.
 class MangaIndexApp extends StatefulWidget {
   const MangaIndexApp({super.key});
@@ -57,7 +57,7 @@ class _MangaIndexAppState extends State<MangaIndexApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Manga Index',
+      title: 'Toon Index',
       navigatorKey: _navigator,
       debugShowCheckedModeBanner: false,
       theme: appTheme(),

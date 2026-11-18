@@ -132,14 +132,30 @@ class _OptionsSheetState extends State<_OptionsSheet> {
     final pc = widget.pc;
     final profile = pc.profiles.where((p) => p.id == _o['activeProfileId']).firstOrNull;
     final languages = {for (final l in pc.languages) l.value: l.label};
+    // A PC from before the novels has no type: 'auto', as there.
+    _o['contentType'] ??= 'auto';
+    final novel = _o['contentType'] == 'novel';
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.viewInsetsOf(context).bottom),
       child: SingleChildScrollView(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('Opções da tradução', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 14),
-          _pick('Visão (achar e apagar o texto) em', 'visionDevice', const {'gpu': 'Placa de vídeo (GPU)', 'cpu': 'Processador (deixa a GPU livre)'}),
-          if (_o['visionDevice'] == 'cpu')
+          _pick('Tipo', 'contentType', const {
+            'auto': 'Automático (novel quando o PDF tem texto)',
+            'comic': 'Mangá / webtoon',
+            'novel': 'Novel (texto)',
+          }),
+          if (novel)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: Text(
+                'O PC lê o texto do próprio PDF, traduz parágrafo por parágrafo e monta as páginas de novo, sem a visão. As ilustrações ficam como estão.',
+                style: TextStyle(color: muted, fontSize: 12),
+              ),
+            ),
+          if (!novel) _pick('Visão (achar e apagar o texto) em', 'visionDevice', const {'gpu': 'Placa de vídeo (GPU)', 'cpu': 'Processador (deixa a GPU livre)'}),
+          if (!novel && _o['visionDevice'] == 'cpu')
             const Padding(
               padding: EdgeInsets.only(bottom: 12),
               child: Text('No processador cada página leva minutos em vez de segundos.', style: TextStyle(color: muted, fontSize: 12)),
@@ -149,8 +165,8 @@ class _OptionsSheetState extends State<_OptionsSheet> {
           _pick('Velocidade', 'speed', PcTranslateSettings.speeds),
           _pick('Idioma original', 'sourceLanguage', {pc.auto: 'Detectar automaticamente', ...languages}),
           _pick('Traduzir para', 'targetLanguage', languages),
-          _pick('Uso da GPU', 'gpuSharing', PcTranslateSettings.gpuSharing),
-          _pick('Páginas ao mesmo tempo', 'concurrency', {for (final n in [1, 2, 3, 4, 5, 6, 8]) n: '$n'}),
+          if (!novel) _pick('Uso da GPU', 'gpuSharing', PcTranslateSettings.gpuSharing),
+          _pick(novel ? 'Pedidos à IA ao mesmo tempo' : 'Páginas ao mesmo tempo', 'concurrency', {for (final n in [1, 2, 3, 4, 5, 6, 8]) n: '$n'}),
           Row(children: [
             Expanded(child: _pick('Não traduzir as primeiras', 'skipStart', _skipChoices)),
             const SizedBox(width: 12),
@@ -160,19 +176,21 @@ class _OptionsSheetState extends State<_OptionsSheet> {
             padding: EdgeInsets.only(bottom: 12),
             child: Text('Páginas de aviso da scan: continuam no capítulo, só não são traduzidas.', style: TextStyle(color: muted, fontSize: 12)),
           ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Traduzir onomatopeias'),
-            value: _o['translateSfx'] == true,
-            onChanged: (v) => _set('translateSfx', v),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Reaproveitar páginas já traduzidas antes'),
-            subtitle: const Text('Desligue para traduzir de novo do zero (com outro modelo, por exemplo)', style: TextStyle(fontSize: 12)),
-            value: _o['reuseLayers'] != false,
-            onChanged: (v) => _set('reuseLayers', v),
-          ),
+          if (!novel) ...[
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Traduzir onomatopeias'),
+              value: _o['translateSfx'] == true,
+              onChanged: (v) => _set('translateSfx', v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Reaproveitar páginas já traduzidas antes'),
+              subtitle: const Text('Desligue para traduzir de novo do zero (com outro modelo, por exemplo)', style: TextStyle(fontSize: 12)),
+              value: _o['reuseLayers'] != false,
+              onChanged: (v) => _set('reuseLayers', v),
+            ),
+          ],
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Salvar como padrão do PC'),

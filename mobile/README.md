@@ -1,6 +1,6 @@
 # manga_index
 
-Manga Index no celular
+Toon Index no celular
 
 ## Getting Started
 

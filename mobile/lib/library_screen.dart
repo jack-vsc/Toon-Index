@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'app_update.dart';
+import 'auto_downloads.dart';
 import 'browser_screen.dart';
-import 'data_screen.dart';
+import 'cloud.dart';
 import 'local_data.dart';
 import 'downloads_screen.dart';
 import 'models.dart';
@@ -18,6 +21,9 @@ import 'work_screen.dart';
 
 /// Every work read or translated, where it was left, the most recent first. Shows the last library
 /// seen when the PC cannot be reached.
+/// Bumped to bring the app back to its start (the browser's home button, from deep in a site).
+final appHome = ValueNotifier(0);
+
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key, required this.api, required this.onUnpaired, required this.onConnect});
 
@@ -42,12 +48,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    appHome.addListener(_toStart);
     Store.loadLibrary().then((cached) async {
       if (cached == null) return;
       final shown = cached.withShelves(await Store.loadPending(Store.pendingShelves));
       if (mounted && _library == null) setState(() => _library = shown);
     });
     _refresh();
+    unawaited(Cloud.listen(opened: _notified, arrived: (title, data) {
+      _refresh();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(title),
+        action: SnackBarAction(label: 'Ver', onPressed: () => _notified(data)),
+      ));
+    }));
+  }
+
+  /// A new-chapter notification tapped: its work, or the chapter on the site when the work is not here yet.
+  Future<void> _notified(Map<String, dynamic> data) async {
+    await _refresh();
+    final view = _library?.views.where((v) => v.work.id == data['workId']).firstOrNull;
+    if (view != null) {
+      await _openWork(view);
+    } else if (data['url'] is String) {
+      await _browse(data['url'] as String);
+    }
   }
 
   Future<void> _refresh() async {
@@ -55,8 +81,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     try {
       final library = (await widget.api.library()).withShelves(await Store.loadPending(Store.pendingShelves));
       if (mounted) setState(() => (_library = library, _error = null));
-      // The PC reached: a newer build of this app there is offered.
+      // The PC reached: a newer build of this app there is offered, and the next chapters are kept for away from home.
       if (mounted) AppUpdate.offer(context, widget.api);
+      unawaited(AutoDownloads.run(widget.api, library));
     } on UnpairedException {
       await Store.forgetConnection();
       widget.onUnpaired();
@@ -109,6 +136,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
     widget.onUnpaired();
   }
 
+  @override
+  void dispose() {
+    appHome.removeListener(_toStart);
+    super.dispose();
+  }
+
+  void _toStart() {
+    if (mounted) setState(() => _tab = 0);
+  }
+
   /// The tab shown: 0 the start (where the reading is, new chapters), 1 every new chapter, 2 the collection.
   int _tab = 0;
 
@@ -134,7 +171,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final fresh = views.where((v) => v.update != null).length;
     return Scaffold(
       appBar: AppBar(
-        title: Text(const ['Manga Index', 'Novidades', 'Biblioteca'][_tab], style: const TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(const ['Toon Index', 'Novidades', 'Biblioteca'][_tab], style: const TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(tooltip: 'Buscar obra', icon: const Icon(Icons.search), onPressed: _search),
           PopupMenuButton<String>(
@@ -279,11 +316,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
             label: const Text('Checar agora'),
           ),
       ]),
-      const Text('Obras com capítulo novo depois do último que você leu. A obra sai daqui quando você lê o capítulo.',
+      const Text('Capítulos que saíram nos últimos 7 dias depois do último que você leu. A obra sai daqui quando você lê o capítulo.',
           style: TextStyle(color: muted, fontSize: 12)),
       const SizedBox(height: 12),
       if (library != null && fresh.isEmpty)
-        const Padding(padding: EdgeInsets.all(40), child: Text('Nenhum capítulo novo por enquanto.', textAlign: TextAlign.center)),
+        const Padding(padding: EdgeInsets.all(28), child: Text('Nenhum capítulo novo nos últimos 7 dias.', textAlign: TextAlign.center)),
       for (final view in fresh)
         _UpdateRow(
           view: view,
@@ -292,7 +329,43 @@ class _LibraryScreenState extends State<LibraryScreen> {
           onBrowse: _browse,
           onTranslate: widget.api.paired ? () => _translate(view) : null,
         ),
+      ..._history(library),
     ]);
+  }
+
+  /// History rows shown, a page more each time "Mostrar mais" is pressed.
+  int _historyShown = 40;
+
+  /// Chapters out over a week ago and not read yet: one compact line each, a page at a time.
+  List<Widget> _history(Library? library) {
+    final older = library?.older ?? const [];
+    if (older.isEmpty) return const [];
+    return [
+      const SizedBox(height: 20),
+      Text('Histórico · ${older.length}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+      const Text('Capítulos que saíram há mais de 7 dias e você ainda não leu.', style: TextStyle(color: muted, fontSize: 12)),
+      const SizedBox(height: 6),
+      for (final (work, update) in older.take(_historyShown))
+        InkWell(
+          onTap: () => _browse(update.url),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(children: [
+              Expanded(child: Text(work.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+              const SizedBox(width: 8),
+              Text('${work.unitShort} ${chapterLabel(update.latest)}', style: const TextStyle(color: accentSoft, fontWeight: FontWeight.w700, fontSize: 12)),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 96,
+                child: Text(update.date != null ? releaseLabel(update.date!).replaceFirst(RegExp(r'^saiu (em )?'), '') : timeAgo(update.outAt),
+                    textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: muted, fontSize: 11)),
+              ),
+            ]),
+          ),
+        ),
+      if (older.length > _historyShown)
+        TextButton(onPressed: () => setState(() => _historyShown += 40), child: Text('Mostrar mais (${older.length - _historyShown})')),
+    ];
   }
 
   Future<void> _checkUpdates() async {
@@ -446,7 +519,7 @@ class _Hero extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: () => onRead(inApp),
                     icon: const Icon(Icons.play_arrow, size: 18),
-                    label: Text('Cap. ${chapterLabel(inApp.chapter!)}'),
+                    label: Text('${view.work.unitShort} ${chapterLabel(inApp.chapter!)}'),
                     style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
                   ),
                 if (url != null)
@@ -466,7 +539,7 @@ class _Hero extends StatelessWidget {
                   OutlinedButton(
                     onPressed: () => onBrowse(view.update!.url),
                     style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
-                    child: Text('Cap. ${chapterLabel(view.update!.latest)}'),
+                    child: Text('${view.work.unitShort} ${chapterLabel(view.update!.latest)}'),
                   ),
               ]),
             ]),
@@ -512,11 +585,12 @@ class _UpdateRow extends StatelessWidget {
                   Expanded(child: Text(view.work.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))),
                 ]),
                 const SizedBox(height: 2),
-                Text('Capítulo ${chapterLabel(update.latest)}', style: const TextStyle(fontSize: 13)),
+                Text('${view.work.unitOne} ${chapterLabel(update.latest)}', style: const TextStyle(fontSize: 13)),
                 if (behind != null)
                   Text('${behind == 1 ? '1 capítulo' : '$behind capítulos'} depois do ${chapterLabel(upTo!)}',
                       style: const TextStyle(fontSize: 12, color: muted)),
-                Text([update.site.toUpperCase(), if (update.checkedAt > 0) timeAgo(update.checkedAt)].join(' · '), style: monoLabel(size: 10)),
+                Text([update.site.toUpperCase(), if (update.date != null) releaseLabel(update.date!) else if (update.checkedAt > 0) timeAgo(update.checkedAt)].join(' · '),
+                    style: monoLabel(size: 10)),
               ]),
             ),
             if (onTranslate != null)
@@ -537,7 +611,7 @@ int _favoriteFirst(WorkView a, WorkView b) => (b.work.favorite ? 1 : 0) - (a.wor
 
 /// The works with a chapter out past the last one read: favorites first, then the ones checked last.
 List<WorkView> freshViews(List<WorkView> views) => views.where((v) => v.update != null).toList()
-  ..sort((a, b) => _favoriteFirst(a, b) != 0 ? _favoriteFirst(a, b) : b.update!.checkedAt.compareTo(a.update!.checkedAt));
+  ..sort((a, b) => b.update!.outAt.compareTo(a.update!.outAt));
 
 int _newFirst(WorkView a, WorkView b) => (b.update != null ? 1 : 0) - (a.update != null ? 1 : 0);
 
@@ -605,6 +679,18 @@ String statusText(WorkView view) {
 
 /// "🆕 Cap. 92 saiu · mgread.io"
 String updateText(ChapterUpdate update) => '🆕 Cap. ${chapterLabel(update.latest)} saiu · ${update.site}';
+
+/// "saiu hoje", "saiu há 3 dias", "saiu em 26 de mai. de 2026" (as on the PC).
+String releaseLabel(int at) {
+  DateTime day(DateTime t) => DateTime(t.year, t.month, t.day);
+  final when = DateTime.fromMillisecondsSinceEpoch(at);
+  final days = day(DateTime.now()).difference(day(when)).inDays;
+  if (days <= 0) return 'saiu hoje';
+  if (days == 1) return 'saiu ontem';
+  if (days < 7) return 'saiu há $days dias';
+  const months = ['jan.', 'fev.', 'mar.', 'abr.', 'mai.', 'jun.', 'jul.', 'ago.', 'set.', 'out.', 'nov.', 'dez.'];
+  return 'saiu em ${when.day} de ${months[when.month - 1]} de ${when.year}';
+}
 
 String timeAgo(int at) {
   final minutes = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(at)).inMinutes;

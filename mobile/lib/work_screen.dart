@@ -2,6 +2,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'batch_screen.dart';
 import 'browser_screen.dart';
 import 'downloads.dart';
 import 'downloads_screen.dart';
@@ -10,6 +11,7 @@ import 'models.dart';
 import 'reader_screen.dart';
 import 'site_download.dart';
 import 'theme.dart';
+import 'work_editor_screen.dart';
 
 /// Chapters listed from 1 up to the newest; past this (a number misread from a title) only the known ones.
 const _maxListed = 3000;
@@ -86,12 +88,52 @@ class _WorkScreenState extends State<WorkScreen> {
   /// One version of each chapter, the newest, to download and read on from.
   List<LibraryChapter> get _readable => widget.view.readable.where((c) => !_deleted.contains(c.id)).toList();
 
+  /// What can be done with a chapter, as on the PC: read or unread, read up to it, delete what was translated.
+  Future<void> _chapterMenu(double n, bool read, List<LibraryChapter> versions) => showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheet) {
+          void then(Future<void> Function() action) {
+            Navigator.pop(sheet);
+            action();
+          }
+
+          final one = widget.view.work.unitOne;
+          return SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Align(alignment: Alignment.centerLeft, child: Text('$one ${chapterLabel(n)}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+              ),
+              ListTile(
+                leading: Icon(read ? Icons.radio_button_unchecked : Icons.check_circle_outline),
+                title: Text(read ? 'Marcar como não lido' : 'Marcar como lido'),
+                onTap: () => then(() => _setRead([n], !read)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.done_all),
+                title: const Text('Lidos até aqui'),
+                subtitle: Text('Do 1 ao ${chapterLabel(n)}'),
+                onTap: () => then(() => _readUpTo(n)),
+              ),
+              for (final v in versions)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Color(0xFFE5484D)),
+                  title: Text(versions.length > 1 ? 'Apagar a versão de ${v.site}' : 'Apagar ${v.downloaded ? 'o baixado' : 'a tradução'}'),
+                  subtitle: Text(v.downloaded ? 'Baixado · ${v.site}' : 'Traduzido · ${v.site}'),
+                  onTap: () => then(() => _deleteVersion(v)),
+                ),
+            ]),
+          );
+        },
+      );
+
   Future<void> _deleteVersion(LibraryChapter c) async {
     final sure = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Apagar a versão de ${c.site}?'),
-        content: Text('O capítulo ${chapterLabel(c.chapter!)} dessa fonte sai da biblioteca do PC (e do celular, se foi baixado).'),
+        title: Text('Apagar o capítulo ${chapterLabel(c.chapter!)} de ${c.site}?'),
+        content: const Text('Ele sai da biblioteca do PC (e do celular, se foi baixado).'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Apagar')),
@@ -187,6 +229,13 @@ class _WorkScreenState extends State<WorkScreen> {
   String _chapterQuery = '';
   bool _oldestFirst = false;
 
+  /// The chapters after the last one read (or in the library), from the work's sites, to the PC's queue.
+  void _next() {
+    final view = widget.view;
+    final had = [view.readUpTo ?? 0, ..._translated.map((c) => c.chapter ?? 0)].reduce((a, b) => a > b ? a : b);
+    Navigator.push(context, MaterialPageRoute(builder: (_) => BatchScreen(api: widget.api, work: view.work, after: had)));
+  }
+
   void _browse(String url) => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowserScreen(api: widget.api, url: url)));
 
   @override
@@ -222,13 +271,24 @@ class _WorkScreenState extends State<WorkScreen> {
     final heading = Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800);
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppBar(backgroundColor: Colors.transparent),
+      appBar: AppBar(backgroundColor: Colors.transparent, actions: [
+        if (widget.api.paired)
+          IconButton(
+            tooltip: 'Editar obra',
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: () async {
+              final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => WorkEditorScreen(work: view.work, api: widget.api)));
+              // Back to the library, which brings the work as the PC now has it.
+              if (changed == true && context.mounted) Navigator.pop(context);
+            },
+          ),
+      ]),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
           _Header(view: view, api: widget.api, aliases: aliases, shelf: shelf),
           Wrap(spacing: 14, runSpacing: 4, children: [
-            if (newest != null) Text.rich(TextSpan(children: [TextSpan(text: chapterLabel(newest), style: const TextStyle(fontWeight: FontWeight.w800)), const TextSpan(text: ' capítulos')])),
+            if (newest != null) Text.rich(TextSpan(children: [TextSpan(text: chapterLabel(newest), style: const TextStyle(fontWeight: FontWeight.w800)), TextSpan(text: ' ${view.work.unitMany.toLowerCase()}')])),
             if (_readable.isNotEmpty)
               Text.rich(TextSpan(children: [TextSpan(text: '${_readable.length}', style: const TextStyle(fontWeight: FontWeight.w800)), const TextSpan(text: ' no PC')])),
           ]),
@@ -246,9 +306,15 @@ class _WorkScreenState extends State<WorkScreen> {
               FilledButton.icon(onPressed: () => _browse(continueUrl), icon: const Icon(Icons.play_arrow), label: const Text('Continuar')),
             if (next != null && continueUrl != null) OutlinedButton(onPressed: () => _browse(continueUrl), child: const Text('No site')),
             if (view.update != null)
-              OutlinedButton(onPressed: () => _browse(view.update!.url), child: Text('Último · Cap. ${chapterLabel(view.update!.latest)}')),
+              OutlinedButton(onPressed: () => _browse(view.update!.url), child: Text('Último · ${view.work.unitShort} ${chapterLabel(view.update!.latest)}')),
             if (view.update != null)
               IconButton.outlined(tooltip: 'Baixar o capítulo novo para ler sem internet', icon: const Icon(Icons.download), onPressed: () => _downloadUpdate(view.update!)),
+            if (widget.api.paired)
+              OutlinedButton.icon(
+                onPressed: _next,
+                icon: const Icon(Icons.playlist_add, size: 18),
+                label: const Text('Próximos capítulos'),
+              ),
             OutlinedButton.icon(
               onPressed: () => _setShelf(favorite: !_favorite),
               icon: Icon(_favorite ? Icons.favorite : Icons.favorite_border, color: _favorite ? accent : null, size: 18),
@@ -282,7 +348,7 @@ class _WorkScreenState extends State<WorkScreen> {
           const SizedBox(height: 22),
           _Panel(children: [
             Row(children: [
-              Text('Capítulos', style: heading),
+              Text(view.work.unitMany, style: heading),
               Text('  ${rows.length}', style: const TextStyle(color: muted)),
               const Spacer(),
               SizedBox(
@@ -299,7 +365,7 @@ class _WorkScreenState extends State<WorkScreen> {
               ),
             ]),
             if (rows.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('Nenhum capítulo lido ou traduzido ainda.', style: TextStyle(color: muted))),
-            for (final n in numbers) _chapterRow(n, rows[n]!.record, rows[n]!.versions),
+            for (final n in numbers) _chapterRow(view.work, n, rows[n]!.record, rows[n]!.versions),
             if (missing.isNotEmpty) ...[
               const SizedBox(height: 6),
               TextButton.icon(
@@ -317,7 +383,7 @@ class _WorkScreenState extends State<WorkScreen> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.offline_pin, color: readGreen),
-                  title: Text(c.chapter != null ? 'Capítulo ${chapterLabel(c.chapter!)}' : c.title),
+                  title: Text(c.chapter != null ? '${view.work.unitOne} ${chapterLabel(c.chapter!)}' : c.title),
                   subtitle: Text('${c.pageCount} páginas · baixado do site no celular', style: const TextStyle(color: muted, fontSize: 12)),
                   trailing: IconButton(
                     tooltip: 'Apagar do celular',
@@ -337,7 +403,7 @@ class _WorkScreenState extends State<WorkScreen> {
             const SizedBox(height: 8),
             _Info('Formato', view.work.isNovel ? 'Novel' : 'Mangá'),
             _Info('Lista', shelf != null ? shelves[shelf]! : 'Nenhuma'),
-            if (newest != null) _Info('Capítulos', chapterLabel(newest)),
+            if (newest != null) _Info(view.work.unitMany, chapterLabel(newest)),
             if (aliases.isNotEmpty) _Info('Outros nomes', aliases.join(' · ')),
             const SizedBox(height: 12),
             const Text('Leu em outro lugar?', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -363,17 +429,20 @@ class _WorkScreenState extends State<WorkScreen> {
 
   /// A chapter as on the scans' title pages: its number big, its state, and reading it; saved from more
   /// than one site, each version to read or delete.
-  Widget _chapterRow(double n, ReadingRecord? record, List<LibraryChapter> versions) {
+  Widget _chapterRow(Work work, double n, ReadingRecord? record, List<LibraryChapter> versions) {
     final entry = versions.firstOrNull;
     final read = _isRead(n, record);
-    final where = record != null
-        ? [if (record.url.isNotEmpty) Uri.tryParse(record.url)?.host.replaceFirst(RegExp(r'^www\.'), '') ?? '', timeAgo(record.updatedAt)].where((s) => s.isNotEmpty).join(' · ')
-        : entry != null
-            ? '${entry.site} · ${timeAgo(entry.createdAt)}'
-            : '';
+    final released = work.dateOf(n);
+    final where = [
+      if (released != null) releaseLabel(released),
+      if (record != null)
+        [if (record.url.isNotEmpty) Uri.tryParse(record.url)?.host.replaceFirst(RegExp(r'^www\.'), '') ?? '', timeAgo(record.updatedAt)].where((s) => s.isNotEmpty).join(' · ')
+      else if (entry != null)
+        '${entry.site} · ${timeAgo(entry.createdAt)}',
+    ].join(' · ');
     return InkWell(
       onTap: entry != null ? () => _read(entry) : record != null && record.url.isNotEmpty ? () => _browse(record.url) : null,
-      onLongPress: () => _readUpTo(n),
+      onLongPress: () => _chapterMenu(n, read, versions),
       borderRadius: BorderRadius.circular(10),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -385,7 +454,7 @@ class _WorkScreenState extends State<WorkScreen> {
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                Text('Capítulo ${chapterLabel(n)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                Text('${work.unitOne} ${chapterLabel(n)}', style: const TextStyle(fontWeight: FontWeight.w600)),
                 if (read) Tag('lido', color: readGreen.withValues(alpha: 0.16), textColor: readGreen),
                 if (record != null && !read) Tag(record.progress != null ? '${(record.progress! * 100).round()}%' : 'lendo', color: accent.withValues(alpha: 0.16), textColor: accentSoft),
                 if (versions.length == 1) Tag(entry!.downloaded ? 'baixado' : 'traduzido', color: accent.withValues(alpha: 0.16), textColor: accentSoft),
@@ -412,9 +481,15 @@ class _WorkScreenState extends State<WorkScreen> {
           ),
           if (entry != null) _downloadButton(entry),
           IconButton(
-            tooltip: read ? 'Marcar como não lido' : 'Marcar como lido (segure o capítulo: lidos até ele)',
+            tooltip: read ? 'Marcar como não lido' : 'Marcar como lido',
             icon: Icon(read ? Icons.check_circle : Icons.radio_button_unchecked, color: read ? readGreen : muted),
             onPressed: () => _setRead([n], !read),
+          ),
+          IconButton(
+            tooltip: 'Mais: lidos até aqui, apagar',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.more_vert, color: muted),
+            onPressed: () => _chapterMenu(n, read, versions),
           ),
         ]),
       ),

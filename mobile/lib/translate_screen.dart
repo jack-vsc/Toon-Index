@@ -93,11 +93,20 @@ class _TranslateScreenState extends State<TranslateScreen> {
   Future<void> _sendFile(String name, Stream<List<int>> bytes, int? length) =>
       _send(() => widget.api.translatePdf(name, bytes, length, options: _options));
 
+  /// One PDF or several: they go to the PC's queue in the order of their names (volume 2 before 10),
+  /// with the options above (mangá or novel among them).
   Future<void> _pickPdf() async {
     final picked = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
     if (picked.isEmpty) return;
-    final file = picked.first;
-    await _sendFile(file.name, file.readAsByteStream(), file.lengthSync());
+    final files = [...picked]..sort((a, b) => _naturalCompare(a.name, b.name));
+    await _send(() async {
+      for (final file in files) {
+        await widget.api.translatePdf(file.name, file.readAsByteStream(), file.lengthSync(), options: _options);
+      }
+    });
+    if (_error == null && files.length > 1 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${files.length} PDFs na fila do PC, um depois do outro.')));
+    }
   }
 
   Future<void> _open(RemoteJob job) async {
@@ -121,7 +130,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text('O PC traduz e o capítulo entra na biblioteca. Ele precisa estar ligado, com o Manga Index aberto.'),
+            const Text('O PC traduz e o capítulo entra na biblioteca. Ele precisa estar ligado, com o Toon Index aberto.'),
             const SizedBox(height: 12),
             TranslateOptionsCard(api: widget.api, onChanged: (o) => _options = o),
             const SizedBox(height: 16),
@@ -140,7 +149,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
                   child: FilledButton.tonalIcon(
                     onPressed: _sending ? null : _pickPdf,
                     icon: const Icon(Icons.picture_as_pdf),
-                    label: const Text('Enviar PDF'),
+                    label: const Text('Enviar PDFs'),
                   ),
                 ),
               ],
@@ -212,3 +221,17 @@ class _JobTile extends StatelessWidget {
 
 /// The first http(s) link in shared or pasted text ("Chapter 54 - Site https://…").
 String? _extractLink(String text) => RegExp(r'https?://\S+').firstMatch(text)?.group(0);
+
+/// Names compared with their numbers as numbers: "Volume 2" before "Volume 10".
+int _naturalCompare(String a, String b) {
+  final parts = RegExp(r'\d+|\D+');
+  final x = parts.allMatches(a.toLowerCase()).map((m) => m[0]!).toList();
+  final y = parts.allMatches(b.toLowerCase()).map((m) => m[0]!).toList();
+  for (var i = 0; i < x.length && i < y.length; i++) {
+    final nx = int.tryParse(x[i]);
+    final ny = int.tryParse(y[i]);
+    final c = nx != null && ny != null ? nx.compareTo(ny) : x[i].compareTo(y[i]);
+    if (c != 0) return c;
+  }
+  return x.length.compareTo(y.length);
+}

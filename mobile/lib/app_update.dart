@@ -52,7 +52,7 @@ class AppUpdate {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Atualização disponível'),
-        content: Text('O PC tem a versão ${release['version']} do Manga Index. Atualizar agora? '
+        content: Text('O PC tem a versão ${release['version']} do Toon Index. Atualizar agora? '
             'O pareamento e os capítulos baixados continuam no celular.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Depois')),

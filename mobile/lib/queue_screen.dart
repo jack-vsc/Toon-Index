@@ -130,7 +130,12 @@ class _QueueScreenState extends State<QueueScreen> {
                       const SizedBox(height: 8),
                     ],
                     for (final j in running) ...[
-                      _RunningCard(job: j, paused: _paused, onPause: () => _do(() => widget.api.pauseQueue(!_paused))),
+                      _RunningCard(
+                        job: j,
+                        paused: _paused,
+                        onPause: () => _do(() => widget.api.pauseQueue(!_paused)),
+                        onRemove: () => _do(() => widget.api.cancelJob(j.id)),
+                      ),
                       const SizedBox(height: 12),
                     ],
                     Row(children: [
@@ -213,7 +218,7 @@ class _QueueScreenState extends State<QueueScreen> {
                               child: ListTile(
                                 dense: true,
                                 contentPadding: const EdgeInsets.only(left: 60, right: 16),
-                                title: Text(j.chapter != null ? 'Cap. ${chapterLabel(j.chapter!)}' : j.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                title: Text(j.number ?? j.label, maxLines: 1, overflow: TextOverflow.ellipsis),
                                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                                   IconButton(
                                     tooltip: 'Primeiro da obra',
@@ -267,13 +272,14 @@ class _Group {
 
   _Group withJobs(List<RemoteJob> jobs) => _Group(key, work, jobs);
 
-  /// "Cap. 31–40", or "Cap. 36" for one.
+  /// "Cap. 31–40", or "Cap. 36" for one; "Vol. 8–17" for a novel's volumes.
   String get range {
     final numbers = [for (final j in jobs) ?j.chapter];
     if (numbers.isEmpty) return '';
     final low = numbers.reduce((a, b) => a < b ? a : b);
     final high = numbers.reduce((a, b) => a > b ? a : b);
-    return low == high ? 'Cap. ${chapterLabel(low)}' : 'Cap. ${chapterLabel(low)}–${chapterLabel(high)}';
+    final prefix = jobs.every((j) => j.isVolume) ? 'Vol.' : 'Cap.';
+    return low == high ? '$prefix ${chapterLabel(low)}' : '$prefix ${chapterLabel(low)}–${chapterLabel(high)}';
   }
 }
 
@@ -299,11 +305,14 @@ List<_Group> _byWork(List<RemoteJob> jobs) {
 
 /// The chapter on now, as a download manager shows one: what it is doing, how far, and a bar.
 class _RunningCard extends StatelessWidget {
-  const _RunningCard({required this.job, required this.paused, required this.onPause});
+  const _RunningCard({required this.job, required this.paused, required this.onPause, required this.onRemove});
 
   final RemoteJob job;
   final bool paused;
   final VoidCallback onPause;
+
+  /// Stops this chapter and takes it off the queue: the PC goes on to the next.
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -346,12 +355,20 @@ class _RunningCard extends StatelessWidget {
           child: LinearProgressIndicator(value: share ?? 0, minHeight: 6, color: accent, backgroundColor: Colors.white.withValues(alpha: 0.08)),
         ),
         const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: onPause,
-          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
-          icon: Icon(paused ? Icons.play_arrow : Icons.pause, size: 18),
-          label: Text(paused ? 'Continuar' : 'Pausar'),
-        ),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton.icon(
+            onPressed: onPause,
+            style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+            icon: Icon(paused ? Icons.play_arrow : Icons.pause, size: 18),
+            label: Text(paused ? 'Continuar' : 'Pausar'),
+          ),
+          OutlinedButton.icon(
+            onPressed: onRemove,
+            style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact, foregroundColor: muted),
+            icon: const Icon(Icons.close, size: 18),
+            label: const Text('Tirar da fila'),
+          ),
+        ]),
       ]),
     );
   }

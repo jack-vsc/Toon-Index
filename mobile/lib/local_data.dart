@@ -112,6 +112,12 @@ class LocalData {
         (data['reading'] as List).removeWhere((r) => r['workId'] == workId && (chapters == null || chapters.contains((r['chapter'] as num).toDouble())));
       });
 
+  /// The work and its reading gone (deleted on the PC).
+  static Future<void> removeWork(String workId) => _change((data) {
+        (data['works'] as List?)?.removeWhere((w) => w['id'] == workId);
+        (data['reading'] as List?)?.removeWhere((r) => r['workId'] == workId);
+      });
+
   static Future<void> applyShelf(String workId, String? shelf, bool favorite) => _change((data) {
         for (final w in _works(data)) {
           if (w['id'] != workId) continue;
@@ -143,7 +149,7 @@ class LocalData {
   /// name, readings that never go back. Returns how many works and chapters it held.
   static Future<(int, int)> merge(Map<String, dynamic> file) => _change((data) {
         if (file['app'] != 'manga-index' || file['works'] is! List || file['reading'] is! List) {
-          throw const FormatException('Esse arquivo não é um backup do Manga Index.');
+          throw const FormatException('Esse arquivo não é um backup do Toon Index.');
         }
         final ids = <String, String>{};
         for (final w in (file['works'] as List).cast<Map<String, dynamic>>()) {
@@ -319,7 +325,9 @@ ChapterName _parseUrl(String url) {
   final name = slug == null
       ? ''
       : slug.replaceFirst(RegExp(r'[-_](?=[a-z]*\d)[a-z0-9]{4,}$', caseSensitive: false), '').replaceAll(RegExp(r'[-_]+'), ' ');
-  return (work: name, chapter: chapterSeg != null ? double.parse(chapterSeg[1]!.replaceAll(',', '.')) : null);
+  // "/capitulo/591535": a number that big is the site's id for the chapter, not its number (as on the PC).
+  final chapter = chapterSeg != null ? double.parse(chapterSeg[1]!.replaceAll(',', '.')) : null;
+  return (work: name, chapter: chapter != null && chapter < 10000 ? chapter : null);
 }
 
 const _accents = {

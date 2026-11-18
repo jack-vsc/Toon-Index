@@ -55,7 +55,7 @@ class _PairScreenState extends State<PairScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'No Manga Index do PC, abra 📱 Celular, ligue o acesso pela rede e toque em "Parear um celular".',
+            'No Toon Index do PC, abra 📱 Celular, ligue o acesso pela rede e toque em "Parear um celular".',
           ),
           const SizedBox(height: 16),
           TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nome deste celular')),

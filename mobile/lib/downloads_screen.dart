@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'auto_downloads.dart';
 import 'models.dart';
 import 'reader_screen.dart';
 import 'site_download.dart';
@@ -18,6 +19,7 @@ class DownloadsScreen extends StatefulWidget {
 class _DownloadsScreenState extends State<DownloadsScreen> {
   DownloadPrefs? _prefs;
   List<PhoneChapter> _chapters = [];
+  int _ahead = 5;
 
   @override
   void initState() {
@@ -28,7 +30,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   Future<void> _load() async {
     final prefs = await DownloadPrefs.load();
     final chapters = (await PhoneChapter.all())..sort((a, b) => b.savedAt.compareTo(a.savedAt));
-    if (mounted) setState(() => (_prefs = prefs, _chapters = chapters));
+    final ahead = await AutoDownloads.ahead();
+    if (mounted) setState(() => (_prefs = prefs, _chapters = chapters, _ahead = ahead));
   }
 
   Future<void> _set({DownloadWhere? where, bool? wifiOnly}) async {
@@ -73,6 +76,24 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   onChanged: (v) => _set(wifiOnly: v),
                   title: const Text('No celular, baixar só no Wi-Fi'),
                   subtitle: const Text('Desligado, usa os dados móveis também (de 5 a 30 MB por capítulo).'),
+                ),
+                const Divider(),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Text('Para ler fora de casa', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                ListTile(
+                  title: const Text('Guardar no celular os próximos capítulos traduzidos'),
+                  subtitle: const Text('Das obras que você está lendo, sozinho, quando o celular fala com o PC no Wi-Fi de casa.'),
+                  trailing: DropdownButton<int>(
+                    value: _ahead,
+                    onChanged: (v) async {
+                      if (v == null) return;
+                      await AutoDownloads.setAhead(v);
+                      setState(() => _ahead = v);
+                    },
+                    items: [for (final n in const [0, 3, 5, 10]) DropdownMenuItem(value: n, child: Text(n == 0 ? 'Não' : '$n'))],
+                  ),
                 ),
                 const Divider(),
                 Padding(

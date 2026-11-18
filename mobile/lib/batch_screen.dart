@@ -11,19 +11,43 @@ import 'translate_options.dart';
 /// given), then a range of its chapters for the PC to translate, or download as they are (a scan
 /// already in Portuguese), one at a time.
 class BatchScreen extends StatefulWidget {
-  const BatchScreen({super.key, required this.api, this.query});
+  const BatchScreen({super.key, required this.api, this.query, this.work, this.after});
 
   final Api api;
 
   /// A name to look up as soon as the screen opens (from the search).
   final String? query;
 
+  /// A work's next chapters (from its page): its own sites listed, the range from the one after [after]
+  /// (the last read, or had).
+  final Work? work;
+  final double? after;
+
   @override
   State<BatchScreen> createState() => _BatchScreenState();
 }
 
+/// The site of a work's page: MangaDex and mgeko read their own way, any other from its page.
+String _siteOf(String url) {
+  final host = Uri.tryParse(url)?.host ?? '';
+  return RegExp(r'(^|\.)mangadex\.org$').hasMatch(host)
+      ? 'mangadex'
+      : RegExp(r'(^|\.)mgeko\.cc$').hasMatch(host)
+          ? 'mgeko'
+          : RegExp(r'(^|\.)mangakakalot\.(fan|gg)$').hasMatch(host)
+          ? 'mangakakalot'
+          : RegExp(r'(^|\.)mangalivre\.blog$').hasMatch(host)
+          ? 'mangalivre'
+          : 'link';
+}
+
+String _hostOf(String url) => (Uri.tryParse(url)?.host ?? url).replaceFirst(RegExp(r'^www\.'), '');
+
 class _BatchScreenState extends State<BatchScreen> {
-  late final _name = TextEditingController(text: widget.query ?? '');
+  late final _name = TextEditingController(text: widget.work?.name ?? widget.query ?? '');
+
+  /// The work's own sites, when it came from its page.
+  late final List<String> _own = widget.work?.sources ?? const [];
   final _link = TextEditingController();
   final _from = TextEditingController();
   final _to = TextEditingController();
@@ -42,7 +66,12 @@ class _BatchScreenState extends State<BatchScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.query != null) WidgetsBinding.instance.addPostFrameCallback((_) => _search());
+    // A work with a single site: its chapters straight away.
+    if (_own.length == 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pick(_siteOf(_own.first), _own.first, widget.work!.name));
+    } else if (widget.query != null && widget.work == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _search());
+    }
   }
 
   Future<void> _run(String busy, Future<void> Function() work) async {
@@ -62,25 +91,30 @@ class _BatchScreenState extends State<BatchScreen> {
     FocusScope.of(context).unfocus();
     setState(() => (_picked = null, _chapters = null));
     await _run('Buscando nos sites…', () async {
-      final results = await widget.api.searchSites(query);
+      final results = await widget.api.searchSites(query, own: true);
       if (mounted) setState(() => _results = results);
     });
   }
 
   Future<void> _pick(String site, String url, String title) async {
-    setState(() => (_picked = (site: site, url: url, title: title), _chapters = null));
+    setState(() => (_picked = (site: site, url: url, title: title), _chapters = null, _download = site == 'link'));
     await _run(site == 'link' ? 'Lendo a lista de capítulos (pode levar alguns minutos)…' : 'Lendo os capítulos…', () async {
-      final (:title, :chapters) = await widget.api.chapterList(site, url);
+      final (:title, :chapters, :language) = await widget.api.chapterList(site, url);
       if (!mounted) return;
       setState(() {
         _chapters = chapters;
+        // A site in Portuguese: downloaded as it is, not translated.
+        if (language != null && language.isNotEmpty) _download = language.toLowerCase().startsWith('pt');
         // A link read without the work's name: the name its page gives.
         if (title != null && title.isNotEmpty && _name.text.trim().isEmpty) {
           _name.text = title;
           _picked = (site: site, url: url, title: title);
         }
         if (chapters.isNotEmpty) {
-          _from.text = chapterLabel(chapters.first.chapter);
+          // From a work's page: from the one after the last read (or had).
+          final after = widget.after;
+          final start = after == null ? chapters.first : chapters.firstWhere((c) => c.chapter > after, orElse: () => chapters.last);
+          _from.text = chapterLabel(start.chapter);
           _to.text = chapterLabel(chapters.last.chapter);
         }
       });
@@ -155,6 +189,28 @@ class _BatchScreenState extends State<BatchScreen> {
           ]),
         ],
         if (_error != null) Padding(padding: const EdgeInsets.only(top: 14), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+        if (_own.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          Text(widget.after != null && widget.after! > 0 ? 'Sites da obra · depois do cap. ${chapterLabel(widget.after!)}' : 'Sites da obra',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          for (final url in _own)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: ListTile(
+                tileColor: panel,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: _picked?.url == url ? accent : Colors.transparent)),
+                leading: const Icon(Icons.link),
+                title: Text(_hostOf(url), style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(_picked?.url == url && _chapters != null ? '${_chapters!.length} capítulos no site' : 'Tocar para ver os capítulos',
+                    style: const TextStyle(color: muted, fontSize: 12)),
+                onTap: _busy == null ? () => _pick(_siteOf(url), url, widget.work!.name) : null,
+              ),
+            ),
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text('Ou busque a obra nos sites pelo nome, acima.', style: TextStyle(color: muted, fontSize: 12)),
+          ),
+        ],
         if (_chapters != null && _picked != null) ...[
           const SizedBox(height: 18),
           _RangeCard(
@@ -226,6 +282,7 @@ class _MatchTile extends StatelessWidget {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(match.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                if (match.site == 'link') Text(_hostOf(match.url), style: const TextStyle(color: muted, fontSize: 12)),
                 if (match.latest != null) Text('cap. ${chapterLabel(match.latest!)}', style: const TextStyle(color: muted, fontSize: 12)),
                 if (match.altNames.isNotEmpty)
                   Text(match.altNames.take(4).join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: muted, fontSize: 11)),

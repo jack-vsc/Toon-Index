@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'app_update.dart';
+import 'cloud.dart';
 import 'data_screen.dart';
 import 'storage_screen.dart';
 import 'theme.dart';
@@ -38,6 +39,20 @@ class SettingsScreen extends StatelessWidget {
             style: const TextStyle(color: muted, fontSize: 12),
           ),
         ),
+        if (api.paired)
+          FutureBuilder<String?>(
+            future: Cloud.spaceId(),
+            builder: (context, snap) => ListTile(
+              leading: Icon(Icons.cloud_outlined, color: snap.data != null ? readGreen : muted),
+              title: Text(snap.data != null ? 'Pela internet: ligado' : 'Pela internet: desligado'),
+              subtitle: Text(
+                snap.data != null
+                    ? 'Fora de casa, a biblioteca, as leituras e a fila passam pelo Firebase. Os capítulos para ler ficam guardados no celular.'
+                    : 'Ligue no PC, em Celular › Pela internet, e abra o app aqui em casa uma vez.',
+                style: const TextStyle(color: muted, fontSize: 12),
+              ),
+            ),
+          ),
         if (!api.paired)
           ListTile(
             leading: const Icon(Icons.qr_code_scanner),
@@ -68,17 +83,9 @@ class SettingsScreen extends StatelessWidget {
           ),
         ],
         section('Notificações'),
-        ListTile(
-          leading: const Icon(Icons.notifications_active_outlined),
-          title: const Text('Avisos de capítulo novo'),
-          subtitle: Text(
-            ntfyTopic != null
-                ? 'Pelo app ntfy: toque para assinar os avisos que o PC manda.'
-                : 'Ligue no PC, em Celular › "Avisar no celular pelo ntfy", e volte aqui.',
-            style: const TextStyle(color: muted, fontSize: 12),
-          ),
-          enabled: ntfyTopic != null,
-          onTap: ntfyTopic == null ? null : () => onSubscribe(ntfyTopic!),
+        FutureBuilder<String?>(
+          future: Cloud.spaceId(),
+          builder: (context, snap) => snap.data != null ? const _PushTile() : _ntfyTile(),
         ),
         section('Armazenamento e dados'),
         ListTile(
@@ -94,10 +101,60 @@ class SettingsScreen extends StatelessWidget {
           onTap: () => open(DataScreen(api: api)),
         ),
         section('Sobre'),
-        ListTile(leading: const Icon(Icons.info_outline), title: const Text('Sobre o Manga Index'), onTap: () => open(const AboutScreen())),
+        ListTile(leading: const Icon(Icons.info_outline), title: const Text('Sobre o Toon Index'), onTap: () => open(const AboutScreen())),
       ]),
     );
   }
+
+  /// Without the internet sync, the new chapters come through the ntfy app, when that is on in the PC.
+  Widget _ntfyTile() => ListTile(
+        leading: const Icon(Icons.notifications_active_outlined),
+        title: const Text('Avisos de capítulo novo'),
+        subtitle: Text(
+          ntfyTopic != null
+              ? 'Pelo app ntfy: toque para assinar os avisos que o PC manda.'
+              : 'Ligue a sincronização pela internet no PC (Celular › Pela internet) para receber os avisos aqui.',
+          style: const TextStyle(color: muted, fontSize: 12),
+        ),
+        enabled: ntfyTopic != null,
+        onTap: ntfyTopic == null ? null : () => onSubscribe(ntfyTopic!),
+      );
+}
+
+/// The PC's new-chapter notifications through Firebase: whether they arrive, and asking Android again.
+class _PushTile extends StatefulWidget {
+  const _PushTile();
+
+  @override
+  State<_PushTile> createState() => _PushTileState();
+}
+
+class _PushTileState extends State<_PushTile> {
+  late Future<bool> _on = Cloud.pushOn();
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<bool>(
+        future: _on,
+        builder: (context, snap) {
+          final on = snap.data == true;
+          return ListTile(
+            leading: Icon(on ? Icons.notifications_active : Icons.notifications_off_outlined, color: on ? readGreen : muted),
+            title: const Text('Avisos de capítulo novo'),
+            subtitle: Text(
+              on
+                  ? 'Ligados: o PC avisa aqui quando sai capítulo novo, mesmo fora de casa. Tocar no aviso abre a obra.'
+                  : 'Toque para permitir os avisos. Se o Android não perguntar, ligue as notificações do app nas configurações do celular.',
+              style: const TextStyle(color: muted, fontSize: 12),
+            ),
+            onTap: on
+                ? null
+                : () async {
+                    await Cloud.registerPush();
+                    setState(() => _on = Cloud.pushOn());
+                  },
+          );
+        },
+      );
 }
 
 /// The app, its version and who made it.
@@ -118,7 +175,7 @@ class AboutScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        const Center(child: Text('Manga Index', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
+        const Center(child: Text('Toon Index', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
         FutureBuilder<String?>(
           future: _channel.invokeMethod<String>('version').catchError((_) => null),
           builder: (context, snap) => Center(

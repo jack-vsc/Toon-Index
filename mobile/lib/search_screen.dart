@@ -48,7 +48,7 @@ class _SearchScreenState extends State<SearchScreen> {
           ListTile(
             leading: const SizedBox(width: 40, child: Icon(Icons.travel_explore, color: accent)),
             title: Text('Buscar “$query” nos sites', style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: const Text('MangaDex e mgeko: traduzir ou baixar capítulos', style: TextStyle(color: muted, fontSize: 12)),
+            subtitle: const Text('MangaDex, mgeko, MangaKakalot e MangaLivre: traduzir ou baixar capítulos', style: TextStyle(color: muted, fontSize: 12)),
             onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => BatchScreen(api: widget.api, query: query))),
           ),
         if (query.isEmpty)

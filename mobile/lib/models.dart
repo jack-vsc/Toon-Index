@@ -20,6 +20,11 @@ class Work {
     this.shelf,
     this.favorite = false,
     this.latest,
+    this.sources = const [],
+    this.auto,
+    this.catalogSites = const [],
+    this.inVolumes = false,
+    this.dates = const {},
   });
 
   final String id;
@@ -39,10 +44,34 @@ class Work {
   /// The newest chapter out on its sites, when the PC checked them.
   final double? latest;
 
+  /// Its pages on sites, checked by the PC for new chapters.
+  final List<String> sources;
+
+  /// What the PC does with a new chapter besides the notice: 'translate', 'download' or null.
+  final String? auto;
+
+  /// The catalog sites it was found on (keys of [catalogSites]).
+  final List<String> catalogSites;
+
+  /// By chapter number ("229", "12.5"), when each came out (ms), where the work's sites say.
+  final Map<String, int> dates;
+
+  /// When chapter [n] came out, where known.
+  int? dateOf(double n) => dates[n == n.roundToDouble() ? n.toInt().toString() : n.toString()];
+
+  /// Numbered in volumes (a light novel translated a volume at a time) instead of chapters; set in its editor.
+  final bool inVolumes;
+
+  /// "Capítulo" or "Volume", "Capítulos" or "Volumes", "Cap." or "Vol.".
+  String get unitOne => inVolumes ? 'Volume' : 'Capítulo';
+  String get unitMany => inVolumes ? 'Volumes' : 'Capítulos';
+  String get unitShort => inVolumes ? 'Vol.' : 'Cap.';
+
   String get name => displayName(names.first);
 
   Work withShelf({required String? shelf, required bool favorite}) =>
-      Work(id: id, names: names, createdAt: createdAt, isNovel: isNovel, hasCover: hasCover, shelf: shelf, favorite: favorite, latest: latest);
+      Work(id: id, names: names, createdAt: createdAt, isNovel: isNovel, hasCover: hasCover, shelf: shelf, favorite: favorite, latest: latest,
+          sources: sources, auto: auto, catalogSites: catalogSites, inVolumes: inVolumes, dates: dates);
 
   factory Work.fromJson(Map<String, dynamic> j) => Work(
         id: j['id'] as String,
@@ -53,6 +82,11 @@ class Work {
         shelf: shelves.containsKey(j['shelf']) ? j['shelf'] as String : null,
         favorite: j['favorite'] == true,
         latest: (j['latest'] as num?)?.toDouble(),
+        sources: ((j['sources'] as List?) ?? []).cast<String>(),
+        auto: j['auto'] == 'translate' || j['auto'] == 'download' ? j['auto'] as String : null,
+        catalogSites: (((j['catalog'] as Map?)?['sites'] as List?) ?? []).cast<String>(),
+        inVolumes: j['unit'] == 'volume',
+        dates: ((j['dates'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toInt())),
       );
 }
 
@@ -146,7 +180,7 @@ class LibraryChapter {
 
 /// A chapter the PC found on one of a work's sites, past the last one read.
 class ChapterUpdate {
-  ChapterUpdate({required this.workId, required this.latest, required this.url, required this.site, this.checkedAt = 0});
+  ChapterUpdate({required this.workId, required this.latest, required this.url, required this.site, this.checkedAt = 0, this.date, this.since, this.recent = true});
 
   final String workId;
   final double latest;
@@ -156,12 +190,28 @@ class ChapterUpdate {
   /// When the PC last looked at that site.
   final int checkedAt;
 
+  /// When the chapter came out, where the site says.
+  final int? date;
+
+  /// When the PC first saw it, for sites that give no date.
+  final int? since;
+
+  /// Out in the last week: news. Older ones not read yet are the history under them.
+  final bool recent;
+
+  /// When it came out as far as is known, for the history's order.
+  int get outAt => date ?? since ?? checkedAt;
+
   factory ChapterUpdate.fromJson(Map<String, dynamic> j) => ChapterUpdate(
         workId: j['workId'] as String,
         latest: (j['latest'] as num).toDouble(),
         url: j['url'] as String,
         site: j['site'] as String,
         checkedAt: (j['checkedAt'] as num?)?.toInt() ?? 0,
+        date: (j['date'] as num?)?.toInt(),
+        since: (j['since'] as num?)?.toInt(),
+        // PCs from before the history send only news.
+        recent: j['recent'] != false,
       );
 }
 
@@ -209,6 +259,18 @@ class Library {
     );
   }
 
+  /// Chapters out over a week ago and not read yet, newest first: Novidades' history.
+  List<(Work, ChapterUpdate)> get older {
+    final byId = {for (final w in works) w.id: w};
+    final rows = [
+      for (final u in updates)
+        if (!u.recent && byId[u.workId] != null) (byId[u.workId]!, u),
+    ];
+    // A work saved twice (a page in common) has one line, under the name of the copy on a list.
+    final twice = duplicateWorks([for (final (w, _) in rows) w]);
+    return rows.where((r) => !twice.contains(r.$1.id)).toList()..sort((a, b) => b.$2.outAt.compareTo(a.$2.outAt));
+  }
+
   /// Works with something to show: those with a new chapter out first, then the one read most recently.
   List<WorkView> get views {
     final list = <WorkView>[];
@@ -217,7 +279,7 @@ class Library {
       final translated = chapters.where((c) => c.workId == work.id).toList()
         ..sort((a, b) => (a.chapter ?? double.infinity).compareTo(b.chapter ?? double.infinity));
       if (records.isEmpty && translated.isEmpty && work.shelf == null && !work.favorite) continue;
-      list.add(WorkView(work, records, translated, update: updates.where((u) => u.workId == work.id).firstOrNull));
+      list.add(WorkView(work, records, translated, update: updates.where((u) => u.workId == work.id && u.recent).firstOrNull));
     }
     int fresh(WorkView v) => v.update != null ? 1 : 0;
     list.sort((a, b) => fresh(b) != fresh(a) ? fresh(b) - fresh(a) : b.lastActivity.compareTo(a.lastActivity));
@@ -313,7 +375,7 @@ class WorkView {
     final done = share;
     return [
       ?listed,
-      if (upTo != null) 'Cap. ${chapterLabel(upTo)}' else if (listed == null) records.isEmpty ? 'Não lido' : 'Lendo',
+      if (upTo != null) '${work.unitShort} ${chapterLabel(upTo)}' else if (listed == null) records.isEmpty ? 'Não lido' : 'Lendo',
       if (done != null && done < 1 && work.shelf != 'done') '${(done * 100).round()}% lido',
       if (work.isNovel) 'Novel',
     ].join(' · ');
@@ -350,8 +412,55 @@ String normalizeName(String name) {
   return out.toString();
 }
 
+/// A name without what a page's title wrapped it in: "[Manga]: Manga One Day, Suddenly, Seoul Is Read"
+/// → "One Day, Suddenly, Seoul Is", "The Asterisk War, Vol. 8 Overview" → "The Asterisk War"
+/// (as src/shared/works.ts cleanWorkName).
+String cleanWorkName(String name) {
+  var clean = name.trim();
+  final tagged = RegExp(r'^(?:\[[^\]]*\]\s*)?:').hasMatch(clean);
+  clean = clean.replaceFirst(RegExp(r'^(?:\[[^\]]*\]\s*)?:\s*'), '');
+  if (tagged) {
+    clean = clean
+        .replaceFirst(RegExp(r'^(?:manga|manhwa|manhua|webtoon)\s+', caseSensitive: false), '')
+        .replaceFirst(RegExp(r'\s+read(?:\s+online)?$', caseSensitive: false), '');
+  }
+  clean = clean
+      .replaceFirst(RegExp(r'[,\s]+(?:vol(?:ume)?\.?\s*\d+\s*)?overview$', caseSensitive: false), '')
+      .replaceFirst(RegExp(r'[,\s\-–—:|]+$'), '')
+      .trim();
+  return clean.isEmpty ? name.trim() : clean;
+}
+
+/// A work's page as the same work's other copies have it: MangaDex by its id, any other by its address.
+String sourceKey(String url) {
+  final dex = RegExp(r'mangadex\.org/title/([0-9a-f-]{36})', caseSensitive: false).firstMatch(url);
+  if (dex != null) return 'mangadex:${dex[1]!.toLowerCase()}';
+  final u = Uri.tryParse(url);
+  if (u == null || u.host.isEmpty) return url;
+  return u.host.replaceFirst(RegExp(r'^www\.'), '') + u.path.replaceFirst(RegExp(r'/$'), '');
+}
+
+/// Of works that are the same one saved twice (a page in common), the ids of those not shown: the one on a
+/// list or a favorite stays, else the first (as src/shared/works.ts duplicateWorks).
+Set<String> duplicateWorks(List<Work> works) {
+  bool listed(Work w) => w.shelf != null || w.favorite;
+  final ranked = [...works.where(listed), ...works.where((w) => !listed(w))];
+  final seen = <String>{};
+  final hidden = <String>{};
+  for (final w in ranked) {
+    final keys = w.sources.map(sourceKey).toList();
+    if (keys.any(seen.contains)) {
+      hidden.add(w.id);
+    } else {
+      seen.addAll(keys);
+    }
+  }
+  return hidden;
+}
+
 /// Names taken from links are lowercase: "the mythical weapon" → "The Mythical Weapon".
 String displayName(String name) {
+  name = cleanWorkName(name);
   if (name != name.toLowerCase()) return name;
   return name.replaceAllMapped(RegExp(r'(^|\s)(\p{L})', unicode: true), (m) => '${m[1]}${m[2]!.toUpperCase()}');
 }
@@ -390,8 +499,14 @@ class RemoteJob {
   final double? chapter;
   final bool downloadOnly;
 
+  /// A novel's volume sent as a PDF ("Name - Volume 08"), grouped by its work like a chapter.
+  bool get isVolume => !isLink && RegExp(r'\bvol(ume)?\b', caseSensitive: false).hasMatch(name);
+
+  /// "Cap. 36" or "Vol. 8".
+  String? get number => chapter == null ? null : '${isVolume ? 'Vol.' : 'Cap.'} ${chapterLabel(chapter!)}';
+
   /// "Cap. 36 · Solo Spell Caster", or the link or file asked for.
-  String get label => work != null && chapter != null ? 'Cap. ${chapterLabel(chapter!)} · $work' : (isLink ? (url ?? name) : name);
+  String get label => work != null && number != null ? '$number · $work' : (isLink ? (url ?? name) : name);
 
   final String id;
   final bool isLink;
@@ -500,7 +615,7 @@ class CatalogResult {
       );
 }
 
-const catalogSites = {'mangadex': 'MangaDex', 'mgeko': 'mgeko'};
+const catalogSites = {'mangadex': 'MangaDex', 'mgeko': 'mgeko', 'mangakakalot': 'MangaKakalot', 'mangalivre': 'MangaLivre (português)', 'sites': 'Nos seus sites em português'};
 
 /// A chapter of a work on a site, to translate or download.
 class SiteChapterLink {

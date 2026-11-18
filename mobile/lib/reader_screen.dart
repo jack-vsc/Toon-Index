@@ -383,7 +383,9 @@ class _ChapterEnd extends StatelessWidget {
 
 /// The chapter's pages (or bands of them) one under the other, with the page number in a corner and
 /// `footer` after the last. Ones not drawn yet show a spinner and are asked for through `onMissing`.
-class ReaderPages extends StatelessWidget {
+/// Two fingers zoom in (up to 4×), a double tap zooms in where it was or back out; zoomed in, one
+/// finger still scrolls the chapter and moves sideways across the page.
+class ReaderPages extends StatefulWidget {
   const ReaderPages({
     super.key,
     required this.controller,
@@ -409,28 +411,107 @@ class ReaderPages extends StatelessWidget {
   final void Function(int index) onMissing;
   final Widget? footer;
 
+  @override
+  State<ReaderPages> createState() => _ReaderPagesState();
+}
+
+class _ReaderPagesState extends State<ReaderPages> with SingleTickerProviderStateMixin {
   static const _footerHeight = 200.0;
+  static const _maxScale = 4.0;
+
+  final _zoom = TransformationController();
+  late final _animation = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+  Animation<Matrix4>? _zooming;
+
+  /// Fingers on the screen: with two the pinch is the zoom's, not the list's scrolling.
+  int _fingers = 0;
+  bool _zoomed = false;
+  Offset _doubleTapAt = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _zoom.addListener(() {
+      final zoomed = _zoom.value.getMaxScaleOnAxis() > 1.01;
+      if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+    });
+    _animation.addListener(() {
+      if (_zooming != null) _zoom.value = _zooming!.value;
+    });
+  }
+
+  @override
+  void dispose() {
+    _animation.dispose();
+    _zoom.dispose();
+    super.dispose();
+  }
+
+  void _fingersChanged(int by) {
+    final fingers = math.max(0, _fingers + by);
+    if ((fingers >= 2) != (_fingers >= 2)) {
+      setState(() => _fingers = fingers);
+    } else {
+      _fingers = fingers;
+    }
+  }
+
+  /// Twice as close where the double tap was, or back to the whole width.
+  void _doubleTap() {
+    final Matrix4 target;
+    if (_zoomed) {
+      target = Matrix4.identity();
+    } else {
+      const scale = 2.0;
+      final at = _doubleTapAt;
+      target = Matrix4.identity()
+        ..translateByDouble(-at.dx * (scale - 1), -at.dy * (scale - 1), 0, 1)
+        ..scaleByDouble(scale, scale, 1, 1);
+    }
+    _zooming = Matrix4Tween(begin: _zoom.value, end: target).animate(CurvedAnimation(parent: _animation, curve: Curves.easeOut));
+    _animation.forward(from: 0);
+  }
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
+    final aspects = widget.aspects;
+    final list = ListView.builder(
+      controller: widget.controller,
+      // While two fingers pinch, the list stays put.
+      physics: _fingers >= 2 ? const NeverScrollableScrollPhysics() : null,
+      itemCount: aspects.length + (widget.footer != null ? 1 : 0),
+      itemExtentBuilder: (index, _) => index < aspects.length ? aspects[index] * width : _footerHeight,
+      itemBuilder: (context, index) {
+        if (index >= aspects.length) return widget.footer;
+        final bytes = widget.images[index];
+        if (bytes == null) {
+          widget.onMissing(index);
+          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+        }
+        return Image.memory(bytes, fit: BoxFit.fill, gaplessPlayback: true);
+      },
+    );
     return Stack(
       children: [
-        ListView.builder(
-          controller: controller,
-          itemCount: aspects.length + (footer != null ? 1 : 0),
-          itemExtentBuilder: (index, _) => index < aspects.length ? aspects[index] * width : _footerHeight,
-          itemBuilder: (context, index) {
-            if (index >= aspects.length) return footer;
-            final bytes = images[index];
-            if (bytes == null) {
-              onMissing(index);
-              return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-            }
-            return Image.memory(bytes, fit: BoxFit.fill, gaplessPlayback: true);
-          },
+        Listener(
+          onPointerDown: (_) => _fingersChanged(1),
+          onPointerUp: (_) => _fingersChanged(-1),
+          onPointerCancel: (_) => _fingersChanged(-1),
+          child: GestureDetector(
+            onDoubleTapDown: (d) => _doubleTapAt = d.localPosition,
+            onDoubleTap: _doubleTap,
+            child: InteractiveViewer(
+              transformationController: _zoom,
+              minScale: 1,
+              maxScale: _maxScale,
+              // Zoomed in, one finger moves across the page; up and down is the list's scrolling.
+              panEnabled: _zoomed,
+              child: list,
+            ),
+          ),
         ),
-        if (showPage)
+        if (widget.showPage)
           Positioned(
             right: 12,
             bottom: 16,
@@ -438,7 +519,7 @@ class ReaderPages extends StatelessWidget {
               decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                child: Text('${page + 1} / ${pageCount ?? aspects.length}', style: const TextStyle(color: Colors.white)),
+                child: Text('${widget.page + 1} / ${widget.pageCount ?? aspects.length}', style: const TextStyle(color: Colors.white)),
               ),
             ),
           ),

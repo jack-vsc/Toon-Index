@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'cloud.dart';
 import 'local_data.dart';
 import 'models.dart';
 
@@ -43,7 +44,7 @@ class PairingInfo {
   final int port;
   final String code;
 
-  /// Null when the text is not a Manga Index pairing code.
+  /// Null when the text is not a Toon Index pairing code.
   static PairingInfo? parse(String text) {
     try {
       final j = jsonDecode(text) as Map<String, dynamic>;
@@ -82,9 +83,17 @@ class Api {
 
   Map<String, String> get authHeaders => {'Authorization': 'Bearer ${connection.token}'};
 
+  /// The last request went through the internet (Firebase), not the home network.
+  bool viaCloud = false;
+
   /// Sends the request to each address in turn until one answers; when none does, looks for the PC
-  /// on the phone's Wi-Fi (the router may have given it another address) and asks it there.
-  Future<http.Response> _send(Future<http.Response> Function(Uri Function(String path) url) request, {Duration timeout = _timeout}) async {
+  /// on the phone's Wi-Fi (the router may have given it another address) and asks it there; away from
+  /// home, through the internet when the PC turned that on ([cloud]: the same request, as data).
+  Future<http.Response> _send(
+    Future<http.Response> Function(Uri Function(String path) url) request, {
+    Duration timeout = _timeout,
+    ({String method, String path, String? body})? cloud,
+  }) async {
     Future<http.Response?> at(String host) async {
       try {
         final response = await request((path) => Uri.parse('http://$host:${connection.port}$path')).timeout(timeout);
@@ -92,6 +101,7 @@ class Api {
           connection.lastHost = host;
           await Store.saveConnection(connection);
         }
+        viaCloud = false;
         if (response.statusCode == 401) throw UnpairedException(_error(response));
         if (response.statusCode != 200) throw ApiException(_error(response));
         return response;
@@ -114,10 +124,57 @@ class Api {
         final response = await at(found);
         if (response != null) return response;
       }
+      if (cloud != null && await Cloud.ready()) {
+        final response = await _throughCloud(cloud);
+        if (response != null) {
+          viaCloud = true;
+          if (response.statusCode != 200) throw ApiException(_error(response));
+          return response;
+        }
+        throw ApiException('O PC está desligado (ou sem internet). Isto precisa dele ligado.');
+      }
     }
     throw ApiException(paired
-        ? 'Não foi possível falar com o PC. Ele está ligado, com o Manga Index aberto? Fora de casa, o Tailscale precisa estar ativo.'
-        : 'Este celular não está conectado a um PC. Conecte pelo menu ⋮ para traduzir.');
+        ? 'Não foi possível falar com o PC. Ele está ligado, com o Toon Index aberto? Fora de casa, ligue a sincronização pela internet no PC (Celular › Pela internet).'
+        : 'Este celular não está pareado com um PC. Pareie em Configurações para traduzir.');
+  }
+
+  /// The request through the internet: the PC's answer when it is on; when it is off, what it last
+  /// published (the library, the queue), or, for a change, left there for it to run when it comes on.
+  Future<http.Response?> _throughCloud(({String method, String path, String? body}) cloud) async {
+    final answer = await Cloud.request(cloud.method, cloud.path, cloud.body,
+        wait: cloud.method == 'GET' ? const Duration(seconds: 12) : const Duration(seconds: 8));
+    if (answer != null) return answer;
+    if (cloud.method == 'POST') return http.Response('{"ok":true,"queued":true}', 200);
+    final name = const {'/api/library': 'library', '/api/queue': 'queue'}[cloud.path];
+    final published = name == null ? null : await Cloud.published(name);
+    return published == null ? null : http.Response.bytes(utf8.encode(published), 200);
+  }
+
+  /// At home: the PC's internet sync settings, kept for away from home, and this phone joining it.
+  Future<void> joinCloud() async {
+    try {
+      final response = await _send((url) => http.get(url('/api/cloud'), headers: authHeaders));
+      if (viaCloud) return;
+      final info = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>?;
+      final prefs = await SharedPreferences.getInstance();
+      if (info == null) {
+        await Cloud.save(null);
+        return;
+      }
+      await Cloud.save(info);
+      final uid = await Cloud.uid();
+      final joined = '${info['spaceId']}|$uid';
+      if (uid == null) return;
+      if (prefs.getString('cloud.joined') != joined) {
+        await _post('/api/cloud/join', {'uid': uid});
+        await prefs.setString('cloud.joined', joined);
+      }
+      // A member now: the PC's new-chapter notifications can find this phone.
+      await Cloud.registerPush();
+    } on ApiException {
+      // Next time at home.
+    }
   }
 
   /// Syncs with the PC: what changed here goes first, then the PC's library (merged with it)
@@ -125,9 +182,11 @@ class Api {
   Future<Library> library() async {
     if (!paired) return LocalData.library();
     await flushPending();
-    final response = await _send((url) => http.get(url('/api/library'), headers: authHeaders));
+    final response = await _send((url) => http.get(url('/api/library'), headers: authHeaders), cloud: (method: 'GET', path: '/api/library', body: null));
     // The PC sends UTF-8 without saying so; response.body would read it as Latin-1.
     await LocalData.replace(utf8.decode(response.bodyBytes));
+    // At home: the internet sync's settings kept for away from home.
+    if (!viaCloud) unawaited(joinCloud());
     return LocalData.library();
   }
 
@@ -177,14 +236,14 @@ class Api {
 
   /// The chapters asked of the PC, newest first.
   Future<List<RemoteJob>> jobs() async {
-    final response = await _send((url) => http.get(url('/api/translate'), headers: authHeaders));
+    final response = await _send((url) => http.get(url('/api/translate'), headers: authHeaders), cloud: (method: 'GET', path: '/api/translate', body: null));
     final list = (jsonDecode(utf8.decode(response.bodyBytes)) as List).map((j) => RemoteJob.fromJson(j as Map<String, dynamic>)).toList();
     return list..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
   }
 
   /// The PC's queue in the order it will run, and whether it is paused.
   Future<({List<RemoteJob> jobs, bool paused})> queue() async {
-    final response = await _send((url) => http.get(url('/api/queue'), headers: authHeaders));
+    final response = await _send((url) => http.get(url('/api/queue'), headers: authHeaders), cloud: (method: 'GET', path: '/api/queue', body: null));
     final body = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     return (jobs: (body['jobs'] as List).map((j) => RemoteJob.fromJson(j as Map<String, dynamic>)).toList(), paused: body['paused'] == true);
   }
@@ -205,7 +264,7 @@ class Api {
 
   /// The PC's translation settings: its defaults, its APIs and languages, to choose a request's options from.
   Future<PcTranslateSettings> translateSettings() async {
-    final response = await _send((url) => http.get(url('/api/translate/options'), headers: authHeaders));
+    final response = await _send((url) => http.get(url('/api/translate/options'), headers: authHeaders), cloud: (method: 'GET', path: '/api/translate/options', body: null));
     return PcTranslateSettings.fromJson(jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>);
   }
 
@@ -238,15 +297,23 @@ class Api {
     if (response.statusCode != 200) throw ApiException(_error(response));
   }
 
-  /// The work looked up on the PC's catalog sites (MangaDex, mgeko), with covers to choose from.
-  Future<List<CatalogResult>> searchSites(String query) async {
-    final response = await _postFor('/api/works/search', {'query': query}, const Duration(seconds: 60));
+  /// A change to a work, as in the PC's editor: {'names': […]}, {'sources': […]}, {'fromId': …} (joins
+  /// that work into this one), {'auto': 'translate' | 'download' | null}, {'refresh': true} or
+  /// {'matches': […]} (the catalog's choices). Looking things up on the sites can take a minute.
+  Future<void> editWork(String workId, Map<String, dynamic> change) async {
+    await _postFor('/api/works/edit', {'workId': workId, ...change}, const Duration(minutes: 3));
+  }
+
+  /// The work looked up on the PC's catalog sites (MangaDex, mgeko), with covers to choose from; with
+  /// [own], on the person's own sites in Portuguese too (searched by the work's Portuguese names).
+  Future<List<CatalogResult>> searchSites(String query, {bool own = false}) async {
+    final response = await _postFor('/api/works/search', {'query': query, if (own) 'own': true}, Duration(seconds: own ? 180 : 150));
     return (jsonDecode(utf8.decode(response.bodyBytes)) as List).map((r) => CatalogResult.fromJson(r as Map<String, dynamic>)).toList();
   }
 
   /// Every chapter of the work on that site (`site` 'link' for a work's page on any site), in order, and
   /// the work's name as its page gives it. Long lists come a page at a time, so this can take a few minutes.
-  Future<({String? title, List<SiteChapterLink> chapters})> chapterList(String site, String url) async {
+  Future<({String? title, List<SiteChapterLink> chapters, String? language})> chapterList(String site, String url) async {
     final response = await _postFor('/api/works/chapters', {'site': site, 'url': url, 'withTitle': true}, const Duration(minutes: 6));
     final body = jsonDecode(utf8.decode(response.bodyBytes));
     // A PC from before the name came along sends the list alone.
@@ -254,6 +321,8 @@ class Api {
     return (
       title: body is Map ? body['title'] as String? : null,
       chapters: list.map((c) => SiteChapterLink.fromJson(c as Map<String, dynamic>)).toList(),
+      // The page's language: a site in Portuguese is downloaded as it is.
+      language: body is Map ? body['language'] as String? : null,
     );
   }
 
@@ -274,6 +343,23 @@ class Api {
         'source': ?source,
         'options': ?options,
       });
+
+  /// What the library has of the work a site's page is about (its list, favorite), for the browser's "Quero ler".
+  Future<Map<String, dynamic>> workPageInfo(String url, String name) async =>
+      jsonDecode(utf8.decode((await _postFor('/api/works/page', {'url': url, 'title': name}, _timeout)).bodyBytes)) as Map<String, dynamic>;
+
+  /// Puts the work of a site's page on a list (null: none) or among the favorites, adding it to the
+  /// library with that page as its site when it is new.
+  Future<Map<String, dynamic>> bookmarkWorkPage(String url, String name, {String? shelf, bool clearShelf = false, bool? favorite}) async =>
+      jsonDecode(utf8.decode((await _postFor(
+                  '/api/works/bookmark', {'url': url, 'title': name, if (shelf != null || clearShelf) 'shelf': shelf, 'favorite': ?favorite}, _timeout))
+              .bodyBytes)) as Map<String, dynamic>;
+
+  /// The work gone for good on the PC (its chapters and where it was left too), and here.
+  Future<void> deleteWork(String workId) async {
+    await _post('/api/works/delete', {'workId': workId});
+    await LocalData.removeWork(workId);
+  }
 
   Future<void> cancelJob(String id) => _post('/api/translate/cancel', {'id': id});
 
@@ -418,7 +504,7 @@ class Api {
 
   /// How much of its disk the PC app takes (each work's chapters, the translation layers, caches).
   Future<Map<String, dynamic>> pcStorage() async {
-    final response = await _send((url) => http.get(url('/api/storage'), headers: authHeaders), timeout: const Duration(seconds: 30));
+    final response = await _send((url) => http.get(url('/api/storage'), headers: authHeaders), timeout: const Duration(seconds: 30), cloud: (method: 'GET', path: '/api/storage', body: null));
     return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
   }
 
@@ -433,7 +519,8 @@ class Api {
   Future<void> _post(String path, Object body) => _postFor(path, body, _timeout);
 
   Future<http.Response> _postFor(String path, Object body, Duration timeout) =>
-      _send((url) => http.post(url(path), headers: {...authHeaders, 'Content-Type': 'application/json'}, body: jsonEncode(body)), timeout: timeout);
+      _send((url) => http.post(url(path), headers: {...authHeaders, 'Content-Type': 'application/json'}, body: jsonEncode(body)),
+          timeout: timeout, cloud: (method: 'POST', path: path, body: jsonEncode(body)));
 
   /// Trades the code shown on the PC for this phone's token.
   static Future<Connection> pair(PairingInfo info, String deviceName) async {
