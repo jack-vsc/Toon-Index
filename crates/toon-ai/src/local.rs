@@ -44,6 +44,32 @@ pub fn installed_models() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// O nome e a nota de um modelo, como a versão em Electron mostrava.
+pub fn describe(id: &str) -> (String, &'static str) {
+    match id {
+        "qwen35-manga-2b" => (
+            "Qwen3.5-2B treinado".into(),
+            "Treinado com as traduções do Claude: o mais fiel e o mais rápido; cabe em placas de 4 GB.",
+        ),
+        "gemma-4-e4b" => (
+            "Gemma 4 E4B".into(),
+            "Rápido; cabe inteiro em placas de 4 GB.",
+        ),
+        _ => (id.to_string(), ""),
+    }
+}
+
+/// Se o motor (llama-server) está baixado.
+pub fn engine_ready() -> bool {
+    ["cuda", "vulkan"].iter().any(|e| {
+        root()
+            .join("engine")
+            .join(e)
+            .join("llama-server.exe")
+            .exists()
+    })
+}
+
 fn model_files(id: &str) -> Option<Source> {
     let source: Source = serde_json::from_slice(
         &std::fs::read(root().join("models").join(id).join("source.json")).ok()?,
