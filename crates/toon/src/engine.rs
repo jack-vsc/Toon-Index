@@ -245,7 +245,14 @@ async fn run_job(
     let options = Options {
         skip_start: settings.skip_start as usize,
         skip_end: settings.skip_end as usize,
-        concurrency: settings.concurrency as usize,
+        // O modelo deste PC atende uma página por vez (--parallel 1): mais páginas abertas ao mesmo
+        // tempo só esperam na fila dele, cada uma segurando centenas de MB de imagem (uma tira de
+        // webtoon tem até 32 mil pixels de altura). Com oito, a memória acabava e o app fechava.
+        concurrency: if ready.profile.id == toon_core::settings::LOCAL_AI_PROFILE_ID {
+            (settings.concurrency as usize).min(2)
+        } else {
+            settings.concurrency as usize
+        },
         chapter: name.clone(),
         layers: Some(format!(
             "{}|sfx:{}",

@@ -103,14 +103,27 @@ fn engine_exe() -> Option<PathBuf> {
 
 /// Liga o servidor com o modelo `id` (ou troca para ele) e espera ficar pronto.
 pub async fn ensure(id: &str, cpu: bool) -> anyhow::Result<()> {
+    // Já ligado com esse modelo: espera ficar pronto como quem o ligou. Várias páginas pedem ao mesmo
+    // tempo, e as que chegavam enquanto o modelo carregava iam para um servidor que ainda não
+    // respondia.
+    let running = {
+        let mut slot = SERVER.lock();
+        match slot.as_mut() {
+            Some(s) if s.model == id => {
+                let alive = s.child.try_wait().ok().flatten().is_none();
+                if alive {
+                    s.used = Instant::now();
+                }
+                alive
+            }
+            _ => false,
+        }
+    };
+    if running {
+        return wait_ready().await;
+    }
     {
         let mut slot = SERVER.lock();
-        if let Some(s) = slot.as_mut() {
-            if s.model == id && s.child.try_wait().ok().flatten().is_none() {
-                s.used = Instant::now();
-                return Ok(());
-            }
-        }
         if let Some(mut old) = slot.take() {
             let _ = old.child.kill();
         }
