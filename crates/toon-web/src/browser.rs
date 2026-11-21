@@ -1,6 +1,7 @@
 //! O navegador que o app controla para ler os sites: o Edge (ou o Chrome) do próprio PC, com um perfil
-//! só do app, onde ficam os cookies e as verificações já passadas. A janela fica fora da tela e só
-//! aparece quando o site pede uma verificação que a pessoa precisa fazer.
+//! só do app, onde ficam os cookies e as verificações já passadas. A janela fica fora da tela; uma
+//! verificação que precisa da pessoa é avisada e resolvida pelo celular ou, se ela pedir, na tela do
+//! PC (`challenge`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -19,7 +20,8 @@ use toon_core::paths::browser_profile_dir;
 const LOAD_TIMEOUT: Duration = Duration::from_secs(60);
 /// Uma verificação que ainda está na tela depois disso precisa da pessoa.
 pub const CHALLENGE_SHOW_AFTER: Duration = Duration::from_secs(6);
-pub const CHALLENGE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Tempo para a pessoa ver o aviso e resolver, no celular ou no PC.
+pub const CHALLENGE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const OFF_SCREEN: i64 = -32_000;
 
 /// O navegador conectado; refeito quando a pessoa fecha o navegador ou ele cai.
@@ -108,6 +110,23 @@ async fn connect() -> anyhow::Result<Browser> {
     bail!("O navegador não abriu a porta de controle.")
 }
 
+/// Põe a janela da aba nessa posição da tela (fora dela, para esconder).
+pub(crate) async fn place(page: &Page, left: i64, top: i64) -> anyhow::Result<()> {
+    let window = page
+        .execute(GetWindowForTargetParams::default())
+        .await?
+        .result
+        .window_id;
+    let bounds = Bounds::builder()
+        .left(left)
+        .top(top)
+        .window_state(WindowState::Normal)
+        .build();
+    page.execute(SetWindowBoundsParams::new(window, bounds))
+        .await?;
+    Ok(())
+}
+
 /// Uma aba do navegador do app, fechada ao sair de escopo.
 pub struct Tab {
     pub page: Page,
@@ -170,21 +189,7 @@ impl Tab {
     }
 
     async fn place(&self, left: i64, top: i64) -> anyhow::Result<()> {
-        let window = self
-            .page
-            .execute(GetWindowForTargetParams::default())
-            .await?
-            .result
-            .window_id;
-        let bounds = Bounds::builder()
-            .left(left)
-            .top(top)
-            .window_state(WindowState::Normal)
-            .build();
-        self.page
-            .execute(SetWindowBoundsParams::new(window, bounds))
-            .await?;
-        Ok(())
+        place(&self.page, left, top).await
     }
 
     /// Traz a janela para a tela, para a pessoa passar uma verificação ou entrar na conta.
@@ -202,24 +207,34 @@ impl Tab {
     }
 
     /// Espera a verificação do site passar. As que passam sozinhas somem em segundos; as outras (a
-    /// caixa do Cloudflare) aparecem na tela para a pessoa, por até dois minutos.
+    /// caixa do Cloudflare) viram um aviso, e a pessoa resolve pelo celular ou pela tela do PC, por
+    /// até cinco minutos. A janela não aparece sozinha, para não atrapalhar o que a pessoa faz.
     pub async fn pass_challenge(&mut self, on_shown: impl Fn()) -> anyhow::Result<()> {
         let started = std::time::Instant::now();
         let mut waited = false;
-        while self.is_challenged().await {
+        let mut pending: Option<String> = None;
+        let result = loop {
+            if !self.is_challenged().await {
+                break Ok(());
+            }
             waited = true;
-            if !self.shown && started.elapsed() > CHALLENGE_SHOW_AFTER {
-                self.show().await;
+            if pending.is_none() && started.elapsed() > CHALLENGE_SHOW_AFTER {
+                pending = Some(crate::challenge::add(self.page.clone(), &self.url().await));
                 on_shown();
             }
             if started.elapsed() > CHALLENGE_TIMEOUT {
-                bail!("O site pediu uma verificação que não foi concluída.");
+                break Err(anyhow!(
+                    "O site pediu uma verificação que não foi concluída."
+                ));
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
+        };
+        if let Some(id) = pending
+            && crate::challenge::finish(&id)
+        {
+            let _ = self.place(OFF_SCREEN, OFF_SCREEN).await;
         }
-        if self.shown {
-            self.hide().await;
-        }
+        result?;
         // A página do site carrega depois da verificação.
         if waited {
             tokio::time::sleep(Duration::from_secs(2)).await;

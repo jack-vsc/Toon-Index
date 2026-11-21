@@ -48,6 +48,12 @@ pub trait App: Send + Sync + 'static {
     /// O que o celular precisa para entrar na sincronização pela internet (nulo quando desligada).
     fn cloud_for_phone(&self) -> Value;
     async fn join_cloud(&self, uid: &str) -> anyhow::Result<()>;
+    /// As verificações de robô esperando a pessoa.
+    fn challenges(&self) -> Value;
+    /// A página de uma verificação, em JPEG.
+    async fn challenge_frame(&self, id: &str) -> anyhow::Result<Vec<u8>>;
+    /// Um toque do celular na página: `x` e `y` de 0 a 1; "tap", "down" ou "up".
+    async fn challenge_press(&self, id: &str, x: f64, y: f64, action: &str) -> anyhow::Result<()>;
 }
 
 type Shared = Arc<dyn App>;
@@ -298,6 +304,25 @@ async fn handle(
     };
     Ok(match (method.as_str(), path) {
         ("GET", "/api/status") => ok(json!({ "app": "Toon Index", "device": device })),
+        ("GET", "/api/challenges") => ok(app.challenges()),
+        ("GET", "/api/challenge/frame") => match query.get("id") {
+            Some(id) => bytes("image/jpeg", app.challenge_frame(id).await?),
+            None => bad("id."),
+        },
+        ("POST", "/api/challenge/press") => {
+            let b = b();
+            match (b["id"].as_str(), b["x"].as_f64(), b["y"].as_f64()) {
+                (Some(id), Some(x), Some(y)) => {
+                    let action = b["action"].as_str().unwrap_or("tap");
+                    if !matches!(action, "tap" | "down" | "up") {
+                        return Ok(bad("action."));
+                    }
+                    app.challenge_press(id, x, y, action).await?;
+                    ok(json!({ "ok": true }))
+                }
+                _ => bad("id, x e y."),
+            }
+        }
         ("GET", "/api/cloud") => ok(app.cloud_for_phone()),
         ("POST", "/api/cloud/join") => match b()["uid"].as_str() {
             Some(uid) => {
@@ -332,6 +357,7 @@ async fn handle(
                 })
                 .collect();
             ok(json!({
+                "challenges": app.challenges(),
                 "works": works,
                 "reading": reading::list(),
                 "chapters": chapters,

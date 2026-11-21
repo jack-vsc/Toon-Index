@@ -448,7 +448,17 @@ impl App {
             self.test_result = r;
             self.testing = None;
         }
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        let mut area = egui::ScrollArea::vertical();
+        // Capturas de tela dos testes: `--scroll <pixels>` desce a página.
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(px) = args
+            .iter()
+            .position(|a| a == "--scroll")
+            .and_then(|i| args.get(i + 1)?.parse::<f32>().ok())
+        {
+            area = area.vertical_scroll_offset(px);
+        }
+        area.show(ui, |ui| {
             ui.heading("APIs de tradução");
             let mut remove = None;
             for (i, p) in self.settings.profiles.iter_mut().enumerate() {
@@ -539,6 +549,7 @@ impl App {
             } else if !self.test_result.is_empty() {
                 ui.label(&self.test_result);
             }
+            self.local_ai_panel(ui);
             ui.separator();
             ui.heading("Tradução");
             ui.horizontal(|ui| {
@@ -636,6 +647,100 @@ impl App {
             self.history_panel(ui);
             self.storage_panel(ui);
             self.online_panel(ui);
+        });
+    }
+
+    /// Os modelos próprios do app, rodando neste PC pelo llama.cpp: escolher um cria o perfil
+    /// "Neste PC" e o deixa em uso.
+    fn local_ai_panel(&mut self, ui: &mut egui::Ui) {
+        use toon_core::settings::{LOCAL_AI_BASE_URL, LOCAL_AI_PROFILE_ID};
+        ui.add_space(12.0);
+        ui.heading("IA neste PC");
+        ui.label(
+            RichText::new(
+                "Traduz sem internet e sem custo, com os modelos baixados em local-ai. Liga na primeira página e desliga depois de 5 minutos parado.",
+            )
+            .color(theme::MUTED),
+        );
+        let models = toon_ai::local::installed_models();
+        if models.is_empty() {
+            ui.label(r"Nenhum modelo baixado em local-ai\models.");
+            return;
+        }
+        if !toon_ai::local::engine_ready() {
+            ui.colored_label(
+                theme::ERR,
+                r"O motor (llama-server) não está em local-ai\engine: os modelos não vão ligar.",
+            );
+        }
+        let in_use = (self.settings.active_profile_id == LOCAL_AI_PROFILE_ID)
+            .then(|| {
+                self.settings
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == LOCAL_AI_PROFILE_ID)
+                    .map(|p| p.model.clone())
+            })
+            .flatten();
+        for id in &models {
+            let (label, note) = toon_ai::local::describe(id);
+            theme::card(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(theme::heading(label, 16.0));
+                        if !note.is_empty() {
+                            ui.label(RichText::new(note).color(theme::MUTED));
+                        }
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if in_use.as_deref() == Some(id.as_str()) {
+                            ui.label(
+                                RichText::new("Em uso")
+                                    .family(theme::bold())
+                                    .color(theme::OK),
+                            );
+                        } else if ui.add(theme::primary("Usar")).clicked() {
+                            let local = ApiProfile {
+                                id: LOCAL_AI_PROFILE_ID.into(),
+                                name: "Neste PC".into(),
+                                base_url: LOCAL_AI_BASE_URL.into(),
+                                models: models.clone(),
+                                model: id.clone(),
+                                ..Default::default()
+                            };
+                            self.settings
+                                .profiles
+                                .retain(|p| p.id != LOCAL_AI_PROFILE_ID);
+                            self.settings.profiles.push(local);
+                            self.settings.active_profile_id = LOCAL_AI_PROFILE_ID.into();
+                            match settings::save(self.settings.clone(), &self.keys) {
+                                Ok(s) => {
+                                    self.settings = s;
+                                    self.notice = format!(
+                                        "Traduzindo com {} neste PC.",
+                                        toon_ai::local::describe(id).0
+                                    );
+                                }
+                                Err(e) => self.notice = e.to_string(),
+                            }
+                        }
+                    });
+                });
+            });
+            ui.add_space(4.0);
+        }
+        ui.horizontal(|ui| {
+            ui.label("Rodar na");
+            ui.selectable_value(
+                &mut self.settings.ai_device,
+                "gpu".to_string(),
+                "Placa de vídeo",
+            );
+            ui.selectable_value(
+                &mut self.settings.ai_device,
+                "cpu".to_string(),
+                "Processador",
+            );
         });
     }
 

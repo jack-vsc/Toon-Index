@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -515,6 +516,26 @@ class Api {
   /// Deletes every chapter of a work on the PC (its readings and translation layers stay).
   Future<Map<String, dynamic>> deletePcWork(String workId) async =>
       jsonDecode(utf8.decode((await _postFor('/api/storage/work', {'workId': workId}, const Duration(seconds: 60))).bodyBytes)) as Map<String, dynamic>;
+
+  /// The PC's pending "are you a robot" checks. Only at home: the page comes from the PC's browser.
+  Future<List<Map<String, dynamic>>> challenges() async {
+    final response = await _send((url) => http.get(url('/api/challenges'), headers: authHeaders), timeout: const Duration(seconds: 5));
+    return ((jsonDecode(response.body) as List?) ?? []).cast<Map<String, dynamic>>();
+  }
+
+  /// The check's page as it is now, as JPEG.
+  Future<Uint8List> challengeFrame(String id) async {
+    final response = await _send(
+        (url) => http.get(url('/api/challenge/frame?id=${Uri.encodeQueryComponent(id)}'), headers: authHeaders),
+        timeout: const Duration(seconds: 20));
+    return response.bodyBytes;
+  }
+
+  /// A tap on the page (x and y from 0 to 1): 'tap', or 'down' and 'up' for press-and-hold.
+  Future<void> challengePress(String id, double x, double y, String action) => _send(
+      (url) => http.post(url('/api/challenge/press'),
+          headers: {...authHeaders, 'Content-Type': 'application/json'},
+          body: jsonEncode({'id': id, 'x': x, 'y': y, 'action': action})));
 
   Future<void> _post(String path, Object body) => _postFor(path, body, _timeout);
 

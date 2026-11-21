@@ -140,6 +140,27 @@ pub async fn announce() {
     }
 }
 
+/// Um site pede que a pessoa confirme que não é um robô: aviso no Windows e no celular.
+pub fn challenge(info: &toon_web::challenge::Info, runtime: &tokio::runtime::Handle) {
+    let title = "Verificação pendente";
+    let body = format!(
+        "{} pede que você confirme que não é um robô. Resolva no celular ou na janela do Toon Index.",
+        if info.site.is_empty() {
+            "Um site"
+        } else {
+            &info.site
+        }
+    );
+    toast(title, &body);
+    let id = info.id.clone();
+    runtime.spawn(async move {
+        let pushed = cloud::send_push(title, &body, &format!("challenge:{id}"), "").await;
+        if !pushed {
+            tracing::info!("verificação pendente sem push (celular sem Firebase)");
+        }
+    });
+}
+
 /// Um aviso do Windows.
 pub fn toast(title: &str, body: &str) {
     windows_toast(title, body);

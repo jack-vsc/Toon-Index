@@ -6,6 +6,7 @@ import 'api.dart';
 import 'app_update.dart';
 import 'auto_downloads.dart';
 import 'browser_screen.dart';
+import 'challenge_screen.dart';
 import 'cloud.dart';
 import 'local_data.dart';
 import 'downloads_screen.dart';
@@ -42,6 +43,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String? _error;
   bool _loading = false;
 
+  /// "Are you a robot" checks waiting on the PC, solved from here.
+  List<Map<String, dynamic>> _challenges = [];
+  Timer? _challengeTimer;
+
   /// The list shown: 'all', 'favorite' or a key of [shelves].
   String _filter = 'all';
 
@@ -67,6 +72,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// A new-chapter notification tapped: its work, or the chapter on the site when the work is not here yet.
   Future<void> _notified(Map<String, dynamic> data) async {
+    final workId = data['workId'] as String? ?? '';
+    if (workId.startsWith('challenge:')) {
+      await _loadChallenges();
+      final id = workId.substring('challenge:'.length);
+      final site = _challenges.where((c) => c['id'] == id).firstOrNull?['site'] as String? ?? '';
+      return _solve(id, site);
+    }
     await _refresh();
     final view = _library?.views.where((v) => v.work.id == data['workId']).firstOrNull;
     if (view != null) {
@@ -83,6 +95,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (mounted) setState(() => (_library = library, _error = null));
       // The PC reached: a newer build of this app there is offered, and the next chapters are kept for away from home.
       if (mounted) AppUpdate.offer(context, widget.api);
+      unawaited(_loadChallenges());
       unawaited(AutoDownloads.run(widget.api, library));
     } on UnpairedException {
       await Store.forgetConnection();
@@ -94,6 +107,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// The PC's pending checks; while there are some, looked at again every few seconds.
+  Future<void> _loadChallenges() async {
+    try {
+      final list = await widget.api.challenges();
+      if (mounted) setState(() => _challenges = list);
+    } catch (_) {
+      // Away from home (or an older PC): nothing to show.
+      if (mounted && _challenges.isNotEmpty) setState(() => _challenges = []);
+    }
+    _challengeTimer?.cancel();
+    if (_challenges.isNotEmpty && mounted) _challengeTimer = Timer(const Duration(seconds: 10), _loadChallenges);
+  }
+
+  Future<void> _solve(String id, String site) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => ChallengeScreen(api: widget.api, id: id, site: site)));
+    unawaited(_loadChallenges());
   }
 
   /// The app's browser, at `url` or at its start page; back here, the readings it sent show up.
@@ -138,6 +169,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   void dispose() {
+    _challengeTimer?.cancel();
     appHome.removeListener(_toStart);
     super.dispose();
   }
@@ -234,6 +266,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   List<Widget> _notices(List<WorkView> views) => [
+        for (final c in _challenges)
+          Card(
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            child: ListTile(
+              leading: const Icon(Icons.verified_user_outlined),
+              title: Text('${(c['site'] as String?)?.isNotEmpty == true ? c['site'] : 'Um site'} pede verificação'),
+              subtitle: const Text('Confirme que não é um robô para o PC continuar.'),
+              trailing: FilledButton(onPressed: () => _solve(c['id'] as String, c['site'] as String? ?? ''), child: const Text('Resolver')),
+            ),
+          ),
         if (_loading && _library == null) const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator())),
         if (_error != null)
           Padding(

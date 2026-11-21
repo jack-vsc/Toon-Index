@@ -161,6 +161,7 @@ impl eframe::App for App {
         if self.queue.jobs.iter().any(|j| j.status == Status::Running) {
             self.queue = jobs::queue();
         }
+        self.challenge_bar(ctx);
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status")
             .frame(
@@ -301,6 +302,56 @@ impl App {
         let tex = jpeg.and_then(|j| jpeg_texture(ctx, &work.id, &j));
         self.covers.insert(work.id.clone(), tex.clone());
         tex
+    }
+
+    /// Uma verificação de robô esperando a pessoa: uma faixa no alto, sem trazer o navegador para
+    /// a frente sozinho.
+    fn challenge_bar(&mut self, ctx: &egui::Context) {
+        let Some(c) = toon_web::challenge::list().into_iter().next() else {
+            return;
+        };
+        egui::TopBottomPanel::top("challenge")
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(0x3a, 0x22, 0x1a))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::ACCENT))
+                    .inner_margin(egui::Margin::symmetric(18, 10)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} pede que você confirme que não é um robô.",
+                            if c.site.is_empty() {
+                                "Um site"
+                            } else {
+                                &c.site
+                            }
+                        ))
+                        .family(theme::bold())
+                        .color(theme::TEXT),
+                    );
+                    ui.label(
+                        RichText::new("Resolva no celular (Toon Index › aviso no topo) ou aqui.")
+                            .color(theme::MUTED),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if c.on_screen {
+                            ui.label(
+                                RichText::new("A página está aberta na tela.")
+                                    .color(theme::ACCENT_2),
+                            );
+                        } else if ui.add(theme::primary("Resolver no PC")).clicked() {
+                            let id = c.id.clone();
+                            self.runtime.spawn(async move {
+                                if let Err(e) = toon_web::challenge::show_on_pc(&id).await {
+                                    tracing::warn!("verificação na tela: {e}");
+                                }
+                            });
+                        }
+                    });
+                });
+            });
     }
 
     /// O caminho pelo app, descendo pela esquerda como no MangaDex.

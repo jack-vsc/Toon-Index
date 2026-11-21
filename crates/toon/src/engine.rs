@@ -60,6 +60,12 @@ impl Engine {
 /// Liga tudo: a fila, a verificação periódica e o servidor.
 pub fn start(engine: Arc<Engine>, runtime: &tokio::runtime::Runtime) {
     let _ = jobs::requeue_interrupted();
+    // Uma verificação de robô vira aviso, no Windows e no celular, em vez de a janela do navegador
+    // pular na frente do que a pessoa está fazendo.
+    let handle = runtime.handle().clone();
+    toon_web::challenge::on_new(move |info| {
+        crate::notify::challenge(info, &handle);
+    });
     runtime.spawn(run_queue(engine.clone()));
     runtime.spawn(check_loop(engine.clone()));
     runtime.spawn(crate::cloud::run(
@@ -438,6 +444,18 @@ impl toon_server::App for ServerHooks {
 
     async fn join_cloud(&self, uid: &str) -> anyhow::Result<()> {
         crate::cloud::join(uid).await
+    }
+
+    fn challenges(&self) -> Value {
+        serde_json::to_value(toon_web::challenge::list()).unwrap_or(Value::Null)
+    }
+
+    async fn challenge_frame(&self, id: &str) -> anyhow::Result<Vec<u8>> {
+        toon_web::challenge::frame(id).await
+    }
+
+    async fn challenge_press(&self, id: &str, x: f64, y: f64, action: &str) -> anyhow::Result<()> {
+        toon_web::challenge::press(id, x, y, action).await
     }
 
     fn check_updates(&self) {

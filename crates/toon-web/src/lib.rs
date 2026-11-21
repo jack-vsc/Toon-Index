@@ -3,6 +3,7 @@
 
 pub mod browser;
 pub mod catalog;
+pub mod challenge;
 pub mod details;
 pub mod download;
 pub mod logins;
