@@ -190,6 +190,32 @@ impl Settings {
                 p.models.push(p.model.clone());
             }
         }
+        // O modelo próprio do app, baixado em local-ai, é sempre uma opção, no PC e no celular, mesmo
+        // antes de ser escolhido uma vez (a versão em Electron só o listava depois disso).
+        let models = local_models();
+        if !models.is_empty() {
+            match self
+                .profiles
+                .iter_mut()
+                .find(|p| p.id == LOCAL_AI_PROFILE_ID)
+            {
+                Some(p) => {
+                    if !models.contains(&p.model) {
+                        p.model = models[0].clone();
+                    }
+                    p.models = models;
+                }
+                None => self.profiles.push(ApiProfile {
+                    id: LOCAL_AI_PROFILE_ID.into(),
+                    name: "Neste PC".into(),
+                    kind: ProviderKind::Openai,
+                    base_url: LOCAL_AI_BASE_URL.into(),
+                    model: models[0].clone(),
+                    models,
+                    thinking: None,
+                }),
+            }
+        }
         if !self.profiles.iter().any(|p| p.id == self.active_profile_id) {
             self.active_profile_id = self
                 .profiles
@@ -209,6 +235,31 @@ impl Settings {
         self.skip_end = self.skip_end.min(50);
         self
     }
+}
+
+/// Os modelos baixados em `local-ai/models` (com os dois arquivos no lugar), o treinado primeiro.
+fn local_models() -> Vec<String> {
+    let dir = crate::paths::data_dir().join("local-ai").join("models");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut models: Vec<String> = entries
+        .flatten()
+        .filter(|e| {
+            std::fs::read(e.path().join("source.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                .is_some_and(|v| {
+                    ["model", "mmproj"].iter().all(|k| {
+                        v[k].as_str()
+                            .is_some_and(|f| std::path::Path::new(f).exists())
+                    })
+                })
+        })
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    models.sort_by_key(|m| (!m.contains("manga"), m.clone()));
+    models
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

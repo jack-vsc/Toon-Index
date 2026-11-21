@@ -10,7 +10,9 @@ async fn main() -> anyhow::Result<()> {
     let mut tab = toon_web::browser::Tab::new().await?;
     tab.open(page).await?;
     let waiting = tokio::spawn(async move {
-        let result = tab.pass_challenge(|| println!("aviso: verificação pendente")).await;
+        let result = tab
+            .pass_challenge(|| println!("aviso: verificação pendente"))
+            .await;
         (result, tab)
     });
     // Espera a verificação entrar na lista (6 s).
